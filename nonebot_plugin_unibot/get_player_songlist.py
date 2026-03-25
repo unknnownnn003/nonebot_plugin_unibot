@@ -36,7 +36,7 @@ def get_font(size, weight="Normal"):
         print(f"Font error: {e}")
         return ImageFont.load_default()
 
-def draw_player_info(data: dict) -> bytes:
+def draw_player_info(data: dict, char_bytes: bytes = None) -> bytes:
     width, height = 800, 480
     # Background color (Dark Theme)
     img = Image.new("RGB", (width, height), (30, 30, 46))
@@ -76,7 +76,7 @@ def draw_player_info(data: dict) -> bytes:
             return draw.textbbox((0, 0), text, font=f)[2]
         return draw.textsize(text, font=f)[0]
 
-    rating_str = f"{rating:.2f} ({rating_color})"
+    rating_str = f"{rating:.2f}"
     op_str = f"{over_power:.2f} ({op_progress}%)"
     play_str = f"{play_count}"
 
@@ -106,10 +106,29 @@ def draw_player_info(data: dict) -> bytes:
     
     draw.line([(40, 260), (760, 260)], fill=(98, 114, 164), width=2)
     
+    currency = data.get('currency', 0)
+    total_currency = data.get('total_currency', 0)
+
     draw.text((40, 290), f"称号: {trophy}", font=font_normal, fill=color_text)
     draw.text((40, 330), f"角色: {character} (Lv.{char_level})", font=font_normal, fill=color_text)
+    draw.text((40, 370), f"金币: {currency} (总计: {total_currency})", font=font_normal, fill=color_text)
     
-    draw.text((40, 410), f"数据同步时间: {upload_time}", font=font_small, fill=(98, 114, 164))
+    draw.text((40, 430), f"数据同步时间: {upload_time}", font=font_small, fill=(98, 114, 164))
+    
+    # footer watermark on the right
+    watermark_text = "数据来自 lxns 落雪查分器"
+    w_watermark = get_w(watermark_text, font_small)
+    draw.text((760 - w_watermark, 430), watermark_text, font=font_small, fill=(98, 114, 164))
+
+    # Draw character image on top right if present
+    if char_bytes:
+        try:
+            char_img = Image.open(io.BytesIO(char_bytes)).convert("RGBA")
+            # Usually 128x128 but to ensure it fits well
+            char_img = char_img.resize((128, 128), Image.Resampling.LANCZOS)
+            img.paste(char_img, (600, 10), mask=char_img)
+        except Exception as e:
+            logger.error(f"渲染角色图片失败: {e}")
     
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -142,8 +161,21 @@ async def _(event: Event):
     status_code = response.status_code
     if status_code == 200:
         data = response.json().get('data', {})
+        
+        char_id = data.get('character', {}).get('id')
+        char_img_bytes = None
+        if char_id:
+            try:
+                char_url = f"https://assets2.lxns.net/chunithm/character/{char_id}.png"
+                async with httpx.AsyncClient() as c2:
+                    char_res = await c2.get(char_url, timeout=10.0)
+                    if char_res.status_code == 200:
+                        char_img_bytes = char_res.content
+            except Exception as e:
+                logger.error(f"获取角色图片失败: {e}")
+
         try:
-            img_bytes = draw_player_info(data)
+            img_bytes = draw_player_info(data, char_img_bytes)
         except FinishedException:
             raise
         except Exception as e:
