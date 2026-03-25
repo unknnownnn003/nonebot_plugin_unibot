@@ -3,3 +3,6 @@
 .git/
 data/
 info/
+__pycache__/
+*.pyc
+3057887752.json

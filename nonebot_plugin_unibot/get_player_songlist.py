@@ -4,6 +4,7 @@ from nonebot.adapters.onebot.v11 import MessageSegment
 from nonebot.log import logger
 from nonebot.exception import FinishedException
 from .config import Config
+from .user_bind import get_bind_info
 from nonebot import get_plugin_config
 import httpx
 import platform
@@ -15,7 +16,7 @@ except ImportError:
 
 config = get_plugin_config(Config)
 
-get_score = on_command("个人信息",aliases={"chuinfo"}, priority=5, block=True)
+get_score = on_command("个人信息", aliases={"分数", "chuinfo"}, priority=5, block=True)
 
 def get_font(size, weight="Normal"):
     try:
@@ -134,24 +135,66 @@ def draw_player_info(data: dict, char_bytes: bytes = None) -> bytes:
     img.save(buf, format="PNG")
     return buf.getvalue()
 
-@get_score.handle()
-async def _(event: Event):
-    user_qq = event.get_user_id()
-    
+async def get_user_friend_code(user_qq: str) -> str:
+    """
+    简易获取好友码函数：
+    先通过 QQ 向落雪 API 盲查。如果查询成功并有 friend_code，则返回该码；
+    如果 API 报错或未绑定，则在本地的 user_bind 文件中查询是否有绑定记录。
+    如果全都没有，则返回空字符串。
+    """
     if not config.lxns_token:
-        await get_score.finish("未配置落雪咖啡屋(Lxns) Token，请在 .env.prod 中添加 lxns_token 配置！")
-        return
+        return ""
         
     url = f"https://maimai.lxns.net/api/v0/chunithm/player/qq/{user_qq}"
     headers = {
         "Authorization": config.lxns_token
     }
     
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, headers=headers, timeout=10.0)
+            if response.status_code == 200:
+                data = response.json().get('data', {})
+                fc = data.get('friend_code')
+                if fc:
+                    return str(fc)
+        except Exception as e:
+            logger.error(f"查询好友码失败: {e}")
+            
+    bind_data = get_bind_info()
+    return bind_data.get(user_qq, "")
+
+@get_score.handle()
+async def _(event: Event):
+    user_qq = str(event.get_user_id())
+    
+    if not config.lxns_token:
+        await get_score.finish("未配置落雪咖啡屋(Lxns) Token，请在 .env.prod 中添加 lxns_token 配置！")
+        return
+        
+    headers = {
+        "Authorization": config.lxns_token
+    }
+    
     await get_score.send("正在获取分数信息，请稍候...")
+    
+    # 优先使用 QQ 号通过 API 盲查
+    url = f"https://maimai.lxns.net/api/v0/chunithm/player/qq/{user_qq}"
     
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(url, headers=headers, timeout=10.0)
+            
+            # 如果不是 200（没绑定QQ或者根本查不到），则尝试找找本地是否配了 friend_code
+            if response.status_code != 200:
+                bind_data = get_bind_info()
+                friend_code = bind_data.get(user_qq)
+                
+                if friend_code:
+                    url = f"https://maimai.lxns.net/api/v0/chunithm/player/{friend_code}"
+                    response = await client.get(url, headers=headers, timeout=10.0)
+                else:
+                    await get_score.finish("QQ号未绑定落雪查分器，建议在lxns查分器上绑定QQ号，或者使用分数已同步lxns查分器的好友码。\n可以通过发送 \"/bind 你的好友码\" 来绑定。")
         except FinishedException:
             raise
         except Exception as e:
