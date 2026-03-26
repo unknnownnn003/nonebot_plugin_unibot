@@ -2,7 +2,7 @@
 
 基于 NoneBot2 的 CHUNITHM (中二节奏) 查分与数据统计插件，主要接入落雪 (Lxns) 查分器 API，提供完善的成绩归档、进度查询与排版出图功能。
 
-## 💡 指令列表
+## 指令列表
 
 | 指令 | 权限 | 描述 |
 | --- | --- | --- |
@@ -13,11 +13,4 @@
 | `/chuhelp` | USER | 查看本插件内的基本使用指令帮助菜单 |
 | `/更新songlist` | SUPERUSER | 更新本地 `songlist.json` 曲库数据 |
 | `/更新曲绘` | SUPERUSER | 获取并更新全部曲绘到 `data/jacket/` 目录 |
-
-
-## 📦 目录结构简解
-
-- `data/songlist.json`：全曲库的元数据 (定数、曲名、ID等)。
-- `data/jacket/`：本地曲绘缓存目录。
-- `data/score/{QQ号}.json`：玩家成绩本地归档。
 
