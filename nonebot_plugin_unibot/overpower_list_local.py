@@ -33,48 +33,144 @@ def load_songlist():
         data = json.load(f)
         return data.get("songs", [])
 
-def get_target_charts(level: str):
-    songs = load_songlist()
-    charts = []
-    
+def load_songlist_full():
+    if not os.path.exists(SONGLIST_PATH):
+        return [], [], []
+    with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        return data.get("songs", []), data.get("versions", []), data.get("genres", [])
+
+
+def parse_term_to_difficulty(term: str):
     is_exact = False
     exact_level = 0.0
     try:
-        exact_level = float(level)
-        if "." in level:
+        exact_level = float(term)
+        if "." in term:
             is_exact = True
     except:
         pass
+    return exact_level, is_exact
+
+def get_target_charts(query_text: str):
+    songs, versions, genres = load_songlist_full()
+    
+    # Normalize query for space-separated multi-word terms
+    query = query_text.lower()
+    replacements = {
+        "origin plus": "originplus", "origin+": "originplus",
+        "air plus": "airplus", "air+": "airplus",
+        "star plus": "starplus", "star+": "starplus",
+        "amazon plus": "amazonplus", "amazon+": "amazonplus",
+        "crystal plus": "crystalplus", "crystal+": "crystalplus",
+        "paradise lost": "paradiselost", "paradiser lost": "paradiselost",
+        "new plus": "newplus", "new+": "newplus",
+        "sun plus": "sunplus", "sun+": "sunplus",
+        "luminous plus": "luminousplus", "luminous+": "luminousplus",
+        "pops & anime": "pops_anime", "pops&animes": "pops_anime", "pops&anime": "pops_anime", "流行 & 动漫": "pops_anime", "流行动漫": "pops_anime",
+        "touhou project": "touhou", "东方project": "touhou",
+        "chunithm original": "original", "gekishu & maimai": "gekimai"
+    }
+    for k, v in replacements.items():
+        query = query.replace(k, v)
         
+    terms = [t for t in query.replace(',', ' ').replace('，', ' ').replace('|', ' ').split() if t]
+
+    version_map = {}
+    for v in versions:
+        title = v['title'].lower()
+        if title == "chunithm":
+            mapped = "origin"
+        elif title == "chunithm plus":
+            mapped = "originplus"
+        else:
+            mapped = title.replace('chunithm', '').strip()
+        version_map[v['version']] = mapped
+
+    for k, v in version_map.items():
+        for r_k, r_v in replacements.items():
+            if r_k in v:
+                v = v.replace(r_k, r_v)
+        version_map[k] = v.replace(' ', '')
+
+    # Build genre aliases dictionary
+    genre_aliases = {
+        "其他游戏": ["variety", "其他", "其它"],
+        "东方project": ["touhou", "东方", "车万"],
+        "原创": ["original", "ori"],
+        "音击舞萌": ["gekimai", "音击", "舞萌"],
+        "流行 & 动漫": ["pops_anime", "流行", "动漫", "pops", "anime"]
+    }
+
+    charts = {}
+
     for song in songs:
         song_id = str(song["id"])
         origin_id = song.get("origin_id", song_id)
-        for diff in song.get("difficulties", []):
-            d = diff.get("difficulty")
-            # Only Master(3) and Ultima(4)
-            if d in (3, 4):
-                c = diff.get("level_value", 0.0)
-                
-                match = False
-                if is_exact:
-                    if abs(float(c) - exact_level) < 0.01:
-                        match = True
-                else:
-                    if diff.get("level") == level:
-                        match = True
-                        
-                if match:
-                    target_id = str(origin_id) if d == 4 else song_id
+        
+        s_version = version_map.get(song.get("version"), "")
+        s_genre_raw = song.get("genre", "").lower()
+        s_genre_search = s_genre_raw
+        for base_genre, aliases in genre_aliases.items():
+            if base_genre in s_genre_raw or s_genre_raw in base_genre:
+                s_genre_search += " " + " ".join(aliases)
+
+        # Find the highest difficulty that is 3 or 4
+        # difficulties usually ordered by level_index in the JSON or we can max it
+        valid_diffs = [diff for diff in song.get("difficulties", []) if diff.get("difficulty") in (3, 4)]
+        best_diff = None
+        if valid_diffs:
+            best_diff = max(valid_diffs, key=lambda d: d.get("level_value", 0.0))
+
+        for term in terms:
+            match_found = False
             
-                    charts.append({
-                        "song_id": song_id,  # Used to match user's score record
-                        "jacket_id": target_id,  # Used to get jacket
+            # 1. Match Difficulty?
+            exact_level, is_exact = parse_term_to_difficulty(term)
+            # Check all diffs for difficulty match
+            for diff in valid_diffs:
+                d = diff.get("difficulty")
+                c = diff.get("level_value", 0.0)
+                l = diff.get("level", "")
+                
+                diff_match = False
+                if is_exact:
+                    if abs(float(c) - exact_level) < 0.01: diff_match = True
+                else:
+                    if l == term: diff_match = True
+                
+                if diff_match:
+                    target_id = str(origin_id) if d == 4 else song_id
+                    key = f"{song_id}_{d}"
+                    charts[key] = {
+                        "song_id": song_id,
+                        "jacket_id": target_id,
                         "level_index": int(d),
                         "level_value": float(c),
                         "theoretical_op": (float(c) + 3) * 5,
                         "song_name": song.get("title", "Unknown")
-                    })
-    return charts
+                    }
+                    match_found = True
+
+            # 2. Match Version or Genre based on highest diff
+            if term == s_version or term in s_genre_search:
+                # Use best_diff
+                if best_diff:
+                    d = best_diff.get("difficulty")
+                    c = best_diff.get("level_value", 0.0)
+                    target_id = str(origin_id) if d == 4 else song_id
+                    key = f"{song_id}_{d}"
+                    charts[key] = {
+                        "song_id": song_id,
+                        "jacket_id": target_id,
+                        "level_index": int(d),
+                        "level_value": float(c),
+                        "theoretical_op": (float(c) + 3) * 5,
+                        "song_name": song.get("title", "Unknown")
+                    }
+                    match_found = True
+
+    return list(charts.values())
 
 def parse_user_data(qq: str):
     json_path = os.path.join(DATA_DIR, "score", f"{qq}.json")
@@ -270,7 +366,7 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
     draw.text((text_x, 105), f"Rating: {rating:.2f}", font=font_medium, fill=(80, 250, 123))
     
     percent = total_op / total_theoretical_op * 100 if total_theoretical_op > 0 else 0
-    t_text = f"Level {req_level}  OP: {total_op:.2f} / {total_theoretical_op:.2f} ({percent:.2f}%)"
+    t_text = f"Filter: {req_level}  OP: {total_op:.2f} / {total_theoretical_op:.2f} ({percent:.2f}%)"
     wt = get_w(t_text, font_large, draw)
     draw.text(((width - wt) / 2, 140), t_text, font=font_large, fill=(255, 121, 198))
     
@@ -390,9 +486,9 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
 
 @chulist_cmd.handle()
 async def _(event: Event, msg: Message = CommandArg()):
-    level = msg.extract_plain_text().strip()
-    if not level:
-        await chulist_cmd.finish("请提供难度，例如: /chulist 13+")
+    query_text = msg.extract_plain_text().strip()
+    if not query_text:
+        await chulist_cmd.finish("请提供查询条件（难度/定数/版本/分类等），例如: /chulist 13+ sun 车万")
         return
         
     user_qq = str(event.get_user_id())
@@ -401,9 +497,9 @@ async def _(event: Event, msg: Message = CommandArg()):
         await chulist_cmd.finish("数据不存在，请发送/update")
         return
         
-    target_charts = get_target_charts(level)
+    target_charts = get_target_charts(query_text)
     if not target_charts:
-        await chulist_cmd.finish(f"未找到难度为 {level} 的谱面！")
+        await chulist_cmd.finish(f"未找到符合条件【{query_text}】的谱面！")
         return
         
     await chulist_cmd.send(f"正在查询并生成，请稍候...")
@@ -445,7 +541,7 @@ async def _(event: Event, msg: Message = CommandArg()):
         })
         
     try:
-        img_bytes = draw_chulist_image(draw_items, total_op, total_theoretical_op, level, player_info, upload_date)
+        img_bytes = draw_chulist_image(draw_items, total_op, total_theoretical_op, query_text, player_info, upload_date)
     except Exception as e:
         logger.error(f"Image gen failed: {e}")
         await chulist_cmd.finish("生成图片失败。")
