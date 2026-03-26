@@ -216,11 +216,11 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
         groups[lv_str].sort(key=lambda x: x["score"], reverse=True)
 
     block_w = 160
-    block_h = 280
+    block_h = 250
     spacing_x = 20
-    spacing_y = 20
+    spacing_y = 10
     
-    margin_top = 220
+    margin_top = 310
     margin_bottom = 60
     margin_side = 40
     
@@ -228,7 +228,7 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
     
     y_cursor = margin_top
     for lv_str in sorted_lvs:
-        y_cursor += 60 # header space
+        y_cursor += 100 # header space
         num_rows = math.ceil(len(groups[lv_str]) / num_cols)
         y_cursor += num_rows * (block_h + spacing_y) + 10
         
@@ -272,9 +272,26 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
     percent = total_op / total_theoretical_op * 100 if total_theoretical_op > 0 else 0
     t_text = f"Level {req_level}  OP: {total_op:.2f} / {total_theoretical_op:.2f} ({percent:.2f}%)"
     wt = get_w(t_text, font_large, draw)
-    draw.text(((width - wt) / 2, 160), t_text, font=font_large, fill=(255, 121, 198))
+    draw.text(((width - wt) / 2, 140), t_text, font=font_large, fill=(255, 121, 198))
     
-    draw.line([(margin_side, 210), (width - margin_side, 210)], fill=(98, 114, 164), width=2)
+    tot_ajc = sum(1 for item in draw_items if item["full_combo"].lower() == "alljusticecritical")
+    tot_aj = sum(1 for item in draw_items if item["full_combo"].lower() in ("alljusticecritical", "alljustice"))
+    tot_fc = sum(1 for item in draw_items if item["full_combo"].lower() in ("alljusticecritical", "alljustice", "fullcombo"))
+    
+    tot_sss_plus = sum(1 for item in draw_items if item["score"] >= 1009000)
+    tot_sss = sum(1 for item in draw_items if item["score"] >= 1007500)
+    tot_ss = sum(1 for item in draw_items if item["score"] >= 1000000)
+    
+    tot_count = len(draw_items)
+    t_text2 = f"AJC: {tot_ajc}/{tot_count}   AJ: {tot_aj}/{tot_count}   FC: {tot_fc}/{tot_count}"
+    wt2 = get_w(t_text2, font_large, draw)
+    draw.text(((width - wt2) / 2, 185), t_text2, font=font_large, fill=(139, 233, 253))
+    
+    t_text3 = f"SSS+: {tot_sss_plus}/{tot_count}   SSS: {tot_sss}/{tot_count}   SS: {tot_ss}/{tot_count}"
+    wt3 = get_w(t_text3, font_large, draw)
+    draw.text(((width - wt3) / 2, 230), t_text3, font=font_large, fill=(241, 250, 140))
+    
+    draw.line([(margin_side, 290), (width - margin_side, 290)], fill=(98, 114, 164), width=2)
     
     y_cursor = margin_top
     for lv_str in sorted_lvs:
@@ -283,10 +300,24 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
         g_th = sum(x["theoretical_op"] for x in group_items)
         g_pct = g_op / g_th * 100 if g_th > 0 else 0.0
         
+        g_ajc = sum(1 for x in group_items if x["full_combo"].lower() == "alljusticecritical")
+        g_aj = sum(1 for x in group_items if x["full_combo"].lower() in ("alljusticecritical", "alljustice"))
+        g_fc = sum(1 for x in group_items if x["full_combo"].lower() in ("alljusticecritical", "alljustice", "fullcombo"))
+        
+        g_sss_plus = sum(1 for x in group_items if x["score"] >= 1009000)
+        g_sss = sum(1 for x in group_items if x["score"] >= 1007500)
+        g_ss = sum(1 for x in group_items if x["score"] >= 1000000)
+        
+        g_total = len(group_items)
+        
         y_cursor += 15
-        h_text = f"定数 {lv_str}   OP: {g_op:.2f} / {g_th:.2f} ({g_pct:.2f}%)"
+        h_text = f"定数 {lv_str}   OP: {g_op:.2f} / {g_th:.2f} ({g_pct:.2f}%)   AJC: {g_ajc}/{g_total}  AJ: {g_aj}/{g_total}  FC: {g_fc}/{g_total}"
         draw.text((margin_side, y_cursor), h_text, font=font_large, fill=(189, 147, 249))
-        y_cursor += 50
+        y_cursor += 45
+        
+        h_text2 = f"SSS+: {g_sss_plus}/{g_total}   SSS: {g_sss}/{g_total}   SS: {g_ss}/{g_total}"
+        draw.text((margin_side, y_cursor), h_text2, font=font_large, fill=(241, 250, 140))
+        y_cursor += 40
         
         for i, item in enumerate(group_items):
             r = i // num_cols
@@ -324,11 +355,8 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
             t_y = j_y + jacket_size + 10
             
             s_name = item['song_name']
-            name_font_size = 18
+            name_font_size = 16
             name_font = get_font(name_font_size, "Bold")
-            while get_w(s_name, name_font, draw) > block_w - 5 and name_font_size > 10:
-                name_font_size -= 1
-                name_font = get_font(name_font_size, "Bold")
                 
             while get_w(s_name, name_font, draw) > block_w - 5 and len(s_name) > 1:
                 s_name = s_name[:-2] + "…"
@@ -353,8 +381,8 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
     footer_y = height - margin_bottom + 15
     draw.line([(margin_side, footer_y - 10), (width - margin_side, footer_y - 10)], fill=(98, 114, 164), width=2)
     f_str = f"Data Upload: {upload_date} | generated by Robinbot | unibot"
-    wf = get_w(f_str, font_tiny, draw)
-    draw.text((width - margin_side - wf, footer_y), f_str, font=font_tiny, fill=color_sub)
+    wf = get_w(f_str, font_normal, draw)
+    draw.text(((width - wf) / 2, footer_y), f_str, font=font_normal, fill=(248, 248, 242))
     
     buf = io.BytesIO()
     img.save(buf, format="PNG")

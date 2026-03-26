@@ -7,7 +7,7 @@
 | 指令 | 权限 | 描述 |
 | --- | --- | --- |
 | `/bind <好友码>` | USER | 绑定你的落雪查分器好友码，以便拉取云端数据 |
-| `/update` | USER | 从落雪查分器更新/拉取最新的游玩数据至本地 JSON 归档 |
+| `/chuupdate` | USER | 上传 lxns 导出的分数 CSV，并更新本地 JSON 成绩归档 |
 | `/个人信息` | USER | 查询并生成玩家的落雪 (Lxns) 游玩个人数据图片（别名：`/分数`、`/chuinfo`） |
 | `/chulist <难度/定数>` | USER | 按难度或定数生成对应的 Overpower 进度及评价统计图（例：`/chulist 13+` 或 `/chulist 14.9`） |
 | `/chuhelp` | USER | 查看本插件内的基本使用指令帮助菜单 |
