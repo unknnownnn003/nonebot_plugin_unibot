@@ -14,3 +14,12 @@
 | `/更新songlist` | SUPERUSER | 更新本地 `songlist.json` 曲库数据 |
 | `/更新曲绘` | SUPERUSER | 获取并更新全部曲绘到 `data/jacket/` 目录 |
 
+Todo:
+
+- [] ajc,aj,fc 完成度统计
+- [] 按版本分类
+- [] 按类别分类
+- [] 曲名显示调整
+- [] 别名数据库
+- [] 单曲查询
+- [] 剧情查询
