@@ -83,13 +83,27 @@ def _parse_csv_to_json(csv_path: str, json_path: str) -> bool:
 @update_score.handle()
 async def _(bot: Bot, event: MessageEvent):
     """
-    处理 /update 命令：提示上传 csv
+    处理 /update 命令：如果消息里已经带文件了直接跳过提示
     """
-    await update_score.send("请上传 lxns 查分器导出的 chunithm-scores.csv 文件")
+    msg = event.get_message()
+    has_file = False
+    for seg in msg:
+        seg_type = getattr(seg, "type", None)
+        if not seg_type and isinstance(seg, dict):
+            seg_type = seg.get("type")
+        elif not seg_type and isinstance(seg, tuple) and len(seg) > 0:
+            seg_type = seg[0]
+            
+        if seg_type == "file":
+            has_file = True
+            break
+            
+    if not has_file:
+        await update_score.send("请上传 lxns 查分器导出的 chunithm-scores.csv 文件")
 
 # 使用 expire_time 让等待状态 5 分钟后超时
 @update_score.got("file_msg", prompt="等待上传中...")
-async def get_uploaded_file(bot: Bot, event: MessageEvent, file_msg: Event = Arg("file_msg")):
+async def get_uploaded_file(bot: Bot, event: MessageEvent):
     try:
         user_qq = str(event.get_user_id())
         
@@ -99,17 +113,22 @@ async def get_uploaded_file(bot: Bot, event: MessageEvent, file_msg: Event = Arg
         local_file = ""
         base64_data = ""
         
-        # 在 OneBot v11 中，通过 file 消息段获取文件，这里也兼容提取 URL 或者通过 API 操作
-        # 但通常直接给 bot.get_file 或解析 message中的 url
-        # 详细判断取决于具体 adapter 和 client(Napcat, go-cqhttp)
         for seg in msg:
-            if seg.type == "file":
-                file_url = seg.data.get("url", "")
-                if not file_url and "file_id" in seg.data:
+            seg_type = getattr(seg, "type", None)
+            seg_data = getattr(seg, "data", {})
+            if not seg_type and isinstance(seg, dict):
+                seg_type = seg.get("type")
+                seg_data = seg.get("data", {})
+            elif not seg_type and isinstance(seg, tuple) and len(seg) >= 2:
+                seg_type = seg[0]
+                seg_data = seg[1] if isinstance(seg[1], dict) else {}
+                
+            if seg_type == "file":
+                file_url = seg_data.get("url", "")
+                if not file_url and "file_id" in seg_data:
                     try:
-                        file_info = await bot.get_file(file_id=seg.data["file_id"])
+                        file_info = await bot.get_file(file_id=seg_data["file_id"])
                         
-                        # 尝试解包 Napcat 嵌套的 data 字段
                         target_info = file_info.get("data", file_info) if isinstance(file_info, dict) else file_info
                         
                         file_url = target_info.get("url", "")
@@ -122,8 +141,14 @@ async def get_uploaded_file(bot: Bot, event: MessageEvent, file_msg: Event = Arg
         # fallback for napcat sometimes
         if not file_url and not local_file and not base64_data and msg:
            for seg in msg:
-                if "url" in seg.data:
-                    file_url = seg.data["url"]
+                seg_data = getattr(seg, "data", {})
+                if not seg_data and isinstance(seg, dict):
+                    seg_data = seg.get("data", {})
+                elif not seg_data and isinstance(seg, tuple) and len(seg) >= 2:
+                    seg_data = seg[1] if isinstance(seg[1], dict) else {}
+                    
+                if "url" in seg_data:
+                    file_url = seg_data["url"]
                     break
 
         temp_csv_path = os.path.join(SCORE_DIR, f"{user_qq}_temp.csv")
