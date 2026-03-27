@@ -26,13 +26,6 @@ JACKET_DIR = os.path.join(DATA_DIR, "jacket")
 
 chulist_cmd = on_command("chulist", priority=5, block=True)
 
-def load_songlist():
-    if not os.path.exists(SONGLIST_PATH):
-        return []
-    with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
-        return data.get("songs", [])
-
 def load_songlist_full():
     if not os.path.exists(SONGLIST_PATH):
         return [], [], []
@@ -118,57 +111,43 @@ def get_target_charts(query_text: str):
         # Find the highest difficulty that is 3 or 4
         # difficulties usually ordered by level_index in the JSON or we can max it
         valid_diffs = [diff for diff in song.get("difficulties", []) if diff.get("difficulty") in (3, 4)]
-        best_diff = None
-        if valid_diffs:
-            best_diff = max(valid_diffs, key=lambda d: d.get("level_value", 0.0))
 
-        for term in terms:
-            match_found = False
+        for diff in valid_diffs:
+            d = diff.get("difficulty")
+            c = diff.get("level_value", 0.0)
+            l = diff.get("level", "")
             
-            # 1. Match Difficulty?
-            exact_level, is_exact = parse_term_to_difficulty(term)
-            # Check all diffs for difficulty match
-            for diff in valid_diffs:
-                d = diff.get("difficulty")
-                c = diff.get("level_value", 0.0)
-                l = diff.get("level", "")
-                
+            diff_passes = True
+            for term in terms:
+                # Check if term matches difficulty
+                exact_level, is_exact = parse_term_to_difficulty(term)
                 diff_match = False
                 if is_exact:
                     if abs(float(c) - exact_level) < 0.01: diff_match = True
                 else:
-                    if l == term: diff_match = True
+                    if l.lower() == term.lower(): diff_match = True
                 
-                if diff_match:
-                    target_id = str(origin_id) if d == 4 else song_id
-                    key = f"{song_id}_{d}"
-                    charts[key] = {
-                        "song_id": song_id,
-                        "jacket_id": target_id,
-                        "level_index": int(d),
-                        "level_value": float(c),
-                        "theoretical_op": (float(c) + 3) * 5,
-                        "song_name": song.get("title", "Unknown")
-                    }
-                    match_found = True
-
-            # 2. Match Version or Genre based on highest diff
-            if term == s_version or term in s_genre_search:
-                # Use best_diff
-                if best_diff:
-                    d = best_diff.get("difficulty")
-                    c = best_diff.get("level_value", 0.0)
-                    target_id = str(origin_id) if d == 4 else song_id
-                    key = f"{song_id}_{d}"
-                    charts[key] = {
-                        "song_id": song_id,
-                        "jacket_id": target_id,
-                        "level_index": int(d),
-                        "level_value": float(c),
-                        "theoretical_op": (float(c) + 3) * 5,
-                        "song_name": song.get("title", "Unknown")
-                    }
-                    match_found = True
+                # Check if term matches version or genre
+                version_genre_match = False
+                if term == s_version or term in s_genre_search.split() or term in s_genre_search:
+                    version_genre_match = True
+                
+                # If neither matched, this term fails for this difficulty
+                if not (diff_match or version_genre_match):
+                    diff_passes = False
+                    break
+            
+            if diff_passes:
+                target_id = str(origin_id) if d == 4 else song_id
+                key = f"{song_id}_{d}"
+                charts[key] = {
+                    "song_id": song_id,
+                    "jacket_id": target_id,
+                    "level_index": int(d),
+                    "level_value": float(c),
+                    "theoretical_op": (float(c) + 3) * 5,
+                    "song_name": song.get("title", "Unknown")
+                }
 
     return list(charts.values())
 
@@ -299,15 +278,18 @@ def get_w(text, f, draw):
     if hasattr(draw, 'textbbox'): return draw.textbbox((0, 0), text, font=f)[2]
     return draw.textsize(text, font=f)[0]
 
-def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, player_info, upload_date):
+def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, player_info, upload_date, no_cat=False):
     groups = {}
-    for item in draw_items:
-        lv = item["level_value"]
-        lv_str = f"{lv:.1f}"
-        if lv_str not in groups: groups[lv_str] = []
-        groups[lv_str].append(item)
-        
-    sorted_lvs = sorted(groups.keys(), key=lambda x: float(x), reverse=True)
+    if no_cat:
+        groups["综合排序"] = list(draw_items)
+    else:
+        for item in draw_items:
+            lv = item["level_value"]
+            lv_str = f"{lv:.1f}"
+            if lv_str not in groups: groups[lv_str] = []
+            groups[lv_str].append(item)
+
+    sorted_lvs = sorted(groups.keys(), key=lambda x: float(x) if x != "综合排序" else 999.0, reverse=True)
     for lv_str in sorted_lvs:
         groups[lv_str].sort(key=lambda x: x["score"], reverse=True)
 
@@ -407,7 +389,10 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
         g_total = len(group_items)
         
         y_cursor += 15
-        h_text = f"定数 {lv_str}   OP: {g_op:.2f} / {g_th:.2f} ({g_pct:.2f}%)   AJC: {g_ajc}/{g_total}  AJ: {g_aj}/{g_total}  FC: {g_fc}/{g_total}"
+        if lv_str == "综合排序":
+            h_text = f"{lv_str}   OP: {g_op:.2f} / {g_th:.2f} ({g_pct:.2f}%)   AJC: {g_ajc}/{g_total}  AJ: {g_aj}/{g_total}  FC: {g_fc}/{g_total}"
+        else:
+            h_text = f"定数 {lv_str}   OP: {g_op:.2f} / {g_th:.2f} ({g_pct:.2f}%)   AJC: {g_ajc}/{g_total}  AJ: {g_aj}/{g_total}  FC: {g_fc}/{g_total}"
         draw.text((margin_side, y_cursor), h_text, font=font_large, fill=(189, 147, 249))
         y_cursor += 45
         
@@ -487,6 +472,12 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
 @chulist_cmd.handle()
 async def _(event: Event, msg: Message = CommandArg()):
     query_text = msg.extract_plain_text().strip()
+    
+    no_cat = False
+    if "--nocat" in query_text:
+        no_cat = True
+        query_text = query_text.replace("--nocat", "").strip()
+
     if not query_text:
         await chulist_cmd.finish("请提供查询条件（难度/定数/版本/分类等），例如: /chulist 13+ sun 车万")
         return
@@ -541,7 +532,7 @@ async def _(event: Event, msg: Message = CommandArg()):
         })
         
     try:
-        img_bytes = draw_chulist_image(draw_items, total_op, total_theoretical_op, query_text, player_info, upload_date)
+        img_bytes = draw_chulist_image(draw_items, total_op, total_theoretical_op, query_text, player_info, upload_date, no_cat=no_cat)
     except Exception as e:
         logger.error(f"Image gen failed: {e}")
         await chulist_cmd.finish("生成图片失败。")

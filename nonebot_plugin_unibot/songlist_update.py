@@ -59,18 +59,32 @@ async def handle_update_songlist():
             aliases_list = alias_data.get("aliases", []) if isinstance(alias_data, dict) else alias_data
             alias_map = {item["song_id"]: item.get("aliases", []) for item in aliases_list if "song_id" in item}
             
+            # 读取本地已存在的 songlist.json 保留用户自行添加的别名
+            local_alias_map = {}
+            if SONGLIST_FILE.exists():
+                try:
+                    with open(SONGLIST_FILE, "r", encoding="utf-8") as local_f:
+                        local_data = json.load(local_f)
+                        for s in local_data.get("songs", []):
+                            if "id" in s and "aliases" in s:
+                                local_alias_map[s["id"]] = s["aliases"]
+                except Exception:
+                    pass
+
             # 将别名数据合并到 songlist_data 中对应的每首歌曲下
             if "songs" in songlist_data:
                 for song in songlist_data["songs"]:
                     song_id = song.get("id")
-                    if song_id in alias_map:
-                        song["aliases"] = alias_map[song_id]
-                    else:
-                        song["aliases"] = []
-
-        # 以 UTF-8 编码将 JSON 数据覆写保存到指定文件路径中
-        with open(SONGLIST_FILE, "w", encoding="utf-8") as f:
-            json.dump(songlist_data, f, ensure_ascii=False, indent=4)
+                    new_aliases = alias_map.get(song_id, [])
+                    local_aliases = local_alias_map.get(song_id, [])
+                    
+                    # 取并集，并保持顺序 (先网络后本地补充)
+                    merged = []
+                    for a in new_aliases + local_aliases:
+                        if a not in merged:
+                            merged.append(a)
+                            
+                    song["aliases"] = merged
             
         # 记录日志，并回复用户更新成功
         logger.success("songlist.json 和别名数据成功更新并合并")
