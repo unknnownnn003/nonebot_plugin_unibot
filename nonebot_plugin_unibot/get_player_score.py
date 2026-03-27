@@ -21,7 +21,7 @@ SONGLIST_PATH = os.path.join(DATA_DIR, "songlist.json")
 if not os.path.exists(SCORE_DIR):
     os.makedirs(SCORE_DIR)
 
-update_score = on_command("chuupdate", priority=5, block=True, expire_time=timedelta(seconds=300))
+update_score = on_command("chuupdate", priority=5, block=True)
 
 def _as_int(value: Any, default: int = -1) -> int:
     try:
@@ -175,7 +175,7 @@ def _read_score_json(path: str) -> List[Dict[str, Any]]:
         logger.error(f"读取分数 JSON 失败: {e}")
         return []
 
-def _parse_file(file_path: str) -> tuple[bool, str, list]:
+def _parse_file(file_path: str) -> tuple[bool, str, list, dict]:
     """
     读取并解析上传的 csv 文件或 Rin json 文件，将其作为标准成绩格式返回
     """
@@ -198,7 +198,7 @@ def _parse_file(file_path: str) -> tuple[bool, str, list]:
                 pass
                 
         if text is None:
-            return False, "文件编码错误或格式不支持，请确保上传的是文本类型的 JSON/CSV 文件！", []
+            return False, "文件编码错误或格式不支持，请确保上传的是文本类型的 JSON/CSV 文件！", [], {}
 
         # 尝试作为 JSON 读取 (Rin 格式)
         try:
@@ -255,7 +255,7 @@ def _parse_file(file_path: str) -> tuple[bool, str, list]:
                         if score > existing_score:
                             data_dict[key] = row
                             
-                return True, info_msg, list(data_dict.values())
+                return True, info_msg, list(data_dict.values()), {"UserName": username, "PlayerRating": rating, "Level": level, "PlayCount": playcount}
         except json.JSONDecodeError:
             pass  # 不是 JSON，继续尝试 CSV
             
@@ -298,10 +298,10 @@ def _parse_file(file_path: str) -> tuple[bool, str, list]:
                     else:
                         data_dict[key] = row
 
-        return True, "CSV 解析成功", list(data_dict.values())
+        return True, "CSV 解析成功", list(data_dict.values()), {}
     except Exception as e:
         logger.error(f"解析文件发生意外错误: {e}")
-        return False, f"解析失败：{e}", []
+        return False, f"解析失败：{e}", [], {}
 
 @update_score.handle()
 async def _(bot: Bot, event: MessageEvent, state: T_State):
@@ -380,12 +380,19 @@ async def get_uploaded_file(bot: Bot, event: MessageEvent):
                 
             try:
                 async with httpx.AsyncClient() as client:
-                    resp = await client.get(file_url, timeout=30.0)
-                    if resp.status_code == 200:
-                        with open(temp_file_path, "wb") as f:
-                            f.write(resp.content)
-                    else:
-                        await update_score.finish("下载文件失败，请稍后重试！")
+                    async with client.stream("GET", file_url, timeout=30.0) as resp:
+                        if resp.status_code == 200:
+                            with open(temp_file_path, "wb") as f:
+                                size = 0
+                                async for chunk in resp.aiter_bytes():
+                                    size += len(chunk)
+                                    if size > 10 * 1024 * 1024:
+                                        raise ValueError("文件超过10MB大小限制")
+                                    f.write(chunk)
+                        else:
+                            await update_score.finish("下载文件失败，请稍后重试！")
+            except ValueError as ve:
+                await update_score.finish(f"报错: {ve}")
             except Exception as e:
                 logger.error(f"下载文件发生错误: {e}")
                 await update_score.finish("下载文件时发生网络错误。")
@@ -396,7 +403,7 @@ async def get_uploaded_file(bot: Bot, event: MessageEvent):
             else:
                 await update_score.finish("未能成功提取文件，更新操作已取消。")
         
-        success, info_msg, parsed_items = _parse_file(temp_file_path)
+        success, info_msg, parsed_items, player_info_rin = _parse_file(temp_file_path)
         
         if os.path.exists(temp_file_path):
             try:
@@ -411,6 +418,16 @@ async def get_uploaded_file(bot: Bot, event: MessageEvent):
             new_items = _inject_level_value(merged, song_meta)
             with open(target_json_path, "w", encoding="utf-8") as f:
                 json.dump(new_items, f, ensure_ascii=False, indent=4)
+            
+            if player_info_rin:
+                info_path = os.path.join(SCORE_DIR, f"{user_qq}_info.json")
+                with open(info_path, "w", encoding="utf-8") as f:
+                    json.dump(player_info_rin, f, ensure_ascii=False, indent=4)
+            
+            if player_info_rin:
+                info_path = os.path.join(SCORE_DIR, f"{user_qq}_info.json")
+                with open(info_path, "w", encoding="utf-8") as f:
+                    json.dump(player_info_rin, f, ensure_ascii=False, indent=4)
             await update_score.finish(f"保存成功\n{info_msg}\n当前总谱面数: {len(new_items)}")
         else:
             await update_score.finish("解析失败，请确认文件名和格式(CSV或Rin JSON)是否正确！")

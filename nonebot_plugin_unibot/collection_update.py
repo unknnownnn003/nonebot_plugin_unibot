@@ -11,7 +11,7 @@ from nonebot.log import logger
 
 # Base URLs
 API_BASE_URL = "https://maimai.lxns.net/api/v0/chunithm"
-ASSETS_BASE_URL = "https://assets2.lxns.net/chunithm"
+ASSETS_BASE_URL = "https://assets.lxns.net/chunithm"
 
 # Define Paths
 PLUGIN_DIR = Path(__file__).parent

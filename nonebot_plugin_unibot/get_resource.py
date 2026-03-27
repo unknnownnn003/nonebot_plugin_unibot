@@ -15,7 +15,7 @@ except ImportError:
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(PLUGIN_DIR, "data")
 JACKET_DIR = os.path.join(DATA_DIR, "jacket")
-BASE_URL = "https://assets2.lxns.net/chunithm/jacket/{song_id}.png"
+BASE_URL = "https://assets.lxns.net/chunithm/jacket/{song_id}.png"
 
 update_jacket = on_command("更新曲绘", permission=SUPERUSER, priority=5, block=True)
 

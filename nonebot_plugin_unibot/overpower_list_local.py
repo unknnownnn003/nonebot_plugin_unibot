@@ -23,6 +23,7 @@ PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(PLUGIN_DIR, "data")
 SONGLIST_PATH = os.path.join(DATA_DIR, "songlist.json")
 JACKET_DIR = os.path.join(DATA_DIR, "jacket")
+SCORE_DIR = os.path.join(DATA_DIR, "score")
 
 chulist_cmd = on_command("chulist", priority=5, block=True)
 
@@ -214,9 +215,71 @@ def calculate_op(level_value, score, fc_status):
     return max(0.0, op)
 
 async def get_player_info_api(user_qq: str):
-    res = {"name": user_qq, "rating": 0.0, "level": 0, "title": "", "char_bytes": None}
-    if not config.lxns_token:
-        return res
+    res = {"name": user_qq, "rating": 0.0, "level": 0, "title": "", "char_bytes": None, "lxns_rating": None, "rin_rating": None}
+    
+    rin_info = {}
+    rin_info_path = os.path.join(SCORE_DIR, f"{user_qq}_info.json")
+    if os.path.exists(rin_info_path):
+        try:
+            with open(rin_info_path, "r", encoding="utf-8") as f:
+                rin_info = json.load(f)
+        except:
+            pass
+
+    lxns_success = False
+    if config.lxns_token:
+        headers = {"Authorization": config.lxns_token}
+
+        try:
+            from .user_bind import get_bind_info
+            bind_data = get_bind_info()
+            friend_code = bind_data.get(user_qq)
+        except Exception:
+            friend_code = None
+
+        url = f"https://maimai.lxns.net/api/v0/chunithm/player/qq/{user_qq}"      
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(url, headers=headers, timeout=10.0)   
+                if response.status_code != 200 and friend_code:
+                    url = f"https://maimai.lxns.net/api/v0/chunithm/player/{friend_code}"
+                    response = await client.get(url, headers=headers, timeout=10.0)
+
+                if response.status_code == 200:
+                    data = response.json().get('data', {})
+                    res["name"] = data.get('name', 'Unknown')
+                    res["lxns_rating"] = data.get('rating', 0.0)
+                    res["rating"] = res["lxns_rating"]
+                    res["level"] = data.get('level', 0)
+                    reborn_count = data.get('reborn_count', data.get('rebornCount', 0))
+                    res["level"] += 100 * reborn_count
+
+                    title_obj = data.get('title', data.get('trophy', {}))
+                    if isinstance(title_obj, dict):
+                        res["title"] = title_obj.get('name', '')
+                    else: res["title"] = str(title_obj)
+
+                    char_id = data.get('character', {}).get('id')
+                    if char_id is not None:
+                        char_path = os.path.join(DATA_DIR, "character", f"{char_id}.png")
+                        if os.path.exists(char_path):
+                            with open(char_path, "rb") as f:
+                                res["char_bytes"] = f.read()
+                    lxns_success = True
+            except Exception as e:
+                logger.error(f"获取玩家信息失败: {e}")
+
+    if rin_info:
+        res["rin_rating"] = rin_info.get("PlayerRating", 0.0)
+        if not lxns_success:
+            res["rating"] = res["rin_rating"]
+            if rin_info.get("UserName"):
+                res["name"] = rin_info["UserName"]
+            if rin_info.get("Level"):
+                res["level"] = rin_info["Level"]
+
+    return res
     headers = {"Authorization": config.lxns_token}
     
     try:
@@ -249,11 +312,11 @@ async def get_player_info_api(user_qq: str):
                 else: res["title"] = str(title_obj)
                 
                 char_id = data.get('character', {}).get('id')
-                if char_id:
-                    char_url = f"https://assets2.lxns.net/chunithm/character/{char_id}.png"
-                    char_res = await client.get(char_url, timeout=10.0)
-                    if char_res.status_code == 200:
-                        res["char_bytes"] = char_res.content
+                if char_id is not None:
+                    char_path = os.path.join(DATA_DIR, "character", f"{char_id}.png")
+                    if os.path.exists(char_path):
+                        with open(char_path, "rb") as f:
+                            res["char_bytes"] = f.read()
                 return res
         except Exception as e:
             logger.error(f"获取玩家信息失败: {e}")
@@ -306,9 +369,11 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
     
     y_cursor = margin_top
     for lv_str in sorted_lvs:
+        valid_items = [x for x in groups[lv_str] if x["score"] > 0]
+        if not valid_items: continue
         y_cursor += 100 # header space
-        num_rows = math.ceil(len(groups[lv_str]) / num_cols)
-        y_cursor += num_rows * (block_h + spacing_y) + 10
+        num_rows = math.ceil(len(valid_items) / num_cols)
+        y_cursor += num_rows * (block_h + spacing_y)
         
     height = y_cursor + margin_bottom
     
@@ -345,7 +410,13 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
     text_x = margin_side + 120
     draw.text((text_x, 20), name, font=font_xl, fill=color_text)
     draw.text((text_x, 75), f"Lv.{level} | {title}", font=font_normal, fill=(139, 233, 253))
-    draw.text((text_x, 105), f"Rating: {rating:.2f}", font=font_medium, fill=(80, 250, 123))
+    lxns_r = player_info.get("lxns_rating")
+    rin_r = player_info.get("rin_rating")
+    if lxns_r is not None and rin_r is not None and lxns_r != rin_r:
+        rating_str = f"Rating: {lxns_r:.2f} (lxns) / {rin_r:.2f} (rin)"
+    else:
+        rating_str = f"Rating: {rating:.2f}"
+    draw.text((text_x, 105), rating_str, font=font_medium, fill=(80, 250, 123))
     
     percent = total_op / total_theoretical_op * 100 if total_theoretical_op > 0 else 0
     t_text = f"Filter: {req_level}  OP: {total_op:.2f} / {total_theoretical_op:.2f} ({percent:.2f}%)"
@@ -374,6 +445,10 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
     y_cursor = margin_top
     for lv_str in sorted_lvs:
         group_items = groups[lv_str]
+        valid_items = [x for x in group_items if x["score"] > 0]
+        if not valid_items:
+            continue
+
         g_op = sum(x["over_power"] for x in group_items)
         g_th = sum(x["theoretical_op"] for x in group_items)
         g_pct = g_op / g_th * 100 if g_th > 0 else 0.0
@@ -399,8 +474,10 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
         h_text2 = f"SSS+: {g_sss_plus}/{g_total}   SSS: {g_sss}/{g_total}   SS: {g_ss}/{g_total}"
         draw.text((margin_side, y_cursor), h_text2, font=font_large, fill=(241, 250, 140))
         y_cursor += 40
-        
-        for i, item in enumerate(group_items):
+
+        valid_items = [x for x in group_items if x["score"] > 0]
+
+        for i, item in enumerate(valid_items):
             r = i // num_cols
             c = i % num_cols
             x = margin_side + c * (block_w + spacing_x)
@@ -455,10 +532,10 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
             pct_s = f"{item['percent']:.2f}%"
             wpc = get_w(pct_s, font_small, draw)
             draw.text((x + (block_w - wpc)/2, t_y + 75), pct_s, font=font_small, fill=(139, 233, 253))
-            
-        nr = math.ceil(len(group_items) / num_cols)
+
+        nr = math.ceil(len(valid_items) / num_cols)
         y_cursor += nr * (block_h + spacing_y)
-        
+
     footer_y = height - margin_bottom + 15
     draw.line([(margin_side, footer_y - 10), (width - margin_side, footer_y - 10)], fill=(98, 114, 164), width=2)
     f_str = f"Data Upload: {upload_date} | generated by Robinbot | unibot"
@@ -485,7 +562,7 @@ async def _(event: Event, msg: Message = CommandArg()):
     user_qq = str(event.get_user_id())
     user_best, upload_date = parse_user_data(user_qq)
     if user_best is None:
-        await chulist_cmd.finish("数据不存在，请发送/update")
+        await chulist_cmd.finish("数据不存在，请发送/chuupdate")
         return
         
     target_charts = get_target_charts(query_text)
@@ -496,14 +573,13 @@ async def _(event: Event, msg: Message = CommandArg()):
     await chulist_cmd.send(f"正在查询并生成，请稍候...")
     player_info = await get_player_info_api(user_qq)
     
-    total_op = 0.0
-    total_theoretical_op = 0.0
     draw_items = []
-    
+    song_stats = {}
+
     for c in target_charts:
         key = f'{c["song_id"]}_{c["level_index"]}'
         theoretical_op = c["theoretical_op"]
-        
+
         play = user_best.get(key)
         if play:
             score = play["score"]
@@ -513,11 +589,19 @@ async def _(event: Event, msg: Message = CommandArg()):
             op = 0.0
             score = 0
             fc = ""
+
+        s_id = str(c["song_id"])
+        if s_id not in song_stats:
+            song_stats[s_id] = {"max_op": 0.0, "max_theoretical_op": 0.0}
             
-        total_op += op
-        total_theoretical_op += theoretical_op
+        if op > song_stats[s_id]["max_op"]:
+            song_stats[s_id]["max_op"] = op
+            
+        if theoretical_op > song_stats[s_id]["max_theoretical_op"]:
+            song_stats[s_id]["max_theoretical_op"] = theoretical_op
+
         percent = op / theoretical_op * 100 if theoretical_op > 0 else 0.0
-        
+
         draw_items.append({
             "song_name": c.get("song_name", "Unknown"),
             "song_id": c["song_id"],
@@ -531,6 +615,10 @@ async def _(event: Event, msg: Message = CommandArg()):
             "theoretical_op": theoretical_op
         })
         
+
+    total_op = sum(stats["max_op"] for stats in song_stats.values())
+    total_theoretical_op = sum(stats["max_theoretical_op"] for stats in song_stats.values())
+
     try:
         img_bytes = draw_chulist_image(draw_items, total_op, total_theoretical_op, query_text, player_info, upload_date, no_cat=no_cat)
     except Exception as e:
