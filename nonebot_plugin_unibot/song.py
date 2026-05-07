@@ -4,8 +4,9 @@ import difflib
 import httpx
 import platform
 import asyncio
+import unicodedata
 from io import BytesIO
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple, Set
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
@@ -35,23 +36,160 @@ try:
 except ImportError:
     jaconv = None
 
+try:
+    from pypinyin import lazy_pinyin
+except ImportError:
+    lazy_pinyin = None
+
 from nonebot import on_command
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 
 def normalize_str(s: str) -> str:
     s = str(s).strip().lower()
+    s = unicodedata.normalize("NFKC", s)
     if zhconv:
         try:
             s = zhconv.convert(s, "zh-cn")
-        except:
+        except Exception:
             pass
     if jaconv:
         try:
             s = jaconv.kana2alphabet(jaconv.kata2hira(s))
-        except:
+        except Exception:
             pass
+    s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
     return "".join(c for c in s if c.isalnum())
+
+def _string_variants(s: str) -> Set[str]:
+    raw = str(s or "").strip().lower()
+    variants = {raw, unicodedata.normalize("NFKC", raw)}
+    if zhconv:
+        try:
+            variants.add(zhconv.convert(raw, "zh-cn"))
+            variants.add(zhconv.convert(raw, "zh-tw"))
+        except Exception:
+            pass
+    if jaconv:
+        try:
+            kana = jaconv.kata2hira(raw)
+            variants.add(kana)
+            variants.add(jaconv.kana2alphabet(kana))
+        except Exception:
+            pass
+    if lazy_pinyin:
+        for value in list(variants):
+            try:
+                pinyin_parts = lazy_pinyin(value, errors="ignore")
+                if pinyin_parts:
+                    variants.add("".join(pinyin_parts))
+                    variants.add(" ".join(pinyin_parts))
+            except Exception:
+                pass
+    normalized = {normalize_str(v) for v in variants}
+    return {v for v in normalized if v}
+
+def _song_search_terms(song: Dict[str, Any]) -> List[Tuple[str, str]]:
+    terms = [("曲名", str(song.get("title", "")))]
+    for alias in song.get("aliases", []) or []:
+        terms.append(("别名", str(alias)))
+    return [(source, value) for source, value in terms if value.strip()]
+
+def _score_term(query_variants: Set[str], term_variants: Set[str]) -> float:
+    best = 0.0
+    for q in query_variants:
+        for term in term_variants:
+            if not q or not term:
+                continue
+            if q == term:
+                best = max(best, 1.0)
+                continue
+            ratio = difflib.SequenceMatcher(None, q, term).ratio()
+            if q in term:
+                coverage = len(q) / max(len(term), 1)
+                ratio = max(ratio, 0.72 + min(coverage, 0.25))
+            elif term in q:
+                coverage = len(term) / max(len(q), 1)
+                ratio = max(ratio, 0.68 + min(coverage, 0.2))
+            best = max(best, ratio)
+    return best
+
+def _load_songlist_data() -> Optional[Dict[str, Any]]:
+    if not os.path.exists(SONGLIST_PATH):
+        return None
+    try:
+        with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"读取曲目列表失败: {e}")
+        return None
+
+def find_song_matches(query: str, limit: int = 8) -> List[Dict[str, Any]]:
+    data = _load_songlist_data()
+    if not data:
+        return []
+
+    songs = data.get("songs", [])
+    query_exact = query.strip().lower()
+    query_variants = _string_variants(query)
+    if not query_exact and not query_variants:
+        return []
+
+    matches: Dict[str, Dict[str, Any]] = {}
+
+    for song in songs:
+        song_id = str(song.get("id", ""))
+        best_score = 0.0
+        best_source = ""
+        best_value = ""
+
+        if song_id and song_id == query_exact:
+            best_score = 1.2
+            best_source = "ID"
+            best_value = song_id
+        elif song_id and query_exact and song_id.startswith(query_exact):
+            best_score = 0.78
+            best_source = "ID"
+            best_value = song_id
+
+        for source, value in _song_search_terms(song):
+            value_exact = value.strip().lower()
+            score = 1.05 if query_exact and query_exact == value_exact else _score_term(query_variants, _string_variants(value))
+            if source == "别名" and score >= 0.72:
+                score += 0.03
+            if score > best_score:
+                best_score = score
+                best_source = source
+                best_value = value
+
+        if best_score >= 0.58:
+            matches[song_id] = {
+                "song": song,
+                "score": best_score,
+                "source": best_source,
+                "matched": best_value,
+            }
+
+    ranked = sorted(matches.values(), key=lambda item: (item["score"], -len(str(item["song"].get("title", "")))), reverse=True)
+    return ranked[:limit]
+
+def pick_song_match(matches: List[Dict[str, Any]]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    if not matches:
+        return None, []
+
+    exact_matches = [m for m in matches if m["score"] >= 1.0]
+    if len(exact_matches) == 1:
+        return exact_matches[0]["song"], []
+    if len(exact_matches) > 1:
+        return None, exact_matches
+
+    top = matches[0]
+    close_matches = [m for m in matches if top["score"] - m["score"] <= 0.08]
+    if len(close_matches) >= 2:
+        return None, close_matches
+    if top["score"] >= 0.74:
+        return top["song"], []
+    return None, matches
 
 def get_font(size: int, weight: str = "Normal") -> ImageFont.FreeTypeFont:
     try:
@@ -109,57 +247,21 @@ def wrap_text_with_height(text: str, font: ImageFont.FreeTypeFont, max_width: in
     height = bbox[3] - bbox[1]
     return result, width, height
 
+def clamp_wrapped_text(text: str, font: ImageFont.FreeTypeFont, max_width: int, max_lines: int, draw: ImageDraw.ImageDraw) -> str:
+    wrapped, _, _ = wrap_text_with_height(text, font, max_width, draw)
+    lines = wrapped.splitlines()
+    if len(lines) <= max_lines:
+        return wrapped
+    lines = lines[:max_lines]
+    tail = lines[-1]
+    while tail and draw.textbbox((0, 0), tail + "...", font=font)[2] > max_width:
+        tail = tail[:-1]
+    lines[-1] = tail + "..."
+    return "\n".join(lines)
+
 def match_song_by_query(query: str) -> Optional[Dict[str, Any]]:
-    if not os.path.exists(SONGLIST_PATH):
-        return None
-        
-    try:
-        with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        logger.error(f"读取曲目列表失败: {e}")
-        return None
-        
-    songs = data.get("songs", [])
-    query_exact = query.strip().lower()
-    query_norm = normalize_str(query)
-    
-    # 1. 精确匹配
-    for song in songs:
-        if str(song.get("id")) == query_exact:
-            return song
-        
-        candidates_exact = [song.get("title", "").strip().lower()] + [str(a).strip().lower() for a in song.get("aliases", [])]
-        if query_exact in candidates_exact:
-            return song
-            
-        candidates_norm = [normalize_str(c) for c in candidates_exact]
-        if query_norm and query_norm in candidates_norm:
-            return song
-            
-    # 2. 包含匹配与模糊匹配 (如果有多个取匹配度最高)
-    best_match = None
-    best_ratio = 0.0
-    
-    for song in songs:
-        candidates = [song.get("title", "")] + [str(a) for a in song.get("aliases", [])]
-        for cand in candidates:
-            cand_norm = normalize_str(cand)
-            if not cand_norm or not query_norm:
-                continue
-                
-            ratio = difflib.SequenceMatcher(None, query_norm, cand_norm).ratio()
-            if query_norm in cand_norm:
-                ratio += 0.2
-                
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_match = song
-                
-    if best_ratio > 0.4:
-        return best_match
-        
-    return None
+    match, _ = pick_song_match(find_song_matches(query, limit=8))
+    return match
 
 async def fetch_song_detail(song_id: int) -> Optional[Dict[str, Any]]:
     url = f"https://maimai.lxns.net/api/v0/chunithm/song/{song_id}"
@@ -185,10 +287,15 @@ async def download_jacket(song_id: int) -> Optional[Image.Image]:
         try:
             resp = await client.get(url, timeout=10.0)
             if resp.status_code == 200:
+                if not resp.content.startswith(b"\x89PNG\r\n\x1a\n"):
+                    logger.warning(f"Invalid jacket content for ID {song_id}: status=200, size={len(resp.content)}")
+                    raise ValueError("invalid jacket content")
                 if not os.path.exists(JACKET_DIR):
                     os.makedirs(JACKET_DIR)
-                with open(jacket_path, "wb") as f:
+                temp_path = jacket_path + ".tmp"
+                with open(temp_path, "wb") as f:
                     f.write(resp.content)
+                os.replace(temp_path, jacket_path)
                 return Image.open(BytesIO(resp.content)).convert("RGBA")
         except Exception as e:
             logger.error(f"Failed to download jacket for ID {song_id}: {e}")
@@ -346,6 +453,75 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
     final_img.save(buf, format="JPEG", quality=90)
     return buf.getvalue()
 
+def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jacket_imgs: List[Image.Image]) -> bytes:
+    BG_COLOR = (30, 30, 35, 255)
+    PANEL_COLOR = (45, 45, 52, 255)
+    TEXT_MAIN = (245, 245, 245, 255)
+    TEXT_SUB = (180, 180, 180, 255)
+    ACCENT = (98, 114, 164, 255)
+
+    card_width = 800
+    row_h = 118
+    header_h = 112
+    footer_h = 58
+    height = header_h + row_h * len(matches) + footer_h
+
+    img = Image.new("RGBA", (card_width, height), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+    font_title = get_font(30, "Bold")
+    font_head = get_font(22, "Medium")
+    font_body = get_font(18, "Normal")
+    font_small = get_font(15, "Normal")
+
+    draw_text(draw, (40, 32), "匹配到多首可能的歌曲", font_title, TEXT_MAIN)
+    query_wrapped = clamp_wrapped_text(f"查询：{query}", font_body, card_width - 80, 1, draw)
+    draw_text(draw, (40, 72), query_wrapped, font_body, TEXT_SUB)
+
+    y = header_h
+    for index, match in enumerate(matches, 1):
+        song = match["song"]
+        title = str(song.get("title", "Unknown"))
+        artist = str(song.get("artist", "-"))
+        song_id = song.get("id", "-")
+        source = match.get("source") or "匹配"
+        matched = str(match.get("matched") or "")
+        score = int(round(min(match.get("score", 0.0), 1.0) * 100))
+
+        draw.rounded_rectangle([32, y + 8, card_width - 32, y + row_h - 8], radius=8, fill=PANEL_COLOR)
+        draw.rounded_rectangle([32, y + 8, 42, y + row_h - 8], radius=8, fill=ACCENT)
+        draw.rectangle([38, y + 8, 42, y + row_h - 8], fill=ACCENT)
+
+        jacket = jacket_imgs[index - 1].resize((82, 82), Image.Resampling.LANCZOS)
+        img.paste(jacket, (58, y + 18), jacket if jacket.mode == "RGBA" else None)
+
+        text_x = 158
+        title_wrapped = clamp_wrapped_text(f"{index}. {title}", font_head, 430, 2, draw)
+        title_h = draw.multiline_textbbox((0, 0), title_wrapped, font=font_head)[3]
+        draw_text(draw, (text_x, y + 18), title_wrapped, font_head, TEXT_MAIN)
+        meta_y = y + 18 + min(title_h, 52) + 6
+        artist_wrapped, _, _ = wrap_text_with_height(f"ID: {song_id}   Artist: {artist}", font_small, 430, draw)
+        draw_text(draw, (text_x, meta_y), artist_wrapped, font_small, TEXT_SUB)
+
+        matched_text = f"{source}: {matched}" if matched else source
+        matched_wrapped = clamp_wrapped_text(matched_text, font_small, 180, 2, draw)
+        draw_text(draw, (card_width - 230, y + 28), matched_wrapped, font_small, TEXT_SUB)
+        draw_text(draw, (card_width - 230, y + 70), f"相似度 {score}%", font_small, ACCENT)
+        y += row_h
+
+    draw.line([(40, height - 44), (card_width - 40, height - 44)], fill=ACCENT, width=2)
+    draw_text(draw, (40, height - 28), "请使用更完整的曲名、ID 或添加别名后再查询", font_small, TEXT_SUB)
+
+    buf = BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+async def download_match_jacket(match: Dict[str, Any]) -> Image.Image:
+    try:
+        song_id = int(match["song"].get("id", 0))
+    except (TypeError, ValueError):
+        song_id = 0
+    return await download_jacket(song_id)
+
 
 @song_query.handle()
 async def _(event: MessageEvent):
@@ -353,8 +529,16 @@ async def _(event: MessageEvent):
     match_str = msg[:-4].strip()  # Remove "是什么歌"
     if not match_str:
         return
-        
-    local_song = match_song_by_query(match_str)
+
+    matches = find_song_matches(match_str, limit=8)
+    local_song, ambiguous_matches = pick_song_match(matches)
+    if ambiguous_matches:
+        jacket_tasks = [download_match_jacket(m) for m in ambiguous_matches[:8]]
+        jacket_imgs = await asyncio.gather(*jacket_tasks)
+        image_bytes = render_song_candidates_image(match_str, ambiguous_matches[:8], list(jacket_imgs))
+        await song_query.finish(MessageSegment.image(image_bytes))
+        return
+
     if not local_song:
         await song_query.finish(f"没有找到与 '{match_str}' 匹配的曲目。")
         return
@@ -467,7 +651,15 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
     if not query:
         await view_alias_cmd.finish("格式错误。请使用: /查看别名 <模糊搜索/名字/ID/别名>")
         
-    local_song = match_song_by_query(query)
+    matches = find_song_matches(query, limit=8)
+    local_song, ambiguous_matches = pick_song_match(matches)
+    if ambiguous_matches:
+        lines = []
+        for item in ambiguous_matches[:8]:
+            song = item["song"]
+            lines.append(f"{song.get('id')} - {song.get('title')}（{item.get('source')}: {item.get('matched')}）")
+        await view_alias_cmd.finish("匹配到多首曲目，请使用更精确的名称或 ID：\n" + "\n".join(lines))
+
     if not local_song:
         await view_alias_cmd.finish(f"未找到与 '{query}' 匹配的曲目。")
         

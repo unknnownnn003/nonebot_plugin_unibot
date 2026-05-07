@@ -51,10 +51,10 @@ def load_index() -> dict:
     return {"categories": {}, "mapping": {}}
 
 
-def download_image_sync(url: str, rel_path: str):
+def download_image_sync(url: str, rel_path: str, force: bool = False):
     """同步下载图片到本地路径供未来渲染读取"""
     local_path = DATA_DIR / rel_path
-    if local_path.exists():
+    if local_path.exists() and not force:
         return
     local_path.parent.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -91,7 +91,7 @@ def rewrite_links(md_text: str, md_path: str) -> str:
                 ext = target_url.split('.')[-1].split('?')[0]
                 img_rel = f"images/external/{abs(hash(target_url))}.{ext}"
                 
-            download_image_sync(target_url, img_rel)
+            download_image_sync(target_url, img_rel, force=True)
             return f"local://{img_rel}"
             
         # 对于其它非图片链接
@@ -246,6 +246,10 @@ async def _(bot: Bot, event: Event):
                 categories[current_category].append({"name": name, "path": file_path})
                 download_queue[file_path] = name
                 
+    if not download_queue:
+        await cmd_update.finish("获取目录成功，但没有解析到任何剧情条目；已取消更新，避免覆盖本地索引。")
+        return
+
     if not DATA_DIR.exists():
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         
@@ -254,20 +258,23 @@ async def _(bot: Bot, event: Event):
         for item in items:
             index_data["mapping"][item["name"]] = item["path"]
             
-    with open(INDEX_FILE, "w", encoding="utf-8") as f:
+    temp_index = INDEX_FILE.with_suffix(".json.tmp")
+    with open(temp_index, "w", encoding="utf-8") as f:
         json.dump(index_data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    temp_index.replace(INDEX_FILE)
         
-    # 排查哪些本地没有
+    # 统计缺失数量；实际下载会刷新所有远端条目，避免远端内容变化后本地不同步
     missing_files = []
     for file_path in download_queue.keys():
         local_path = DATA_DIR / file_path.lstrip('/')
         if not local_path.exists():
             missing_files.append(file_path)
             
-    if not missing_files:
-        await cmd_update.finish("索引已更新，所有剧情均已保存在本地，无需爬取新内容。")
-
-    await cmd_update.send(f"共有 {len(missing_files)} 篇新剧情需要下载，正在后台爬取该文本并转换图片链接为绝对路径...\n完成后会进行通知。")
+    await cmd_update.send(
+        f"索引已更新，共 {len(download_queue)} 篇剧情，缺失 {len(missing_files)} 篇；"
+        "正在刷新远端文本并转换图片链接...\n完成后会进行通知。"
+    )
     
     def download_and_rewrite(f_path):
         target_url = f"{BASE_URL}{urllib.parse.quote(f_path)}"
@@ -283,7 +290,7 @@ async def _(bot: Bot, event: Event):
     success_count = 0
     fail_count = 0
     
-    for file_path in missing_files:
+    for file_path in download_queue.keys():
         local_path = (DATA_DIR / file_path.lstrip('/')).resolve()
         if not str(local_path).startswith(str(DATA_DIR.resolve())):
             logger.warning(f"跳过包含越权路径的文件: {file_path}")

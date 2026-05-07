@@ -6,3 +6,4 @@ httpx
 aiofiles
 jaconv
 zhconv
+pypinyin

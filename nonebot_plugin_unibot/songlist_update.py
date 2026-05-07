@@ -1,6 +1,7 @@
 import json
 import httpx
 from pathlib import Path
+from datetime import datetime
 from nonebot import on_command
 from nonebot.permission import SUPERUSER
 from nonebot.log import logger
@@ -49,6 +50,8 @@ async def handle_update_songlist():
             response.raise_for_status()
             # 解析获取到的 JSON 数据
             songlist_data = response.json()
+            if not isinstance(songlist_data, dict) or not isinstance(songlist_data.get("songs"), list):
+                raise ValueError("songlist API 返回格式异常，未发现 songs 列表")
             
             # 请求别名数据
             alias_response = await client.get(alias_url, timeout=30.0)
@@ -57,6 +60,8 @@ async def handle_update_songlist():
             
             # 建立 song_id 到 aliases 的映射字典以提高查找效率
             aliases_list = alias_data.get("aliases", []) if isinstance(alias_data, dict) else alias_data
+            if not isinstance(aliases_list, list):
+                aliases_list = []
             alias_map = {item["song_id"]: item.get("aliases", []) for item in aliases_list if "song_id" in item}
             
             # 读取本地已存在的 songlist.json 保留用户自行添加的别名
@@ -85,10 +90,25 @@ async def handle_update_songlist():
                             merged.append(a)
                             
                     song["aliases"] = merged
+
+            temp_file = SONGLIST_FILE.with_suffix(".json.tmp")
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(songlist_data, f, ensure_ascii=False, indent=4)
+                f.write("\n")
+            temp_file.replace(SONGLIST_FILE)
+
+            song_count = len(songlist_data.get("songs", []))
+            alias_count = sum(len(song.get("aliases", []) or []) for song in songlist_data.get("songs", []))
             
         # 记录日志，并回复用户更新成功
-        logger.success("songlist.json 和别名数据成功更新并合并")
-        await update_songlist.send("更新成功！songlist.json 及歌曲别名已成功获取并覆盖。")
+        mtime = datetime.fromtimestamp(SONGLIST_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        logger.success(f"songlist.json 和别名数据成功更新并合并: {SONGLIST_FILE}")
+        await update_songlist.send(
+            "更新成功！songlist.json 及歌曲别名已成功获取并覆盖。\n"
+            f"写入路径：{SONGLIST_FILE}\n"
+            f"曲目数：{song_count}，别名数：{alias_count}\n"
+            f"文件修改时间：{mtime}"
+        )
         
     except httpx.HTTPError as http_err:
         # 捕获 HTTP 网络请求相关的异常
