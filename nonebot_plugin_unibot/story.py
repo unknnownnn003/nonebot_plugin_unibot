@@ -204,7 +204,7 @@ cmd_list = on_command("剧情分类", aliases={"剧情列表"}, priority=5, bloc
 
 @cmd_update.handle()
 async def _(bot: Bot, event: Event):
-    await cmd_update.send("开始拉取网站目录并排查本地缺失剧情内容，请稍候...")
+    await cmd_update.send("收到，正在处理...")
     
     def fetch_sidebar():
         req = urllib.request.Request(f"{BASE_URL}/_sidebar.md", headers={'User-Agent': 'Mozilla/5.0'})
@@ -271,10 +271,7 @@ async def _(bot: Bot, event: Event):
         if not local_path.exists():
             missing_files.append(file_path)
             
-    await cmd_update.send(
-        f"索引已更新，共 {len(download_queue)} 篇剧情，缺失 {len(missing_files)} 篇；"
-        "正在刷新远端文本并转换图片链接...\n完成后会进行通知。"
-    )
+    await cmd_update.send("收到，正在处理...")
     
     def download_and_rewrite(f_path):
         target_url = f"{BASE_URL}{urllib.parse.quote(f_path)}"
@@ -439,7 +436,7 @@ async def render_and_send(bot: Bot, event: Event, name: str, file_path: str, mat
 """
 
     if HTMLRENDER_AVAILABLE:
-        await matcher.send("加载中...")
+        await matcher.send("收到，正在处理...")
         try:
             # 预下载所有图片以解决渲染时头图不显示的问题
             md_text = await predownload_images(md_text)

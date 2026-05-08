@@ -67,7 +67,7 @@ def load_versions() -> list[int]:
 
 @update_collection.handle()
 async def _():
-    await update_collection.send("开始获取并更新收藏品数据，请稍候...")
+    await update_collection.send("收到，正在处理...")
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     versions_list = load_versions()

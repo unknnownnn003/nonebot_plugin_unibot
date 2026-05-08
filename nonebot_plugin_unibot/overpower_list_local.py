@@ -570,7 +570,7 @@ async def _(event: Event, msg: Message = CommandArg()):
         await chulist_cmd.finish(f"未找到符合条件【{query_text}】的谱面！")
         return
         
-    await chulist_cmd.send(f"正在查询并生成，请稍候...")
+    await chulist_cmd.send("收到，正在处理...")
     player_info = await get_player_info_api(user_qq)
     
     draw_items = []

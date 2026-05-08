@@ -49,7 +49,7 @@ async def write_bytes_atomic(path: str, content: bytes):
 
 @update_jacket.handle()
 async def _(msg: Message = CommandArg()):
-    await update_jacket.send("开始获取更新曲绘，请稍候...")
+    await update_jacket.send("收到，正在处理...")
 
     os.makedirs(JACKET_DIR, exist_ok=True)
 
@@ -78,7 +78,7 @@ async def _(msg: Message = CommandArg()):
             target_ids.add(song_id)
 
     total_count = len(target_ids)
-    await update_jacket.send(f"共扫描到带有曲绘的曲目 {total_count} 首，正在检查并下载...")
+    await update_jacket.send("收到，正在处理...")
 
     semaphore = asyncio.Semaphore(15)
     success_count = 0

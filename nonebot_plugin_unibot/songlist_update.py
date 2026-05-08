@@ -31,7 +31,7 @@ async def handle_update_songlist():
     向 API 请求最新的 songlist，如果成功则覆盖写入本地 data/songlist.json 文件中。
     """
     # 发送提醒消息，表示已开始执行
-    await update_songlist.send("开始从外部 API 获取 songlist，请稍候...")
+    await update_songlist.send("收到，正在处理...")
     
     # 确保 data 目录存在，如果不存在则自动创建
     if not DATA_DIR.exists():

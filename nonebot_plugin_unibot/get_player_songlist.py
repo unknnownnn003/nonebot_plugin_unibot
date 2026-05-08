@@ -202,7 +202,7 @@ async def _(event: Event):
             "Authorization": config.lxns_token
         }
 
-        await get_score.send("正在获取分数信息，请稍候...")
+        await get_score.send("收到，正在处理...")
 
         url = f"https://maimai.lxns.net/api/v0/chunithm/player/qq/{user_qq}"        
         async with httpx.AsyncClient() as client:
