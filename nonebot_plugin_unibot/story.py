@@ -214,7 +214,8 @@ async def _(bot: Bot, event: Event):
     try:
         sidebar_text = await asyncio.to_thread(fetch_sidebar)
     except Exception as e:
-        await cmd_update.finish(f"获取目录失败: {e}")
+        logger.error(f"获取剧情目录失败: {e}")
+        await cmd_update.finish("获取目录失败，请稍后重试或查看控制台日志。")
         return
         
     lines = sidebar_text.split('\n')
@@ -445,12 +446,11 @@ async def render_and_send(bot: Bot, event: Event, name: str, file_path: str, mat
             chunks = split_markdown(md_text, max_lines=400)
             
             nodes = []
-            source_url = f"{BASE_URL}/#{file_path}"
             nodes.append(
                 MessageSegment.node_custom(
                     user_id=int(bot.self_id),
                     nickname="uni",
-                    content=Message(f"当前角色：{name}\n内容来源：{source_url}")
+                    content=Message(f"当前角色：{name}")
                 )
             )
 
@@ -497,12 +497,10 @@ async def render_and_send(bot: Bot, event: Event, name: str, file_path: str, mat
 
         except Exception as e:
             import traceback; logger.error(f"Render failed: {traceback.format_exc()}")
-            await matcher.send(f"渲染图片失败：{e}\n下面为您提供部分纯文本：\n{md_text[:500]}...")
+            await matcher.send("渲染图片失败，请稍后重试或查看控制台日志。")
     else:
-        # 如果未安装 HtmlRender 发送前 500 字提示
-        msg = f"未安装 HtmlRender 插件以渲染 Markdown 文本，只能为您发送文本片段。\n\n# {name}\n\n" + md_text[:500]
-        if len(md_text) > 500:
-            msg += "\n\n...[由于内容过长已省略。请联系 Bot 管理员安装 Playwright 及 HTMLRender 插件以获取完整精美带图渲染版本]"
+        # 未安装 HtmlRender 时不降级发送原始 Markdown，避免文本中包含未处理的链接或路径。
+        msg = "未安装 HtmlRender 插件，暂时无法渲染剧情图片。请联系 Bot 管理员安装 Playwright 及 HTMLRender 插件。"
         await matcher.send(msg)
 
 
@@ -523,7 +521,7 @@ async def _(bot: Bot, event: Event, args: Message = CommandArg()):
             matches.append((k, v))
 
     if not matches:
-        await cmd_story.finish(f"本地未找到包含「{name}」的剧情索引记录，请检查名称。")
+        await cmd_story.finish("本地未找到匹配的剧情索引记录，请检查名称。")
         
     target_name = ""
     target_path = ""

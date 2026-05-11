@@ -7,6 +7,7 @@ from nonebot import on_command
 from nonebot.adapters import Event
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
 from nonebot.exception import FinishedException
+from nonebot.log import logger
 
 chuhelp_cmd = on_command("chuhelp", priority=5, block=True)
 
@@ -26,48 +27,75 @@ def get_font(size, weight="Normal"):
     except: return ImageFont.load_default()
 
 def draw_help():
-    width = 800
+    width = 980
     img = Image.new("RGB", (width, 10), (30, 30, 46))
     draw = ImageDraw.Draw(img)
 
     font_title = get_font(48, "Bold")
-    font_cmd = get_font(28, "Bold")
-    font_desc = get_font(22, "Normal")
+    font_section = get_font(30, "Bold")
+    font_cmd = get_font(25, "Bold")
+    font_desc = get_font(21, "Normal")
 
     commands = [
-        ("[1] /bind [好友码]  （若QQ号绑定过lxns查分器则可不用bind）", "绑定至lxns查分器"),
-        ("[2] /chuupdate", "上传 lxns 导出的分数 CSV 或者rin导出的json 更新本地成绩"),
-        ("[3] /chulist [查询条件] [--nocat]", "生成由多种条件组合查询的 Overpower 统计图。\n支持：定数、难度、版本、以及部分特殊指定分类。\n多个条件间可用空格叠加取交集。\n含 --nocat 标志时将不再按定数分组，而是汇总按分数排行。\n示例: /chulist 13+ sun 车万 --nocat"),
-        ("[4] /chuinfo", "获取当前绑定账号信息"),
-        ("[5] [曲名/别名/ID]是什么歌", "查询目标歌曲详情信息"),
-        ("[6] /添加别名 [ID] [别名]", "为歌曲添加自定义本地别名"),
-        ("[7] /查看别名 [模糊查询/id]", "查看指定曲目的所有别名"),
-        ("[8] /查剧情 [角色名/关键词]", "搜索并阅读指定角色的剧情"),
-        ("[9] /随机剧情", "随机抽选一段角色剧情阅读"),
-        ("[10] /剧情列表", "查看当前已收录剧情的所有角色列表")
+        ("账号与成绩", [
+            ("/bind [好友码]", "绑定落雪查分器好友码；QQ 已绑定 lxns 时通常可跳过"),
+            ("/chuupdate", "上传 lxns CSV 或 rin JSON，更新本地成绩归档"),
+            ("/lxupdate", "从落雪接口同步已绑定账号的国服成绩到本地"),
+            ("/cf [歌名或ID] [难度] [分数] [fc/aj]", "手动传分，别名 /传分；难度为空时默认 MASTER"),
+            ("/b", "查询落雪 B30+N20：只使用国服成绩和落雪定数，忽略手动传分"),
+            ("/b30", "查询本地 B30：国服成绩与手动传分取最高分，使用 chunirec 定数"),
+            ("/chuinfo", "获取当前绑定账号信息；别名 /个人信息、/分数"),
+            ("/chulist [条件] [--nocat]", "生成本地 Overpower 统计图；只统计落雪曲库与国服成绩"),
+        ]),
+        ("曲库与推荐", [
+            ("[曲名/别名/ID]是什么歌", "查询歌曲详情，支持别名、罗马音、简繁体和变体字匹配"),
+            ("/添加别名 [ID] [别名]", "为歌曲添加自定义本地别名"),
+            ("/删除别名 [ID] [别名]", "删除指定歌曲的本地别名，仅 SUPERUSER 可用"),
+            ("/查看别名 [模糊查询/ID/别名]", "查看指定歌曲的本地及官方别名"),
+            ("推什么 [条件]", "按条件随机推荐可推分曲目，建议范围限定在落雪曲库"),
+        ]),
+        ("剧情", [
+            ("/查剧情 [角色名/关键词]", "搜索并阅读指定角色或关键词的剧情"),
+            ("/随机剧情", "随机抽选一段角色剧情阅读"),
+            ("/剧情分类", "查看剧情分类；别名 /剧情列表"),
+        ]),
+        ("维护命令（SUPERUSER）", [
+            ("/更新songlist", "从落雪同步国服 songlist，保留本地别名与 chunirec 定数"),
+            ("/更新chunirec", "从 chunirec 同步日服新曲，并转换为落雪 songlist 兼容格式"),
+            ("/更新曲绘", "下载落雪曲库中的数字 ID 曲绘，跳过 chunirec 非数字 ID"),
+            ("/更新收藏品", "同步收藏品资源"),
+            ("/更新剧情", "同步剧情索引与文本资源"),
+        ]),
     ]
     
-    y = 140
-    for cmd, desc in commands:
-        y += 45
-        for line in desc.split('\n'):
-            y += 35
+    y = 135
+    for _, items in commands:
+        y += 48
+        for _, desc in items:
+            y += 38
+            for _ in desc.split('\n'):
+                y += 29
+            y += 6
         y += 20
         
-    height = y + 80
+    height = y + 82
     img = Image.new("RGB", (width, height), (30, 30, 46))
     draw = ImageDraw.Draw(img)
     
-    draw.text((40, 40), "Unibot 基础指令", font=font_title, fill=(248, 248, 242))
+    draw.text((40, 40), "Unibot 指令帮助", font=font_title, fill=(248, 248, 242))
     draw.line([(40, 110), (width - 40, 110)], fill=(98, 114, 164), width=2)
 
-    y = 140
-    for cmd, desc in commands:
-        draw.text((40, y), cmd, font=font_cmd, fill=(255, 121, 198))
-        y += 45
-        for line in desc.split('\n'):
-            draw.text((60, y), line, font=font_desc, fill=(139, 233, 253))
-            y += 35
+    y = 135
+    for section, items in commands:
+        draw.text((40, y), section, font=font_section, fill=(241, 250, 140))
+        y += 48
+        for cmd, desc in items:
+            draw.text((58, y), cmd, font=font_cmd, fill=(255, 121, 198))
+            y += 38
+            for line in desc.split('\n'):
+                draw.text((78, y), line, font=font_desc, fill=(139, 233, 253))
+                y += 29
+            y += 6
         y += 20
         
     draw.line([(40, y + 10), (width - 40, y + 10)], fill=(98, 114, 164), width=2)
@@ -86,4 +114,5 @@ async def _(event: Event):
     except FinishedException:
         raise
     except Exception as e:
-        await chuhelp_cmd.finish(f"生成帮助图片失败: {e}")
+        logger.error(f"生成帮助图片失败: {e}")
+        await chuhelp_cmd.finish("生成帮助图片失败，请查看控制台日志。")

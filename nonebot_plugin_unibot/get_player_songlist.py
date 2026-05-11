@@ -194,7 +194,7 @@ async def _(event: Event):
     lxns_data = {}
     if not config.lxns_token:
         if not rin_info:
-            await get_score.finish("未配置落雪咖啡屋(Lxns) Token，请在 .env.prod 中添加 lxns_token 配置，或者上传Rin的JSON文件！")
+            await get_score.finish("未配置落雪咖啡屋(Lxns) Token，且本地没有可用玩家信息。请配置后重试，或上传 Rin 的 JSON 文件。")
             return
         lxns_failed = True
     else:

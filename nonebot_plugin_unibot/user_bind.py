@@ -61,12 +61,12 @@ async def _(event: Event, msg: Message = CommandArg()):
     friend_code = msg.extract_plain_text().strip()
     
     if not friend_code:
-        await bind_command.finish("请输入需要绑定的好友码，例如：/bind 123456789000000")
+        await bind_command.finish("请输入需要绑定的好友码，例如：/bind <好友码>")
         
     if not friend_code.isdigit():
         await bind_command.finish("好友码格式错误，必须为全数字")
         
     if save_bind_info(user_qq, friend_code):
-        await bind_command.finish(f"绑定成功！当前 QQ: {user_qq} 已绑定好友码: {friend_code}")
+        await bind_command.finish("绑定成功！好友码已保存。")
     else:
         await bind_command.finish("绑定失败，内部发生错误，请查看控制台日志。")

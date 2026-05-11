@@ -31,6 +31,7 @@ KNOWN_FUTURE_VERSIONS = {"verse", "xverse", "xversex"}
 MAX_RATING_SCORE = 1009000
 
 best_rating_cmd = on_command("b", priority=5, block=True)
+best_rating_30_cmd = on_command("b30", priority=5, block=True)
 
 BG_TOP = (26, 28, 40)
 BG_BOTTOM = (38, 31, 58)
@@ -124,7 +125,7 @@ def load_song_data() -> Tuple[List[Dict[str, Any]], Set[int]]:
     return songs if isinstance(songs, list) else [], new_versions
 
 
-def build_chart_meta(songs: List[Dict[str, Any]]) -> Dict[Tuple[str, int], Dict[str, Any]]:
+def build_chart_meta(songs: List[Dict[str, Any]], const_source: str = "default") -> Dict[Tuple[str, int], Dict[str, Any]]:
     meta: Dict[Tuple[str, int], Dict[str, Any]] = {}
     for song in songs:
         if not isinstance(song, dict):
@@ -139,33 +140,41 @@ def build_chart_meta(songs: List[Dict[str, Any]]) -> Dict[Tuple[str, int], Dict[
             if level_index < 0:
                 continue
             jacket_id = str(diff.get("origin_id") or song.get("origin_id") or song_id) if level_index == 5 else song_id
+            level_value = diff.get("level_value")
+            level = diff.get("level")
+            if const_source == "lx":
+                level_value = diff.get("lx_level_value", level_value)
+                level = diff.get("lx_level", level)
+            elif const_source == "chunirec":
+                level_value = diff.get("chunirec_level_value", level_value)
+                level = diff.get("chunirec_level", level)
             meta[(song_id, level_index)] = {
                 "id": song_id,
                 "jacket_id": jacket_id,
                 "song_name": title,
-                "level": diff.get("level"),
-                "level_value": safe_float(diff.get("level_value"), 0.0),
+                "level": level,
+                "level_value": safe_float(level_value, 0.0),
                 "level_index": level_index,
                 "version": version,
             }
     return meta
 
 
-def load_local_scores(qq: str) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]]:
-    path = os.path.join(SCORE_DIR, f"{qq}.json")
+def load_score_file(path: str) -> List[Dict[str, Any]]:
     if not os.path.exists(path):
-        return None
+        return []
     try:
         with open(path, "r", encoding="utf-8") as f:
             rows = json.load(f)
     except Exception as e:
         logger.error(f"读取本地成绩失败: {e}")
-        return None
+        return []
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
 
+
+def merge_score_rows(rows: List[Dict[str, Any]]) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]]:
     best: Dict[Tuple[str, int], Dict[str, Any]] = {}
-    for row in rows if isinstance(rows, list) else []:
-        if not isinstance(row, dict):
-            continue
+    for row in rows:
         song_id = str(row.get("id", ""))
         level_index = safe_int(row.get("level_index"), -1)
         score = safe_int(row.get("score"), 0)
@@ -174,7 +183,63 @@ def load_local_scores(qq: str) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]
         key = (song_id, level_index)
         if key not in best or score > safe_int(best[key].get("score"), 0):
             best[key] = row
-    return best
+    return best or None
+
+
+def load_b30_scores(qq: str) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]]:
+    rows = [row for row in load_score_file(os.path.join(SCORE_DIR, f"{qq}.json")) if row.get("source") != "manual"]
+    rows.extend(load_score_file(os.path.join(SCORE_DIR, f"{qq}_manual.json")))
+    return merge_score_rows(rows)
+
+
+def load_player_info(qq: str) -> Dict[str, Any]:
+    info_path = os.path.join(SCORE_DIR, f"{qq}_info.json")
+    if not os.path.exists(info_path):
+        return {}
+    try:
+        with open(info_path, "r", encoding="utf-8") as f:
+            info = json.load(f)
+        return info if isinstance(info, dict) else {}
+    except Exception as e:
+        logger.warning(f"读取本地玩家信息失败: {e}")
+        return {}
+
+
+def load_legacy_manual_scores(qq: str) -> List[Dict[str, Any]]:
+    rows = load_score_file(os.path.join(SCORE_DIR, f"{qq}.json"))
+    return [row for row in rows if row.get("source") == "manual"]
+
+
+def strip_legacy_manual_scores(qq: str) -> None:
+    path = os.path.join(SCORE_DIR, f"{qq}.json")
+    rows = load_score_file(path)
+    if not rows or not any(row.get("source") == "manual" for row in rows):
+        return
+    cleaned = [row for row in rows if row.get("source") != "manual"]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cleaned, f, ensure_ascii=False, indent=4)
+
+
+def migrate_legacy_manual_scores(qq: str) -> None:
+    manual_path = os.path.join(SCORE_DIR, f"{qq}_manual.json")
+    legacy = load_legacy_manual_scores(qq)
+    if not legacy:
+        return
+    merged = merge_score_rows(load_score_file(manual_path) + legacy)
+    if merged:
+        with open(manual_path, "w", encoding="utf-8") as f:
+            json.dump(list(merged.values()), f, ensure_ascii=False, indent=4)
+    strip_legacy_manual_scores(qq)
+
+
+def load_local_scores_excluding_manual(qq: str) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]]:
+    rows = [row for row in load_score_file(os.path.join(SCORE_DIR, f"{qq}.json")) if row.get("source") != "manual"]
+    return merge_score_rows(rows)
+
+
+def load_local_scores(qq: str) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]]:
+    rows = [row for row in load_score_file(os.path.join(SCORE_DIR, f"{qq}.json")) if row.get("source") != "manual"]
+    return merge_score_rows(rows)
 
 
 def rating_from_score(level_value: float, score: int) -> float:
@@ -256,9 +321,9 @@ def format_score_plain(score: int) -> str:
     return f"{max(score, 0):07d}"
 
 
-def build_item(meta: Dict[str, Any], score_row: Dict[str, Any]) -> Dict[str, Any]:
+def build_item(meta: Dict[str, Any], score_row: Dict[str, Any], use_stored_rating: bool = True) -> Dict[str, Any]:
     score = safe_int(score_row.get("score"), 0)
-    rating = safe_float(score_row.get("rating"), 0.0)
+    rating = safe_float(score_row.get("rating"), 0.0) if use_stored_rating else 0.0
     if rating <= 0:
         rating = rating_from_score(safe_float(meta.get("level_value"), 0.0), score)
     return {
@@ -288,6 +353,32 @@ def normalize_lxns_item(item: Dict[str, Any], chart_meta: Dict[Tuple[str, int], 
             "version": 0,
         }
     return build_item(meta, item)
+
+
+def normalize_local_item(
+    item: Dict[str, Any],
+    chart_meta: Dict[Tuple[str, int], Dict[str, Any]],
+    const_source: str = "chunirec",
+) -> Optional[Dict[str, Any]]:
+    song_id = str(item.get("id", ""))
+    level_index = safe_int(item.get("level_index"), -1)
+    if not song_id or level_index < 0:
+        return None
+    meta = dict(chart_meta.get((song_id, level_index), {}))
+    if not meta:
+        level_value = item.get("chunirec_level_value") if const_source == "chunirec" else item.get("lx_level_value")
+        if level_value is None:
+            level_value = item.get("level_value")
+        meta = {
+            "id": song_id,
+            "jacket_id": song_id,
+            "song_name": item.get("song_name") or f"ID {song_id}",
+            "level": item.get("level") or "",
+            "level_value": safe_float(level_value, 0.0),
+            "level_index": level_index,
+            "version": 0,
+        }
+    return build_item(meta, item, use_stored_rating=False)
 
 
 def section_average(items: List[Dict[str, Any]], divisor: int) -> float:
@@ -347,6 +438,8 @@ def build_recommendations(
     exact: List[Dict[str, Any]] = []
     fallback: List[Dict[str, Any]] = []
     for key, meta in candidate_entries:
+        if not str(meta.get("id", "")).isdigit():
+            continue
         level_value = safe_float(meta.get("level_value"), 0.0)
         if level_value <= 0:
             continue
@@ -437,9 +530,10 @@ async def fetch_lxns_bests(friend_code: str) -> Tuple[List[Dict[str, Any]], List
 
 async def prepare_jackets(items: List[Dict[str, Any]]) -> Dict[str, Image.Image]:
     jacket_ids = sorted({str(item["jacket_id"]) for item in items if item.get("jacket_id")})
-    tasks = [download_jacket(safe_int(jacket_id)) for jacket_id in jacket_ids]
+    numeric_ids = [jacket_id for jacket_id in jacket_ids if jacket_id.isdigit()]
+    tasks = [download_jacket(safe_int(jacket_id)) for jacket_id in numeric_ids]
     images = await asyncio.gather(*tasks) if tasks else []
-    return {jacket_id: image for jacket_id, image in zip(jacket_ids, images) if image is not None}
+    return {jacket_id: image for jacket_id, image in zip(numeric_ids, images) if image is not None}
 
 
 def make_background(width: int, height: int) -> Image.Image:
@@ -658,6 +752,70 @@ def draw_best_image(
     return buf.getvalue()
 
 
+def draw_b30_header(img: Image.Image, player: Dict[str, Any], b30_avg: float) -> None:
+    draw = ImageDraw.Draw(img)
+    font_title = get_font(34, "Bold")
+    font_head = get_font(32, "Bold")
+    font_body = get_font(23, "Normal")
+    font_small = get_font(19, "Normal")
+
+    draw_shadowed_panel(draw, (40, 38, 640, 206), 8, PANEL, LINE)
+    name = player.get("UserName") or player.get("name") or "Unknown"
+    level = safe_int(player.get("Level", player.get("level", 0)), 0)
+    draw.text((70, 58), clamp_text(draw, name, font_title, 520), font=font_title, fill=TEXT)
+    draw.text((70, 112), f"Lv.{level}", font=font_body, fill=TEXT_SUB)
+    draw.text((70, 154), f"B30 Rating {b30_avg:.4f}", font=font_head, fill=GREEN)
+
+    draw_shadowed_panel(draw, (680, 38, 1040, 206), 8, PANEL, LINE)
+    draw.text((732, 74), "CHUNITHM B30", font=font_head, fill=CYAN)
+    draw.text((738, 124), "All versions | ChuniRec constants", font=font_body, fill=TEXT_SUB)
+
+    draw_shadowed_panel(draw, (1080, 38, 1560, 206), 8, PANEL, LINE)
+    draw.text((1112, 78), f"TOTAL {b30_avg:.4f}", font=font_head, fill=GREEN)
+    draw.text((1112, 132), "Local scores + manual records", font=font_body, fill=TEXT_SUB)
+    draw.text((1112, 166), "generated by Robinbot", font=font_small, fill=TEXT_SUB)
+
+
+def draw_b30_image(
+    player: Dict[str, Any],
+    b30_items: List[Dict[str, Any]],
+    jacket_images: Dict[str, Image.Image],
+) -> bytes:
+    width = 1600
+    card_w = 284
+    card_h = 124
+    gap_x = 22
+    gap_y = 18
+    cols = 5
+    margin_x = 40
+    section_w = width - margin_x * 2
+    rows = math.ceil(max(len(b30_items), 1) / cols)
+    top = 244
+    section_title_h = 84
+    height = top + section_title_h + rows * (card_h + gap_y) + 70
+
+    img = make_background(width, height)
+    draw = ImageDraw.Draw(img)
+    b30_avg = section_average(b30_items, 30)
+    draw_b30_header(img, player, b30_avg)
+
+    y = top
+    draw_section_title(draw, margin_x + 120, y, section_w - 240, "单榜 BEST 30", PURPLE)
+    y += section_title_h
+    for index, item in enumerate(b30_items[:30], start=1):
+        x = margin_x + ((index - 1) % cols) * (card_w + gap_x)
+        card_y = y + ((index - 1) // cols) * (card_h + gap_y)
+        draw_score_card(img, item, index, x, card_y, jacket_images.get(str(item["jacket_id"])), card_w, card_h)
+
+    footer_font = get_font(19, "Normal")
+    footer = "Data from local score records | ChuniRec constants | generated by Robinbot"
+    fw = text_width(draw, footer, footer_font)
+    draw.text(((width - fw) / 2, height - 44), footer, font=footer_font, fill=TEXT_SUB)
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def parse_version(raw: str) -> str:
     return raw.strip().lower() or SUPPORTED_VERSION
 
@@ -670,14 +828,14 @@ async def _(event: MessageEvent, msg: Message = CommandArg()):
             await best_rating_cmd.finish(f"当前只能生成 {SUPPORTED_VERSION} 的 B30/N20。{version} 属于日服新版本，当前本地曲库与落雪中二数据还不支持。")
         await best_rating_cmd.finish("版本参数暂不支持。可用：/b 或 /b 2026")
     if not config.lxns_token:
-        await best_rating_cmd.finish("未配置 lxns_token，无法从落雪获取 B30/N20。")
+        await best_rating_cmd.finish("未配置落雪开发者密钥，无法从落雪获取 B30/N20。")
 
     qq = str(event.get_user_id())
     await best_rating_cmd.send("收到，正在处理...")
     async with httpx.AsyncClient() as client:
         friend_code, player = await resolve_player(client, qq)
     if not friend_code:
-        await best_rating_cmd.finish("未找到落雪玩家信息，请先使用 /bind 绑定好友码，或确认落雪已绑定当前 QQ。")
+        await best_rating_cmd.finish("未找到落雪玩家信息，请先使用 /bind 绑定好友码，或确认落雪已绑定当前账号。")
 
     raw_b30, raw_n20, err = await fetch_lxns_bests(friend_code)
     if err:
@@ -685,7 +843,7 @@ async def _(event: MessageEvent, msg: Message = CommandArg()):
         await best_rating_cmd.finish("获取落雪 B30/N20 失败，请稍后再试。")
 
     songs, new_versions = load_song_data()
-    chart_meta = build_chart_meta(songs)
+    chart_meta = build_chart_meta(songs, const_source="lx")
     b30_items = [item for item in (normalize_lxns_item(row, chart_meta) for row in raw_b30 if isinstance(row, dict)) if item]
     n20_items = [item for item in (normalize_lxns_item(row, chart_meta) for row in raw_n20 if isinstance(row, dict)) if item]
     b30_items.sort(key=lambda x: (x["rating"], x["score"]), reverse=True)
@@ -704,3 +862,37 @@ async def _(event: MessageEvent, msg: Message = CommandArg()):
         logger.exception(f"生成 B30/N20 图片失败: {e}")
         await best_rating_cmd.finish("生成 B30/N20 图片失败。")
     await best_rating_cmd.finish(MessageSegment.image(img_bytes))
+
+
+@best_rating_30_cmd.handle()
+async def _(event: MessageEvent):
+    qq = str(event.get_user_id())
+    await best_rating_30_cmd.send("收到，正在处理...")
+    migrate_legacy_manual_scores(qq)
+
+    songs, _new_versions = load_song_data()
+    chart_meta = build_chart_meta(songs, const_source="chunirec")
+    local_scores = load_b30_scores(qq)
+    if not local_scores:
+        await best_rating_30_cmd.finish("本地没有可用成绩。请先使用 /lxupdate、/chuupdate 或 /传分。")
+
+    items = [
+        item
+        for item in (normalize_local_item(row, chart_meta, const_source="chunirec") for row in local_scores.values())
+        if item and safe_float(item.get("level_value"), 0.0) > 0 and safe_int(item.get("score"), 0) > 0
+    ]
+    items.sort(key=lambda x: (x["rating"], x["score"]), reverse=True)
+    b30_items = items[:30]
+    if not b30_items:
+        await best_rating_30_cmd.finish("本地成绩中没有可用于计算 B30 的谱面。")
+
+    player: Dict[str, Any] = {"UserName": "Local Player", "Level": 0}
+    player.update(load_player_info(qq))
+
+    try:
+        jacket_images = await prepare_jackets(b30_items)
+        img_bytes = draw_b30_image(player, b30_items, jacket_images)
+    except Exception as e:
+        logger.exception(f"生成 B30 图片失败: {e}")
+        await best_rating_30_cmd.finish("生成 B30 图片失败。")
+    await best_rating_30_cmd.finish(MessageSegment.image(img_bytes))

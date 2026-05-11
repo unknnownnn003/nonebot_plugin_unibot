@@ -115,8 +115,12 @@ def get_target_charts(query_text: str):
 
         for diff in valid_diffs:
             d = diff.get("difficulty")
-            c = diff.get("level_value", 0.0)
-            l = diff.get("level", "")
+            c = diff.get("lx_level_value", diff.get("level_value", 0.0))
+            if c is None:
+                c = diff.get("level_value", 0.0)
+            l = diff.get("lx_level", diff.get("level", ""))
+            if l is None:
+                l = diff.get("level", "")
             
             diff_passes = True
             for term in terms:
@@ -167,6 +171,8 @@ def parse_user_data(qq: str):
         
     user_best = {}
     for row in data:
+        if isinstance(row, dict) and row.get("source") == "manual":
+            continue
         s_id = str(row.get("id", ""))
         l_idx = str(row.get("level_index", ""))
         
@@ -567,7 +573,7 @@ async def _(event: Event, msg: Message = CommandArg()):
         
     target_charts = get_target_charts(query_text)
     if not target_charts:
-        await chulist_cmd.finish(f"未找到符合条件【{query_text}】的谱面！")
+        await chulist_cmd.finish("未找到符合条件的谱面！")
         return
         
     await chulist_cmd.send("收到，正在处理...")

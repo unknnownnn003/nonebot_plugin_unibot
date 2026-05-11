@@ -4,17 +4,19 @@ import csv
 import io
 import gzip
 import asyncio
-from datetime import timedelta
-from typing import Dict, List, Any
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Any, Optional, Tuple
 
 import httpx
 from nonebot import get_plugin_config, on_command
-from nonebot.adapters.onebot.v11 import MessageEvent, Bot
+from nonebot.adapters.onebot.v11 import MessageEvent, Bot, Message
 from nonebot.log import logger
 from nonebot.exception import FinishedException
+from nonebot.params import CommandArg
 from nonebot.typing import T_State
 
 from .config import Config
+from .song import find_song_matches, pick_song_match
 from .user_bind import get_bind_info
 
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,6 +33,7 @@ config = get_plugin_config(Config)
 
 update_score = on_command("chuupdate", priority=5, block=True)
 lxupdate_score = on_command("lxupdate", priority=5, block=True)
+manual_score = on_command("传分", aliases={"cf", "手动传分", "addscore", "mscore"}, priority=5, block=True)
 
 def _as_int(value: Any, default: int = -1) -> int:
     try:
@@ -136,6 +139,10 @@ def _load_song_meta() -> Dict[str, Dict[str, Any]]:
             diff_map[str(di)] = {
                 "level": diff.get("level"),
                 "level_value": diff.get("level_value"),
+                "lx_level": diff.get("lx_level"),
+                "lx_level_value": diff.get("lx_level_value"),
+                "chunirec_level": diff.get("chunirec_level"),
+                "chunirec_level_value": diff.get("chunirec_level_value"),
             }
 
         song_meta[str(song_id)] = {
@@ -162,6 +169,10 @@ def _inject_level_value(items: List[Dict[str, Any]], song_meta: Dict[str, Dict[s
         elif "level_value" not in new_item:
             new_item["level_value"] = None
 
+        for key in ["lx_level_value", "chunirec_level_value", "lx_level", "chunirec_level"]:
+            if diff_info.get(key) is not None:
+                new_item[key] = diff_info.get(key)
+
         if (not new_item.get("level")) and diff_info.get("level") is not None:
             new_item["level"] = diff_info.get("level")
 
@@ -170,6 +181,188 @@ def _inject_level_value(items: List[Dict[str, Any]], song_meta: Dict[str, Dict[s
 
         result.append(new_item)
     return result
+
+
+DIFF_ALIASES = {
+    "0": 0,
+    "bas": 0,
+    "basic": 0,
+    "绿": 0,
+    "绿色": 0,
+    "1": 1,
+    "adv": 1,
+    "advanced": 1,
+    "黄": 1,
+    "黄色": 1,
+    "2": 2,
+    "exp": 2,
+    "expert": 2,
+    "红": 2,
+    "红色": 2,
+    "3": 3,
+    "mas": 3,
+    "master": 3,
+    "紫": 3,
+    "紫色": 3,
+    "4": 4,
+    "ult": 4,
+    "ultima": 4,
+    "黑": 4,
+    "黑色": 4,
+    "5": 5,
+    "we": 5,
+    "worldsend": 5,
+    "world'send": 5,
+    "world's end": 5,
+    "worldsend": 5,
+    "宴": 5,
+}
+DIFF_NAMES = {
+    0: "BASIC",
+    1: "ADVANCED",
+    2: "EXPERT",
+    3: "MASTER",
+    4: "ULTIMA",
+    5: "WORLD'S END",
+}
+
+
+def _parse_score_value(raw: str) -> Optional[int]:
+    text = str(raw or "").replace(",", "").strip()
+    if not text.isdigit():
+        return None
+    score = int(text)
+    if 0 <= score <= 1010000:
+        return score
+    return None
+
+
+def _parse_diff_value(raw: str) -> Optional[int]:
+    text = str(raw or "").strip().lower().replace(" ", "")
+    return DIFF_ALIASES.get(text)
+
+
+def _parse_manual_score_args(raw: str) -> Tuple[Optional[str], Optional[int], Optional[int], str]:
+    parts = raw.strip().split()
+    if len(parts) < 2:
+        return None, None, None, ""
+
+    score_pos = -1
+    score = None
+    for index in range(len(parts) - 1, -1, -1):
+        score = _parse_score_value(parts[index])
+        if score is not None:
+            score_pos = index
+            break
+    if score_pos < 1:
+        return None, None, None, ""
+
+    diff = 3
+    query_end = score_pos
+    parsed_diff = _parse_diff_value(parts[score_pos - 1])
+    if parsed_diff is not None:
+        diff = parsed_diff
+        query_end = score_pos - 1
+
+    query = " ".join(parts[:query_end]).strip()
+    combo = " ".join(parts[score_pos + 1 :]).strip()
+    return query, diff, score, combo
+
+
+def _format_manual_candidates(matches: List[Dict[str, Any]]) -> str:
+    lines = []
+    for item in matches[:8]:
+        song = item.get("song", {})
+        lines.append(f"{song.get('id')} - {song.get('title')}（{item.get('source')}: {item.get('matched')}）")
+    return "\n".join(lines)
+
+
+def _manual_score_path(user_id: str) -> str:
+    return os.path.join(SCORE_DIR, f"{user_id}_manual.json")
+
+
+def _replace_manual_score(items: List[Dict[str, Any]], row: Dict[str, Any]) -> List[Dict[str, Any]]:
+    key = f"{row.get('id')}_{row.get('level_index')}"
+    result = [
+        item
+        for item in items
+        if isinstance(item, dict) and f"{item.get('id')}_{item.get('level_index')}" != key
+    ]
+    result.append(row)
+    return result
+
+
+@manual_score.handle()
+async def _(event: MessageEvent, args: Message = CommandArg()):
+    raw = args.extract_plain_text().strip()
+    if not raw:
+        await manual_score.finish(
+            "格式：/cf <歌名或ID> [难度] <分数> [fc/aj]\n"
+            "例：/cf 月葬 1009000\n"
+            "不写难度默认 MAS；难度可用 bas/adv/exp/mas/ult/we。"
+        )
+
+    query, level_index, score, combo = _parse_manual_score_args(raw)
+    if not query or level_index is None or score is None:
+        await manual_score.finish("格式错误。请使用：/cf <歌名或ID> [难度] <分数> [fc/aj]")
+
+    matches = find_song_matches(query, limit=8)
+    local_song, ambiguous_matches = pick_song_match(matches)
+    if ambiguous_matches:
+        await manual_score.finish("匹配到多首曲目，请使用更精确的名称或 ID：\n" + _format_manual_candidates(ambiguous_matches))
+    if not local_song:
+        await manual_score.finish("未找到匹配的曲目。")
+
+    difficulties = local_song.get("difficulties", []) if isinstance(local_song, dict) else []
+    diff_info = next(
+        (diff for diff in difficulties if isinstance(diff, dict) and _as_int(diff.get("difficulty"), -1) == level_index),
+        None,
+    )
+    if not diff_info:
+        await manual_score.finish("匹配到曲目，但该曲目没有对应难度。")
+
+    song_id = str(local_song.get("id"))
+    now = datetime.now(timezone.utc).isoformat()
+    row: Dict[str, Any] = {
+        "id": song_id,
+        "level_index": level_index,
+        "score": score,
+        "song_name": local_song.get("title") or "",
+        "level": diff_info.get("level"),
+        "level_value": diff_info.get("level_value"),
+        "lx_level_value": diff_info.get("lx_level_value"),
+        "chunirec_level_value": diff_info.get("chunirec_level_value"),
+        "rank": "",
+        "clear": "",
+        "full_combo": normalize_manual_combo(combo),
+        "source": "manual",
+        "manual": True,
+        "updated_at": now,
+    }
+
+    target_json_path = _manual_score_path(str(event.get_user_id()))
+    song_meta = _load_song_meta()
+    old_items = _read_score_json(target_json_path)
+    merged = _replace_manual_score(old_items, row)
+    new_items = _inject_level_value(merged, song_meta)
+    with open(target_json_path, "w", encoding="utf-8") as f:
+        json.dump(new_items, f, ensure_ascii=False, indent=4)
+
+    await manual_score.finish(
+        f"手动成绩已保存：{local_song.get('title')} {DIFF_NAMES.get(level_index, level_index)} {score}"
+    )
+
+
+def normalize_manual_combo(raw: str) -> str:
+    text = str(raw or "").strip().lower().replace(" ", "")
+    return {
+        "fc": "fullcombo",
+        "fullcombo": "fullcombo",
+        "aj": "alljustice",
+        "alljustice": "alljustice",
+        "ajc": "alljusticecritical",
+        "alljusticecritical": "alljusticecritical",
+    }.get(text, "")
 
 def _read_score_json(path: str) -> List[Dict[str, Any]]:
     if not os.path.exists(path):
@@ -528,7 +721,7 @@ async def _(event: MessageEvent):
     user_qq = str(event.get_user_id())
     token = (config.lxns_token or "").strip()
     if not token:
-        await lxupdate_score.finish("未配置落雪开发者密钥，请在 .env 中配置 lxns_token 后再使用 /lxupdate。")
+        await lxupdate_score.finish("未配置落雪开发者密钥，无法使用 /lxupdate。")
 
     await lxupdate_score.send("收到，正在处理...")
 
@@ -537,18 +730,18 @@ async def _(event: MessageEvent):
 
     try:
         async with httpx.AsyncClient() as client:
-            friend_code, player_data, source = await _resolve_friend_code(client, user_qq, token)
+            friend_code, player_data, _source = await _resolve_friend_code(client, user_qq, token)
             if not friend_code:
                 await lxupdate_score.finish("未找到落雪好友码。请先在落雪绑定 QQ，或使用 /bind 好友码 后重试。")
 
             score_items, status, song_count, failed_required_count, unavailable_required_count, failed_optional_count = await _fetch_lxns_all_scores(client, friend_code, token)
             if status == 401:
-                await lxupdate_score.finish("落雪开发者密钥无效或权限不足，请检查 lxns_token。")
+                await lxupdate_score.finish("落雪开发者密钥无效或权限不足，请检查配置。")
             if status == 404:
                 await lxupdate_score.finish("落雪没有找到该玩家成绩，请确认好友码是否正确或数据是否已上传到落雪。")
             if status != 200:
                 logger.error(f"lxns score api failed: status={status}")
-                await lxupdate_score.finish(f"落雪成绩接口请求失败，HTTP {status}。")
+                await lxupdate_score.finish("落雪成绩接口请求失败，请稍后重试。")
 
             parsed_items, missing_score = _normalize_lxns_score_items(score_items)
             if not parsed_items:
@@ -571,7 +764,6 @@ async def _(event: MessageEvent):
                 with open(info_path, "w", encoding="utf-8") as f:
                     json.dump(_normalize_lxns_player_info(player_data), f, ensure_ascii=False, indent=4)
 
-            source_text = "QQ直查" if source == "qq" else "本地绑定好友码"
             failed_parts = []
             if unavailable_required_count:
                 failed_parts.append(f"落雪未提供分数的 MASTER/ULTIMA 谱面数: {unavailable_required_count}")
@@ -579,7 +771,7 @@ async def _(event: MessageEvent):
                 failed_parts.append(f"低优先级谱面失败数: {failed_optional_count}")
             failed_text = ("\n" + "\n".join(failed_parts)) if failed_parts else ""
             await lxupdate_score.finish(
-                f"落雪同步成功\n来源: {source_text}\n好友码: {friend_code}\n本次查询曲目数: {song_count}\n本次获取谱面数: {len(parsed_items)}\n当前总谱面数: {len(new_items)}{failed_text}"
+                f"落雪同步成功\n本次查询曲目数: {song_count}\n本次获取谱面数: {len(parsed_items)}\n当前总谱面数: {len(new_items)}{failed_text}"
             )
     except FinishedException:
         raise
@@ -678,7 +870,8 @@ async def get_uploaded_file(bot: Bot, event: MessageEvent):
                         else:
                             await update_score.finish("下载文件失败，请稍后重试！")
             except ValueError as ve:
-                await update_score.finish(f"报错: {ve}")
+                logger.warning(f"上传成绩文件被拒绝: {ve}")
+                await update_score.finish("文件不符合上传要求，更新操作已取消。")
             except Exception as e:
                 logger.error(f"下载文件发生错误: {e}")
                 await update_score.finish("下载文件时发生网络错误。")

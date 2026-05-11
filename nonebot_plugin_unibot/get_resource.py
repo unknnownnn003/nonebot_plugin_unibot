@@ -18,12 +18,13 @@ PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(PLUGIN_DIR, "data")
 JACKET_DIR = os.path.join(DATA_DIR, "jacket")
 BASE_URL = "https://assets.lxns.net/chunithm/jacket/{song_id}.png"
+LXNS_CONCURRENCY = 15
 
 update_jacket = on_command("更新曲绘", permission=SUPERUSER, priority=5, block=True)
 
 
 def looks_like_png(content: bytes) -> bool:
-    return len(content) > 8 and content.startswith(b"\x89PNG\r\n\x1a\n")
+    return len(content) >= 8 and content.startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def is_existing_jacket_valid(path: str) -> bool:
@@ -34,6 +35,10 @@ def is_existing_jacket_valid(path: str) -> bool:
             return looks_like_png(f.read(8))
     except Exception:
         return False
+
+
+def should_use_lxns_jacket(song_id: str) -> bool:
+    return str(song_id).isdigit()
 
 
 async def write_bytes_atomic(path: str, content: bytes):
@@ -66,7 +71,8 @@ async def _(msg: Message = CommandArg()):
         await update_jacket.send("读取曲目列表失败，请先获取或更新曲目列表！")
         return
 
-    target_ids = set()
+    targets = {}
+    skipped_chunirec_count = 0
     for song in songs:
         song_id = song.get("id")
         for diff in song.get("difficulties", []) or []:
@@ -75,41 +81,51 @@ async def _(msg: Message = CommandArg()):
                 break
 
         if song_id is not None:
-            target_ids.add(song_id)
+            song_id_str = str(song_id)
+            if not should_use_lxns_jacket(song_id_str):
+                skipped_chunirec_count += 1
+                continue
+            targets[song_id_str] = song
 
-    total_count = len(target_ids)
+    total_count = len(targets)
     await update_jacket.send("收到，正在处理...")
 
-    semaphore = asyncio.Semaphore(15)
+    lxns_semaphore = asyncio.Semaphore(LXNS_CONCURRENCY)
     success_count = 0
     skip_count = 0
     fail_count = 0
 
-    async def fetch_and_save(client: httpx.AsyncClient, sid: int):
+    async def fetch_and_save(client: httpx.AsyncClient, sid: str, song: dict):
         nonlocal success_count, skip_count, fail_count
         file_path = os.path.join(JACKET_DIR, f"{sid}.png")
         if is_existing_jacket_valid(file_path):
             skip_count += 1
             return
 
-        url = BASE_URL.format(song_id=sid)
-        async with semaphore:
-            try:
-                response = await client.get(url, timeout=10.0)
+        lxns_url = BASE_URL.format(song_id=sid)
+        try:
+            content = None
+            async with lxns_semaphore:
+                response = await client.get(lxns_url, timeout=10.0)
                 if response.status_code == 200 and looks_like_png(response.content):
-                    await write_bytes_atomic(file_path, response.content)
-                    success_count += 1
+                    content = response.content
                 else:
-                    fail_count += 1
-                    logger.warning(f"下载曲绘失败 (状态码 {response.status_code}, 大小 {len(response.content)}): {url}")
-            except Exception as e:
+                    logger.warning(f"下载曲绘失败 (状态码 {response.status_code}, 大小 {len(response.content)}): {lxns_url}")
+
+            if content and looks_like_png(content):
+                await write_bytes_atomic(file_path, content)
+                success_count += 1
+            else:
                 fail_count += 1
-                logger.error(f"下载曲绘出错: {url} - {str(e)}")
+        except Exception as e:
+            fail_count += 1
+            logger.warning(f"下载曲绘出错: {lxns_url} - {type(e).__name__}: {e!r}")
 
     async with httpx.AsyncClient() as client:
-        tasks = [fetch_and_save(client, sid) for sid in target_ids]
+        tasks = [fetch_and_save(client, sid, song) for sid, song in targets.items()]
         await asyncio.gather(*tasks)
 
     await update_jacket.send(
-        f"曲绘更新任务完成！\n成功下载：{success_count}\n跳过已有：{skip_count}\n下载失败：{fail_count}"
+        f"曲绘更新任务完成！\n成功下载：{success_count}\n跳过已有：{skip_count}\n"
+        f"跳过日服曲目：{skipped_chunirec_count}\n下载失败：{fail_count}"
     )

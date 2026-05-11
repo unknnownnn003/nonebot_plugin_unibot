@@ -36,11 +36,6 @@ try:
 except ImportError:
     jaconv = None
 
-try:
-    from pypinyin import lazy_pinyin
-except ImportError:
-    lazy_pinyin = None
-
 from nonebot import on_command
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
@@ -77,15 +72,6 @@ def _string_variants(s: str) -> Set[str]:
             variants.add(jaconv.kana2alphabet(kana))
         except Exception:
             pass
-    if lazy_pinyin:
-        for value in list(variants):
-            try:
-                pinyin_parts = lazy_pinyin(value, errors="ignore")
-                if pinyin_parts:
-                    variants.add("".join(pinyin_parts))
-                    variants.add(" ".join(pinyin_parts))
-            except Exception:
-                pass
     normalized = {normalize_str(v) for v in variants}
     return {v for v in normalized if v}
 
@@ -162,7 +148,7 @@ def find_song_matches(query: str, limit: int = 8) -> List[Dict[str, Any]]:
                 best_source = source
                 best_value = value
 
-        if best_score >= 0.58:
+        if best_score >= 0.64:
             matches[song_id] = {
                 "song": song,
                 "score": best_score,
@@ -274,6 +260,10 @@ async def fetch_song_detail(song_id: int) -> Optional[Dict[str, Any]]:
             logger.error(f"Failed to fetch song detail for ID {song_id}: {e}")
     return None
 
+def should_use_lxns_jacket(song_id: Any) -> bool:
+    return str(song_id).isdigit()
+
+
 async def download_jacket(song_id: int) -> Optional[Image.Image]:
     jacket_path = os.path.join(JACKET_DIR, f"{song_id}.png")
     if os.path.exists(jacket_path):
@@ -284,21 +274,22 @@ async def download_jacket(song_id: int) -> Optional[Image.Image]:
             
     url = f"https://assets.lxns.net/chunithm/jacket/{song_id}.png"
     async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(url, timeout=10.0)
-            if resp.status_code == 200:
-                if not resp.content.startswith(b"\x89PNG\r\n\x1a\n"):
-                    logger.warning(f"Invalid jacket content for ID {song_id}: status=200, size={len(resp.content)}")
-                    raise ValueError("invalid jacket content")
-                if not os.path.exists(JACKET_DIR):
-                    os.makedirs(JACKET_DIR)
-                temp_path = jacket_path + ".tmp"
-                with open(temp_path, "wb") as f:
-                    f.write(resp.content)
-                os.replace(temp_path, jacket_path)
-                return Image.open(BytesIO(resp.content)).convert("RGBA")
-        except Exception as e:
-            logger.error(f"Failed to download jacket for ID {song_id}: {e}")
+        if should_use_lxns_jacket(song_id):
+            try:
+                resp = await client.get(url, timeout=10.0)
+                if resp.status_code == 200:
+                    if not resp.content.startswith(b"\x89PNG\r\n\x1a\n"):
+                        logger.warning(f"Invalid jacket content for ID {song_id}: status=200, size={len(resp.content)}")
+                        raise ValueError("invalid jacket content")
+                    if not os.path.exists(JACKET_DIR):
+                        os.makedirs(JACKET_DIR)
+                    temp_path = jacket_path + ".tmp"
+                    with open(temp_path, "wb") as f:
+                        f.write(resp.content)
+                    os.replace(temp_path, jacket_path)
+                    return Image.open(BytesIO(resp.content)).convert("RGBA")
+            except Exception as e:
+                logger.error(f"Failed to download jacket for ID {song_id}: {e}")
             
     # 如果下载失败，返回一张纯色占位图
     img = Image.new("RGBA", (200, 200), (100, 100, 100, 255))
@@ -516,8 +507,9 @@ def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jack
     return buf.getvalue()
 
 async def download_match_jacket(match: Dict[str, Any]) -> Image.Image:
+    song = match.get("song", {})
     try:
-        song_id = int(match["song"].get("id", 0))
+        song_id = song.get("id", 0) if song.get("data_source") == "chunirec" else int(song.get("id", 0))
     except (TypeError, ValueError):
         song_id = 0
     return await download_jacket(song_id)
@@ -540,7 +532,7 @@ async def _(event: MessageEvent):
         return
 
     if not local_song:
-        await song_query.finish(f"没有找到与 '{match_str}' 匹配的曲目。")
+        await song_query.finish("没有找到匹配的曲目。")
         return
         
     song_id = local_song.get("id")
@@ -550,8 +542,11 @@ async def _(event: MessageEvent):
         
     detail = await fetch_song_detail(song_id)
     if not detail:
-        await song_query.finish(f"找到了曲目 {local_song.get('title')} (ID: {song_id})，但在获取详情时失败，可能网络连接有误或接口异常。")
-        return
+        if local_song.get("data_source") == "chunirec":
+            detail = local_song
+        else:
+            await song_query.finish("已匹配到曲目，但在获取详情时失败，可能网络连接有误或接口异常。")
+            return
         
     jacket_img = await download_jacket(song_id)
     image_bytes = render_song_image(local_song, detail, jacket_img)
@@ -570,11 +565,7 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
         await add_alias_cmd.finish("格式错误。请使用: /添加别名 <song_id> <别名>")
     
     song_id_str, alias_name = msg_args[0], msg_args[1].strip()
-    
-    if not song_id_str.isdigit():
-        await add_alias_cmd.finish("song_id必须为数字。")
-         
-    song_id = int(song_id_str)
+    song_id = song_id_str
     
     try:
         with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
@@ -585,7 +576,7 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
         
     found = False
     for song in data.get("songs", []):
-         if song.get("id") == song_id:
+         if str(song.get("id")) == song_id:
               found = True
               aliases = song.setdefault("aliases", [])
               if alias_name not in aliases:
@@ -599,7 +590,7 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
     with open(SONGLIST_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
         
-    await add_alias_cmd.finish(f"已成功为 ID {song_id} 添加别名：{alias_name}。")
+    await add_alias_cmd.finish(f"已成功为 ID {song_id} 添加别名。")
 
 @del_alias_cmd.handle()
 async def _(event: MessageEvent, args: Message = CommandArg()):
@@ -608,11 +599,7 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
         await del_alias_cmd.finish("格式错误。请使用: /删除别名 <song_id> <别名>")
     
     song_id_str, alias_name = msg_args[0], msg_args[1].strip()
-    
-    if not song_id_str.isdigit():
-        await del_alias_cmd.finish("song_id必须为数字。")
-         
-    song_id = int(song_id_str)
+    song_id = song_id_str
     
     try:
         with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
@@ -624,7 +611,7 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
     found = False
     removed = False
     for song in data.get("songs", []):
-         if song.get("id") == song_id:
+         if str(song.get("id")) == song_id:
               found = True
               aliases = song.get("aliases", [])
               if alias_name in aliases:
@@ -637,13 +624,13 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
         return
          
     if not removed:
-        await del_alias_cmd.finish(f"ID {song_id} 下不存在别名：{alias_name}。")
+        await del_alias_cmd.finish(f"ID {song_id} 下不存在该别名。")
         return
          
     with open(SONGLIST_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
         
-    await del_alias_cmd.finish(f"成功为 ID {song_id} 删除别名：{alias_name}")
+    await del_alias_cmd.finish(f"成功为 ID {song_id} 删除别名。")
 
 @view_alias_cmd.handle()
 async def _(event: MessageEvent, args: Message = CommandArg()):
@@ -661,7 +648,7 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
         await view_alias_cmd.finish("匹配到多首曲目，请使用更精确的名称或 ID：\n" + "\n".join(lines))
 
     if not local_song:
-        await view_alias_cmd.finish(f"未找到与 '{query}' 匹配的曲目。")
+        await view_alias_cmd.finish("未找到匹配的曲目。")
         
     aliases = local_song.get("aliases", [])
     title = local_song.get("title", "")
