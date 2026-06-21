@@ -723,7 +723,7 @@ async def _(event: MessageEvent):
     if not token:
         await lxupdate_score.finish("未配置落雪开发者密钥，无法使用 /lxupdate。")
 
-    await lxupdate_score.send("收到，正在处理...")
+    await lxupdate_score.send("收到，正在从落雪同步全部成绩，曲目较多时可能耗时较长，请耐心等待...")
 
     target_json_path = os.path.join(SCORE_DIR, f"{user_qq}.json")
     info_path = os.path.join(SCORE_DIR, f"{user_qq}_info.json")

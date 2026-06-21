@@ -9,19 +9,19 @@
 
 | 指令 | 权限 | 描述 |
 | --- | --- | --- |
-| `/bind <好友码>` | USER | 绑定你的落雪查分器好友码，以便拉取云端数据。若 QQ 已在 lxns 侧绑定，通常可跳过该步骤。 |
-| `/chuupdate` | USER | 上传 lxns 导出的分数 CSV 或 rin 导出的 JSON，并更新本地成绩归档。 |
-| `/lxupdate` | USER | 从落雪接口同步已绑定账号的国服成绩到本地。 |
+| `/bind <好友码>` | USER | 绑定你的国服查分器好友码，以便拉取云端数据。若 QQ 已在国服侧绑定，通常可跳过该步骤。 |
+| `/chuupdate` | USER | 上传国服导出的分数 CSV 或 rin 导出的 JSON，并更新本地成绩归档。 |
+| `/lxupdate` | USER | 从国服接口同步已绑定账号的国服成绩到本地。 |
 | `/cf <歌名或ID> [难度] <分数> [fc/aj]` | USER | 手动传分，别名：`/传分`、`/手动传分`、`/addscore`、`/mscore`。难度为空时默认 `MAS`，重复传分不会阻止低分写入，生成 `/b30` 时会和国服成绩取最高分。 |
-| `/b` | USER | 生成落雪 B30+N20 查分图：只使用国服成绩和落雪定数，忽略用户手动传分。推分建议也只从落雪曲库中选择。 |
-| `/b30` | USER | 生成本地 B30 查分图：国服成绩与手动传分取最高分，使用 chunirec 定数，不再拆分 B30+N20。 |
-| `/个人信息` | USER | 查询并生成玩家的落雪 (Lxns) 游玩个人数据图片（别名：`/分数`、`/chuinfo`）。 |
-| `/chulist <查询条件> [--nocat]` | USER | 按难度、定数、版本或特定分类生成对应的 Overpower 进度及评价统计图，支持多个条件叠加取交集。该命令只使用落雪曲库和国服成绩。 |
+| `/b` | USER | 生成国服 B30+N20 查分图：只使用国服成绩和国服定数，忽略用户手动传分。推分建议也只从国服曲库中选择。 |
+| `/b30` | USER | 生成本地 B30 查分图：国服成绩与手动传分取最高分，使用日服定数，不再拆分 B30+N20。 |
+| `/个人信息` | USER | 查询并生成玩家的国服游玩个人数据图片（别名：`/分数`、`/chuinfo`）。 |
+| `/chulist <查询条件> [--nocat]` | USER | 按难度、定数、版本或特定分类生成对应的 Overpower 进度及评价统计图，支持多个条件叠加取交集。该命令只使用国服曲库和国服成绩。 |
 | `[曲名或ID]是什么歌` | USER | 根据曲名、别名、罗马音、简繁体或变体字模糊查询并生成歌曲详情图（无前缀触发，例如：`1066是什么歌`）。 |
 | `/添加别名 <ID> <别名>` | USER | 为指定ID曲目添加本地检索别名 |
 | `/删除别名 <ID> <别名>` | SUPERUSER | 删除指定曲目的本地别名 |
 | `/查看别名 <模糊搜索/名字/ID/别名>` | USER | 获取目标歌曲现有的本地及官方别名 |
-| `推什么 [查询条件]` | USER | 按指定条件随机推荐可推分曲目，推荐范围限定在落雪曲库。 |
+| `推什么 [查询条件]` | USER | 按指定条件随机推荐可推分曲目，推荐范围限定在国服曲库。 |
 | `/chuhelp` | USER | 查看本插件内的基本使用指令帮助菜单 |
 | `/查剧情 <角色名/关键词>` | USER | 搜索并阅读指定角色的剧情 |
 | `/随机剧情` | USER | 随机抽选一段角色剧情阅读 |
@@ -31,17 +31,19 @@
 
 | 指令 | 权限 | 描述 |
 | --- | --- | --- |
-| `/更新songlist` | SUPERUSER | 从落雪更新本地 `songlist.json` 曲库数据。更新时会保留用户本地别名，并尽量保留已有 chunirec 定数。 |
-| `/更新chunirec` | SUPERUSER | 从 chunirec 同步日服新曲，并转换为落雪 songlist 兼容格式；已存在的落雪曲目优先保留。别名：`/更新chunirecsonglist`、`/更新日服songlist`。 |
-| `/更新曲绘` | SUPERUSER | 获取并更新落雪曲库中的数字 ID 曲绘到 `data/jacket/` 目录；chunirec 非数字 ID 曲目不会再尝试下载曲绘。 |
+| `/更新songlist` | SUPERUSER | 从国服更新本地 `songlist.json` 曲库数据。更新时会保留用户本地别名，并尽量保留已有日服定数。 |
+| `/更新chunirec` | SUPERUSER | 从日服同步新曲，并转换为国服 songlist 兼容格式；已存在的国服曲目优先保留。配置 `naominet_token` 后会尝试补全与未来国服一致的数字 ID。别名：`/更新chunirecsonglist`、`/更新日服songlist`。 |
+| `/上传chunirec` | SUPERUSER | 当服务器无法直接访问 chunirec API 时，上传本地拉取的日服曲库 JSON 数据文件进行离线同步。详见下方「离线同步」说明。 |
+| `/更新曲绘 [full]` | SUPERUSER | 从落雪获取并更新曲绘到 `data/jacket/` 目录；默认限速增量补缺并缓存缺图状态，传 `full`/`force`/`完整`/`重下` 时完整重下。落雪没有的曲绘保持为空，不再使用 chunirec/RinNET 回退。 |
 | `/更新收藏品` | SUPERUSER | 同步收藏品资源。 |
 | `/更新剧情` | SUPERUSER | 同步剧情索引与文本资源。 |
 
 ## 数据源说明
 
-- 落雪曲库仍是国服功能的优先数据源。`/更新songlist` 会保留本地别名，并继续兼容已有的 chunirec 补充字段。
-- chunirec 曲库用于补充日服新曲和谱面定数。同步后的歌曲会写入落雪 songlist 兼容结构，谱面中会同时保留 `lx_level_value` 与 `chunirec_level_value`，以便 `/b` 与 `/b30` 分别使用不同定数来源。
-- 手动传分与落雪成绩分表存储。`/b30` 会读取两边成绩并按同一谱面取最高分，`/b`、`/chulist` 仍只按国服/落雪数据口径生成。
+- 国服曲库仍是国服功能的优先数据源。`/更新songlist` 会保留本地别名，并继续兼容已有的日服补充字段。
+- 日服曲库用于补充日服新曲和谱面定数。同步后的歌曲会写入国服 songlist 兼容结构，谱面中会同时保留 `lx_level_value` 与 `chunirec_level_value`，以便 `/b` 与 `/b30` 分别使用不同定数来源。
+- naominet 只用于补充日服新曲的未来国服数字 ID。naominet 歌曲接口需要登录令牌；未配置或鉴权失败时，日服同步仍会继续，但无法自动补数字 ID。曲绘统一从落雪获取，落雪没有则留空。
+- 手动传分与国服成绩分表存储。`/b30` 会读取两边成绩并按同一谱面取最高分，`/b`、`/chulist` 仍只按国服数据口径生成。
 
 ## 配置
 
@@ -51,3 +53,29 @@
 | --- | --- |
 | `lxns_token` | 调用落雪接口，同步玩家成绩、玩家信息和 songlist。 |
 | `chunirec_token` | 调用 chunirec `music/showall` 接口，同步日服曲库补充数据。 |
+| `naominet_token` | 可选。调用 naominet 接口读取歌曲数字 ID，用于日服新曲 ID 补全；可填写登录 token 或完整 `Bearer ...`。 |
+| `naominet_session` | 可选。naominet 的 `SESSION` cookie 值。若接口需要浏览器登录态，和 `naominet_token` 一起配置。 |
+
+## 离线同步（服务器无法访问 chunirec 时）
+
+当 NoneBot 服务器无法直接访问 `api.chunirec.net` 时，可通过本地拉取 + 上传的方式完成日服曲库同步：
+
+1. **在本地 PC 上运行拉取脚本**：
+   ```bash
+   cd tools
+   python fetch_chunirec_data.py
+   ```
+   按提示输入 chunirec Token（和可选的 naominet Token），脚本会生成一个 `chunirec_data_YYYYMMDD_HHMMSS.json` 文件。脚本不再下载 chunirec 曲绘。
+
+2. **上传到 bot**：将生成的 JSON 文件通过 QQ 发送给 bot，同时使用命令：
+   ```
+   /上传chunirec [附带 JSON 文件]
+   ```
+   Bot 会解析文件并调用与 `/更新chunirec` 相同的合并逻辑完成同步。
+
+3. **设置环境变量（可选）**：脚本也支持通过环境变量传入 Token，方便自动化：
+   ```bash
+   set CHUNIREC_TOKEN=your_token_here
+   set NAOMINET_TOKEN=your_naominet_token
+   python fetch_chunirec_data.py
+   ```

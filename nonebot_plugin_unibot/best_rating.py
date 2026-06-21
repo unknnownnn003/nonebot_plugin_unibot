@@ -130,7 +130,13 @@ def build_chart_meta(songs: List[Dict[str, Any]], const_source: str = "default")
     for song in songs:
         if not isinstance(song, dict):
             continue
-        song_id = str(song.get("id", ""))
+        song_id = str(song.get("jacket_id") or song.get("rinnet_id") or song.get("id") or "")
+        chart_id = str(song.get("id", ""))
+        alternate_ids = {
+            str(value)
+            for value in (chart_id, song.get("chunirec_id"), song.get("rinnet_id"), song.get("jacket_id"))
+            if value not in (None, "")
+        }
         title = song.get("title") or song.get("song_name") or ""
         version = safe_int(song.get("version"), 0)
         for diff in song.get("difficulties", []) or []:
@@ -148,8 +154,8 @@ def build_chart_meta(songs: List[Dict[str, Any]], const_source: str = "default")
             elif const_source == "chunirec":
                 level_value = diff.get("chunirec_level_value", level_value)
                 level = diff.get("chunirec_level", level)
-            meta[(song_id, level_index)] = {
-                "id": song_id,
+            chart = {
+                "id": chart_id,
                 "jacket_id": jacket_id,
                 "song_name": title,
                 "level": level,
@@ -157,6 +163,8 @@ def build_chart_meta(songs: List[Dict[str, Any]], const_source: str = "default")
                 "level_index": level_index,
                 "version": version,
             }
+            for lookup_id in alternate_ids:
+                meta[(lookup_id, level_index)] = dict(chart)
     return meta
 
 

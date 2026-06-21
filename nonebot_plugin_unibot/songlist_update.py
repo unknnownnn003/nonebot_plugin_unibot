@@ -1,12 +1,16 @@
 import json
+import os
 import httpx
 from pathlib import Path
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 from nonebot import get_plugin_config, on_command
+from nonebot.adapters.onebot.v11 import MessageEvent, Bot
 from nonebot.permission import SUPERUSER
 from nonebot.log import logger
+from nonebot.exception import FinishedException
+from nonebot.typing import T_State
 
 from .config import Config
 
@@ -20,6 +24,8 @@ CHUNIREC_SHOWALL_URL = "https://api.chunirec.net/2.0/music/showall.json"
 CHUNIREC_REGION = "jp2"
 CHUNIREC_SOURCE = "chunirec"
 CHUNIREC_DB_MUSIC_URL = "https://db.chunirec.net/music/{title}/{song_id}"
+NAOMINET_MUSIC_URL = "https://portal.naominet.live/api/game/chuni/v2/data/music"
+NAOMINET_DB_VERSION_URL = "https://portal.naominet.live/api/static/dbVersion"
 CHUNIREC_VERSION_RULES: List[Tuple[date, int, str]] = [
     (date(2025, 12, 11), 24000, "CHUNITHM X-VERSE-X"),
     (date(2025, 7, 16), 23500, "CHUNITHM X-VERSE"),
@@ -61,6 +67,13 @@ update_songlist = on_command("更新songlist", permission=SUPERUSER, priority=10
 update_chunirec_songlist = on_command(
     "更新chunirec",
     aliases={"更新chunirecsonglist", "更新日服songlist"},
+    permission=SUPERUSER,
+    priority=10,
+    block=True,
+)
+update_chunirec_upload = on_command(
+    "上传chunirec",
+    aliases={"上传chunirec数据", "上传日服songlist"},
     permission=SUPERUSER,
     priority=10,
     block=True,
@@ -114,8 +127,156 @@ def normalize_title_key(value: Any) -> str:
     return str(value or "").strip().casefold()
 
 
+def _parse_json_file(raw_bytes: bytes, file_path: str = "") -> Any:
+    """解析 JSON 文件，支持多种编码、gzip 压缩和 ZIP 包装"""
+    # 尝试直接解析（json.loads 支持 UTF-8/16/32 with BOM）
+    try:
+        return json.loads(raw_bytes)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        pass
+
+    # 尝试 gzip 解压
+    if raw_bytes[:2] == b"\x1f\x8b":
+        import gzip
+        try:
+            decompressed = gzip.decompress(raw_bytes)
+            return _parse_json_file(decompressed, file_path)
+        except Exception:
+            pass
+
+    # 尝试 ZIP 解包（QQ 可能将文件包装为 ZIP）
+    if raw_bytes[:2] == b"PK":
+        import io
+        import zipfile
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+                names = zf.namelist()
+                # 优先找 JSON 文件
+                json_names = [n for n in names if n.lower().endswith(".json")]
+                for name in json_names + names:
+                    try:
+                        inner = zf.read(name)
+                        return _parse_json_file(inner, f"{file_path}/{name}")
+                    except Exception:
+                        continue
+            raise ValueError(f"ZIP 包中未找到可解析的 JSON 文件，内容: {names}")
+        except Exception as e:
+            raise ValueError(f"ZIP 包解析失败: {e}")
+
+    # 尝试常见编码
+    for enc in ["utf-8-sig", "utf-8", "gbk", "gb2312", "utf-16", "latin-1"]:
+        try:
+            return json.loads(raw_bytes.decode(enc))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+
+    # 最后一次尝试：记录前 50 字节用于调试
+    preview = raw_bytes[:50]
+    logger.error(f"无法解析 JSON 文件 {file_path}，前 50 字节: {preview!r}")
+    raise json.JSONDecodeError(
+        f"无法解析文件，已尝试所有编码。前 50 字节: {preview!r}",
+        preview.decode("latin-1", errors="replace"), 0,
+    )
+
+
 def song_match_key(song: Dict[str, Any]) -> Tuple[str, str]:
     return (normalize_title_key(song.get("title")), normalize_title_key(song.get("artist")))
+
+
+def pick_first_value(data: Dict[str, Any], keys: List[str]) -> Any:
+    for key in keys:
+        value = data.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def extract_naominet_rows(payload: Any) -> List[Dict[str, Any]]:
+    if isinstance(payload, dict) and isinstance(payload.get("data"), (dict, list)):
+        payload = payload["data"]
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if not isinstance(payload, dict):
+        return []
+    for key in ("content", "items", "records", "list", "songs", "result"):
+        rows = payload.get(key)
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+    return []
+
+
+def get_naominet_page_total(payload: Any) -> Optional[int]:
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        payload = payload["data"]
+    if not isinstance(payload, dict):
+        return None
+    for key in ("totalPages", "total_pages", "pages", "pageCount"):
+        value = payload.get(key)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def build_naominet_headers(token: str, session: Optional[str]) -> Dict[str, str]:
+    auth_value = token if token.lower().startswith("bearer ") else f"Bearer {token}"
+    headers = {
+        "Authorization": auth_value,
+        "Referer": "https://portal.naominet.live/",
+        "Accept": "application/json",
+    }
+    if session:
+        headers["Cookie"] = f"SESSION={session}"
+    return headers
+
+
+async def fetch_naominet_id_map(
+    client: httpx.AsyncClient,
+    token: str,
+    session: Optional[str] = None,
+) -> Tuple[Dict[Tuple[str, str], str], str]:
+    headers = build_naominet_headers(token, session)
+    result: Dict[Tuple[str, str], str] = {}
+
+    probe = await client.get(
+        NAOMINET_DB_VERSION_URL,
+        headers=headers,
+        timeout=20.0,
+    )
+    probe.raise_for_status()
+
+    response = await client.get(
+        NAOMINET_MUSIC_URL,
+        headers=headers,
+        timeout=20.0,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if isinstance(payload, dict):
+        status = payload.get("status")
+        code = status.get("code") if isinstance(status, dict) else None
+        if code == 94011:
+            raise PermissionError("naominet 返回 Unauthorized，需要可访问该接口的登录令牌")
+    rows = extract_naominet_rows(payload)
+    if not rows:
+        raise ValueError("naominet data/music 未返回可用歌曲列表")
+    for row in rows:
+        numeric_id = pick_first_value(row, ["musicId", "music_id", "songId", "song_id", "id"])
+        title = pick_first_value(row, ["title", "name", "songName", "song_name"])
+        artist = pick_first_value(row, ["artist", "artistName", "artist_name"])
+        if numeric_id is None or title is None:
+            continue
+        numeric_id_str = str(numeric_id).strip()
+        if not numeric_id_str.isdigit():
+            continue
+        result[(normalize_title_key(title), normalize_title_key(artist))] = numeric_id_str
+        result[(normalize_title_key(title), "")] = numeric_id_str
+
+    status_text = f"naominet 匹配表：{len(result)} 条键，读取 {len(rows)} 首"
+    if not result:
+        status_text = "naominet 未返回可用歌曲数字 ID"
+    return result, status_text
 
 
 def map_chunirec_genre(genre: Any) -> str:
@@ -197,16 +358,25 @@ def ensure_chunirec_versions(local_data: Dict[str, Any]) -> None:
         existing.add(item["version"])
 
 
-def convert_chunirec_song(item: Dict[str, Any], existing_aliases: Dict[str, List[str]]) -> Optional[Dict[str, Any]]:
+def convert_chunirec_song(
+    item: Dict[str, Any],
+    existing_aliases: Dict[str, List[str]],
+    naominet_id_map: Optional[Dict[Tuple[str, str], str]] = None,
+) -> Optional[Dict[str, Any]]:
     meta = item.get("meta")
     data = item.get("data")
     if not isinstance(meta, dict) or not isinstance(data, dict):
         return None
 
-    song_id = str(meta.get("id") or "").strip()
+    chunirec_id = str(meta.get("id") or "").strip()
     title = str(meta.get("title") or "").strip()
-    if not song_id or not title:
+    if not chunirec_id or not title:
         return None
+    numeric_id = None
+    if naominet_id_map:
+        numeric_id = naominet_id_map.get((normalize_title_key(title), normalize_title_key(meta.get("artist"))))
+        numeric_id = numeric_id or naominet_id_map.get((normalize_title_key(title), ""))
+    song_id = numeric_id or chunirec_id
 
     difficulties = []
     for diff_key, diff_data in data.items():
@@ -230,7 +400,7 @@ def convert_chunirec_song(item: Dict[str, Any], existing_aliases: Dict[str, List
         difficulties.append(difficulty)
 
     version = infer_chunirec_version(meta.get("release"))
-    return {
+    song = {
         "id": song_id,
         "title": title,
         "artist": meta.get("artist") or "-",
@@ -239,20 +409,33 @@ def convert_chunirec_song(item: Dict[str, Any], existing_aliases: Dict[str, List
         "version": version,
         "release": meta.get("release"),
         "difficulties": sorted(difficulties, key=lambda d: d.get("difficulty", 99)),
-        "aliases": existing_aliases.get(song_id, []),
+        "aliases": existing_aliases.get(song_id, existing_aliases.get(chunirec_id, [])),
         "data_source": CHUNIREC_SOURCE,
-        "chunirec_id": song_id,
-        "chunirec_url": CHUNIREC_DB_MUSIC_URL.format(title=quote(title, safe=""), song_id=song_id),
+        "chunirec_id": chunirec_id,
+        "chunirec_url": CHUNIREC_DB_MUSIC_URL.format(title=quote(title, safe=""), song_id=chunirec_id),
     }
+    if numeric_id:
+        song["rinnet_id"] = numeric_id
+        song["jacket_id"] = numeric_id
+    return song
 
 
-def merge_chunirec_songs(local_data: Dict[str, Any], chunirec_payload: List[Dict[str, Any]]) -> Tuple[int, int, int]:
+def merge_chunirec_songs(
+    local_data: Dict[str, Any],
+    chunirec_payload: List[Dict[str, Any]],
+    naominet_id_map: Optional[Dict[Tuple[str, str], str]] = None,
+) -> Tuple[int, int, int]:
     songs = local_data.setdefault("songs", [])
     if not isinstance(songs, list):
         raise ValueError("本地 songlist.json 中 songs 不是列表")
 
     existing_aliases = build_local_alias_map(local_data)
     existing_by_id = {str(song.get("id")): idx for idx, song in enumerate(songs) if isinstance(song, dict) and song.get("id") is not None}
+    existing_by_chunirec_id = {
+        str(song.get("chunirec_id") or song.get("id")): idx
+        for idx, song in enumerate(songs)
+        if isinstance(song, dict) and song.get("data_source") == CHUNIREC_SOURCE and (song.get("chunirec_id") or song.get("id"))
+    }
     lx_title_keys = {song_match_key(song) for song in songs if isinstance(song, dict) and song.get("data_source") != CHUNIREC_SOURCE}
     lx_title_only = {
         normalize_title_key(song.get("title"))
@@ -291,21 +474,26 @@ def merge_chunirec_songs(local_data: Dict[str, Any], chunirec_payload: List[Dict
     for raw_song in chunirec_payload:
         if not isinstance(raw_song, dict):
             continue
-        converted = convert_chunirec_song(raw_song, existing_aliases)
+        converted = convert_chunirec_song(raw_song, existing_aliases, naominet_id_map)
         if not converted:
             continue
 
         song_id = str(converted["id"])
+        chunirec_id = str(converted.get("chunirec_id") or song_id)
         title_key = normalize_title_key(converted.get("title"))
         title_artist_key = (title_key, normalize_title_key(converted.get("artist")))
 
         existing_index = existing_by_id.get(song_id)
+        if existing_index is None:
+            existing_index = existing_by_chunirec_id.get(chunirec_id)
         if existing_index is not None:
             old_song = songs[existing_index]
             if isinstance(old_song, dict) and old_song.get("data_source") == CHUNIREC_SOURCE:
                 converted["aliases"] = old_song.get("aliases", converted["aliases"])
                 songs[existing_index] = converted
                 refreshed += 1
+                existing_by_id[song_id] = existing_index
+                existing_by_chunirec_id[chunirec_id] = existing_index
             else:
                 if isinstance(old_song, dict):
                     merge_chunirec_consts(old_song, converted)
@@ -321,6 +509,7 @@ def merge_chunirec_songs(local_data: Dict[str, Any], chunirec_payload: List[Dict
 
         songs.append(converted)
         existing_by_id[song_id] = len(songs) - 1
+        existing_by_chunirec_id[chunirec_id] = len(songs) - 1
         added += 1
 
     return added, refreshed, skipped_lx
@@ -441,6 +630,8 @@ async def handle_update_chunirec_songlist():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     try:
+        naominet_id_map: Dict[Tuple[str, str], str] = {}
+        naominet_status = "未配置 naominet_token，跳过数字 ID 补全"
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 CHUNIREC_SHOWALL_URL,
@@ -452,18 +643,36 @@ async def handle_update_chunirec_songlist():
             if not isinstance(payload, list):
                 raise ValueError("chunirec music/showall 返回格式异常，未得到列表")
 
+            naominet_token = (config.naominet_token or "").strip()
+            naominet_session = (config.naominet_session or "").strip() or None
+            if naominet_token:
+                try:
+                    naominet_id_map, naominet_status = await fetch_naominet_id_map(
+                        client,
+                        naominet_token,
+                        naominet_session,
+                    )
+                except PermissionError as e:
+                    naominet_status = str(e)
+                    logger.warning(naominet_status)
+                except Exception as e:
+                    naominet_status = f"naominet 数字 ID 补全失败: {type(e).__name__}"
+                    logger.warning(f"{naominet_status}: {e!r}")
+
         local_data = load_local_songlist()
         ensure_chunirec_versions(local_data)
-        added, refreshed, skipped_lx = merge_chunirec_songs(local_data, payload)
+        added, refreshed, skipped_lx = merge_chunirec_songs(local_data, payload, naominet_id_map)
         write_songlist_atomic(local_data)
 
         mtime = datetime.fromtimestamp(SONGLIST_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
         logger.success(
-            f"chunirec 曲库同步完成: added={added}, refreshed={refreshed}, skipped_lx={skipped_lx}, file={SONGLIST_FILE}"
+            f"chunirec 曲库同步完成: added={added}, refreshed={refreshed}, skipped_lx={skipped_lx}, "
+            f"naominet={naominet_status}, file={SONGLIST_FILE}"
         )
         await update_chunirec_songlist.send(
             "chunirec 曲库同步完成！\n"
             f"新增：{added}，刷新：{refreshed}，保留落雪已有：{skipped_lx}\n"
+            f"数字 ID：{naominet_status}\n"
             f"文件修改时间：{mtime}"
         )
     except httpx.HTTPError as http_err:
@@ -472,3 +681,195 @@ async def handle_update_chunirec_songlist():
     except Exception as e:
         logger.error(f"chunirec 曲库同步写入或解析失败: {e}")
         await update_chunirec_songlist.send("同步失败，写入或解析发生错误，请查看控制台日志。")
+
+
+@update_chunirec_upload.handle()
+async def _(event: MessageEvent, state: T_State):
+    """检查消息中是否附带文件，有则存入 state 跳过 prompt"""
+    msg = event.get_message()
+    for seg in msg:
+        seg_type = getattr(seg, "type", None)
+        if not seg_type and isinstance(seg, dict):
+            seg_type = seg.get("type")
+        elif not seg_type and isinstance(seg, tuple) and len(seg) >= 2:
+            seg_type = seg[0]
+        if seg_type == "file":
+            state["file_msg"] = msg
+            break
+
+
+@update_chunirec_upload.got("file_msg", prompt="请上传由 fetch_chunirec_data.py 生成的 JSON 数据文件")
+async def _(bot: Bot, event: MessageEvent):
+    """处理上传的 chunirec JSON 数据文件，合并到本地 songlist"""
+    try:
+        msg = event.get_message()
+        file_url = ""
+        local_file = ""
+        base64_data = ""
+
+        for seg in msg:
+            seg_type = getattr(seg, "type", None)
+            seg_data = getattr(seg, "data", {})
+            if not seg_type and isinstance(seg, dict):
+                seg_type = seg.get("type")
+                seg_data = seg.get("data", {})
+            elif not seg_type and isinstance(seg, tuple) and len(seg) >= 2:
+                seg_type = seg[0]
+                seg_data = seg[1] if isinstance(seg[1], dict) else {}
+
+            if seg_type == "file":
+                seg_url = seg_data.get("url", "")
+                file_id = seg_data.get("file_id", "")
+                logger.warning(
+                    f"chunirec 收到文件消息: seg_url={seg_url[:80] if seg_url else 'EMPTY'}..., "
+                    f"file_id={file_id}, seg_keys={list(seg_data.keys()) if isinstance(seg_data, dict) else 'N/A'}"
+                )
+                # 优先用 get_file API 获取 base64（避免 QQ CDN URL 返回错误文件）
+                if file_id:
+                    try:
+                        file_info = await bot.call_api("get_file", file_id=file_id)
+                        target_info = file_info.get("data", file_info) if isinstance(file_info, dict) else file_info
+                        base64_data = target_info.get("base64", "")
+                        file_url = target_info.get("url", "") if not base64_data else ""
+                        local_file = target_info.get("file", "")
+                        logger.warning(
+                            f"chunirec get_file 结果: base64={'YES' if base64_data else 'NO'}, "
+                            f"url={file_url[:80] if file_url else 'EMPTY'}..., "
+                            f"local_file={local_file}"
+                        )
+                    except Exception as e:
+                        logger.error(f"获取文件信息失败: {e}")
+                # fallback 到消息中的 URL
+                if not base64_data and not file_url and seg_url:
+                    file_url = seg_url
+                break
+
+        if not file_url and not local_file and not base64_data:
+            await update_chunirec_upload.finish("未检测到有效的文件，请在使用命令后上传 JSON 数据文件。")
+
+        import tempfile
+        temp_file_path = os.path.join(tempfile.gettempdir(), f"chunirec_upload_{datetime.now().strftime('%Y%m%d%H%M%S')}.json")
+
+        try:
+            if base64_data:
+                import base64
+                with open(temp_file_path, "wb") as f:
+                    f.write(base64.b64decode(base64_data))
+            elif local_file and os.path.exists(local_file):
+                import shutil
+                shutil.copy2(local_file, temp_file_path)
+            elif file_url:
+                if isinstance(file_url, str):
+                    if file_url.startswith("//"):
+                        file_url = f"http:{file_url}"
+                    elif file_url.startswith("/") and not os.path.exists(file_url):
+                        file_url = f"http://{file_url}"
+
+                if not isinstance(file_url, str) or not (file_url.startswith("http://") or file_url.startswith("https://")):
+                    await update_chunirec_upload.finish("接收到的不是有效的文件链接。")
+
+                try:
+                    async with httpx.AsyncClient() as client:
+                        async with client.stream("GET", file_url, timeout=30.0) as resp:
+                            if resp.status_code == 200:
+                                with open(temp_file_path, "wb") as f:
+                                    size = 0
+                                    async for chunk in resp.aiter_bytes():
+                                        size += len(chunk)
+                                        if size > 50 * 1024 * 1024:
+                                            raise ValueError("文件超过50MB大小限制")
+                                        f.write(chunk)
+                            else:
+                                await update_chunirec_upload.finish("下载文件失败，请稍后重试！")
+                except ValueError as ve:
+                    logger.warning(f"上传 chunirec 数据文件被拒绝: {ve}")
+                    await update_chunirec_upload.finish("文件不符合上传要求。")
+                except Exception as e:
+                    logger.error(f"下载 chunirec 数据文件错误: {e}")
+                    await update_chunirec_upload.finish("下载文件时发生网络错误。")
+            else:
+                await update_chunirec_upload.finish("未能成功提取文件。")
+        except FinishedException:
+            raise
+
+        try:
+            with open(temp_file_path, "rb") as f:
+                raw_bytes = f.read()
+
+            # 记录下载文件的原始字节预览，便于排查
+            preview = raw_bytes[:200]
+            logger.warning(
+                f"chunirec 上传文件已下载: size={len(raw_bytes)}, "
+                f"first_bytes={preview[:60]!r}"
+            )
+
+            upload_data = _parse_json_file(raw_bytes, temp_file_path)
+        except json.JSONDecodeError as e:
+            logger.warning(f"chunirec JSON 解析失败: {e}, preview={raw_bytes[:200]!r}")
+            await update_chunirec_upload.finish(f"JSON 解析失败: {e}")
+        except UnicodeDecodeError as e:
+            await update_chunirec_upload.finish(f"文件编码解析失败: {e}")
+        except ValueError as e:
+            logger.warning(f"chunirec 文件处理失败: {e}, preview={raw_bytes[:200]!r}")
+            await update_chunirec_upload.finish(f"文件处理失败: {e}")
+        finally:
+            if os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                except Exception:
+                    pass
+
+        if not isinstance(upload_data, dict):
+            logger.warning(f"chunirec 上传数据不是 dict，实际类型: {type(upload_data).__name__}, value={str(upload_data)[:200]!r}")
+            await update_chunirec_upload.finish("文件格式错误：期望 JSON 对象。")
+
+        chunirec_payload = upload_data.get("chunirec_payload")
+        logger.warning(
+            f"chunirec 上传数据解析完成: keys={list(upload_data.keys())[:15]}, "
+            f"chunirec_payload={type(chunirec_payload).__name__}, "
+            f"len={len(chunirec_payload) if isinstance(chunirec_payload, list) else 'N/A'}"
+        )
+        if not isinstance(chunirec_payload, list) or not chunirec_payload:
+            logger.warning(
+                f"chunirec_payload 无效: type={type(chunirec_payload).__name__}, "
+                f"len={len(chunirec_payload) if isinstance(chunirec_payload, list) else 'N/A'}, "
+                f"keys_found={list(upload_data.keys())}"
+            )
+            await update_chunirec_upload.finish("文件格式错误：缺少 chunirec_payload 或不是有效列表。")
+
+        naominet_id_map: Dict[Tuple[str, str], str] = {}
+        naominet_status = upload_data.get("naominet_status", "未包含 naominet 数据")
+        raw_map = upload_data.get("naominet_id_map", [])
+        if isinstance(raw_map, list):
+            for entry in raw_map:
+                if isinstance(entry, list) and len(entry) >= 3:
+                    title_key, artist_key, numeric_id = entry[0], entry[1], entry[2]
+                    naominet_id_map[(title_key, artist_key)] = numeric_id
+
+        await update_chunirec_upload.send("收到，正在处理上传的 chunirec 数据...")
+
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        local_data = load_local_songlist()
+        ensure_chunirec_versions(local_data)
+        added, refreshed, skipped_lx = merge_chunirec_songs(
+            local_data, chunirec_payload, naominet_id_map,
+        )
+        write_songlist_atomic(local_data)
+
+        mtime = datetime.fromtimestamp(SONGLIST_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        logger.success(
+            f"chunirec 上传曲库同步完成: added={added}, refreshed={refreshed}, skipped_lx={skipped_lx}, "
+            f"naominet={naominet_status}, file={SONGLIST_FILE}"
+        )
+        await update_chunirec_upload.send(
+            "chunirec 上传曲库同步完成！\n"
+            f"新增：{added}，刷新：{refreshed}，保留落雪已有：{skipped_lx}\n"
+            f"数字 ID：{naominet_status}\n"
+            f"文件修改时间：{mtime}"
+        )
+
+    except FinishedException:
+        raise
+    except Exception as e:
+        logger.error(f"chunirec 上传处理失败: {e}")
+        await update_chunirec_upload.send("处理上传数据时发生意外错误，请查看控制台日志。")

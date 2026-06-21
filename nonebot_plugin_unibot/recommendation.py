@@ -8,7 +8,7 @@ from nonebot import on_regex
 from nonebot.adapters.onebot.v11 import MessageEvent, MessageSegment
 from nonebot.log import logger
 
-from .song import get_font, get_version_name, wrap_text_with_height, draw_text, download_jacket
+from .song import get_font, get_version_name, wrap_text_with_height, draw_text, download_jacket, make_empty_jacket
 from .overpower_list_local import calculate_op
 
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,7 +18,7 @@ SCORE_DIR = os.path.join(DATA_DIR, "score")
 
 recommend_cmd = on_regex(r"^推什么\s*(.+)?$", priority=5, block=True)
 
-def render_recommendation_image(song: dict, diff: dict, user_score: int, user_op: float, max_op: float, jacket_img: Image.Image, has_score: bool) -> bytes:
+def render_recommendation_image(song: dict, diff: dict, user_score: int, user_op: float, max_op: float, jacket_img: Image.Image | None, has_score: bool) -> bytes:
     BG_COLOR = (30, 30, 35, 255)
     PANEL_COLOR = (45, 45, 52, 255)
     TEXT_MAIN = (245, 245, 245, 255)
@@ -50,6 +50,7 @@ def render_recommendation_image(song: dict, diff: dict, user_score: int, user_op
     draw = ImageDraw.Draw(temp_img)
 
     jacket_size = 200
+    jacket_img = jacket_img or make_empty_jacket(jacket_size)
     jacket_img = jacket_img.resize((jacket_size, jacket_size), Image.Resampling.LANCZOS)
     temp_img.paste(jacket_img, (40, 40), jacket_img if jacket_img.mode == "RGBA" else None)
 

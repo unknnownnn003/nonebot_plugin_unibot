@@ -22,6 +22,7 @@ PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(PLUGIN_DIR, "data")
 SONGLIST_PATH = os.path.join(DATA_DIR, "songlist.json")
 JACKET_DIR = os.path.join(DATA_DIR, "jacket")
+LXNS_JACKET_URL = "https://assets.lxns.net/chunithm/jacket/{song_id}.png"
 
 song_query = on_regex(r"^(.+)是什么歌$", priority=10, block=True)
 
@@ -264,6 +265,10 @@ def should_use_lxns_jacket(song_id: Any) -> bool:
     return str(song_id).isdigit()
 
 
+def make_empty_jacket(size: int = 200) -> Image.Image:
+    return Image.new("RGBA", (size, size), (0, 0, 0, 0))
+
+
 async def download_jacket(song_id: int) -> Optional[Image.Image]:
     jacket_path = os.path.join(JACKET_DIR, f"{song_id}.png")
     if os.path.exists(jacket_path):
@@ -272,10 +277,10 @@ async def download_jacket(song_id: int) -> Optional[Image.Image]:
         except Exception:
             pass
             
-    url = f"https://assets.lxns.net/chunithm/jacket/{song_id}.png"
     async with httpx.AsyncClient() as client:
         if should_use_lxns_jacket(song_id):
             try:
+                url = LXNS_JACKET_URL.format(song_id=song_id)
                 resp = await client.get(url, timeout=10.0)
                 if resp.status_code == 200:
                     if not resp.content.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -290,12 +295,10 @@ async def download_jacket(song_id: int) -> Optional[Image.Image]:
                     return Image.open(BytesIO(resp.content)).convert("RGBA")
             except Exception as e:
                 logger.error(f"Failed to download jacket for ID {song_id}: {e}")
-            
-    # 如果下载失败，返回一张纯色占位图
-    img = Image.new("RGBA", (200, 200), (100, 100, 100, 255))
-    return img
 
-def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], jacket_img: Image.Image) -> bytes:
+    return None
+
+def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], jacket_img: Optional[Image.Image]) -> bytes:
     # 颜色常数
     BG_COLOR = (30, 30, 35, 255)
     PANEL_COLOR = (45, 45, 52, 255)
@@ -339,6 +342,7 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
     draw = ImageDraw.Draw(temp_img)
 
     jacket_size = 200
+    jacket_img = jacket_img or make_empty_jacket(jacket_size)
     jacket_img = jacket_img.resize((jacket_size, jacket_size), Image.Resampling.LANCZOS)
     temp_img.paste(jacket_img, (40, 40), jacket_img if jacket_img.mode == "RGBA" else None)
 
@@ -422,11 +426,14 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
             draw.rounded_rectangle([40, start_y, card_width - 40, start_y + box_h], radius=8, fill=None, outline=(220, 50, 50), width=2)
 
         level_val = ld.get("level_value", ld.get("level", "?"))
-        level_str = ""
-        try:
-            level_str = f"{float(level_val):.1f}"
-        except:
-            level_str = str(level_val)
+        # 定数为 0 时（chunirec 未收录定数），直接使用 level 字段
+        if level_val is None or (isinstance(level_val, (int, float)) and float(level_val) == 0):
+            level_str = str(ld.get("level") or ld.get("chunirec_level") or "?")
+        else:
+            try:
+                level_str = f"{float(level_val):.1f}"
+            except:
+                level_str = str(level_val)
         
         draw_text(draw, (70, start_y + margin_top), f"{diff_name} {level_str}", font_diff, text_color)
 
@@ -444,7 +451,7 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
     final_img.save(buf, format="JPEG", quality=90)
     return buf.getvalue()
 
-def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jacket_imgs: List[Image.Image]) -> bytes:
+def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jacket_imgs: List[Optional[Image.Image]]) -> bytes:
     BG_COLOR = (30, 30, 35, 255)
     PANEL_COLOR = (45, 45, 52, 255)
     TEXT_MAIN = (245, 245, 245, 255)
@@ -482,7 +489,8 @@ def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jack
         draw.rounded_rectangle([32, y + 8, 42, y + row_h - 8], radius=8, fill=ACCENT)
         draw.rectangle([38, y + 8, 42, y + row_h - 8], fill=ACCENT)
 
-        jacket = jacket_imgs[index - 1].resize((82, 82), Image.Resampling.LANCZOS)
+        jacket_img = jacket_imgs[index - 1] if index - 1 < len(jacket_imgs) else None
+        jacket = (jacket_img or make_empty_jacket(82)).resize((82, 82), Image.Resampling.LANCZOS)
         img.paste(jacket, (58, y + 18), jacket if jacket.mode == "RGBA" else None)
 
         text_x = 158
@@ -506,7 +514,7 @@ def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jack
     img.convert("RGB").save(buf, format="JPEG", quality=90)
     return buf.getvalue()
 
-async def download_match_jacket(match: Dict[str, Any]) -> Image.Image:
+async def download_match_jacket(match: Dict[str, Any]) -> Optional[Image.Image]:
     song = match.get("song", {})
     try:
         song_id = song.get("id", 0) if song.get("data_source") == "chunirec" else int(song.get("id", 0))

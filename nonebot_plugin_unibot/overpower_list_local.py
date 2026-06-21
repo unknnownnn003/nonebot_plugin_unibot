@@ -99,6 +99,9 @@ def get_target_charts(query_text: str):
     charts = {}
 
     for song in songs:
+        if song.get("data_source") == "chunirec":
+            continue
+
         song_id = str(song["id"])
         origin_id = song.get("origin_id", song_id)
         
