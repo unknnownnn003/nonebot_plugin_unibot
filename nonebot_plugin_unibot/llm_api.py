@@ -55,7 +55,9 @@ def describe_capabilities():
             dict(id="story.list", name="nb_unibot_story_list", description="查看本地剧情分类或分类下的角色名。",
                  parameters=StoryCategoryArgs.model_json_schema(), effect="none", keywords=["剧情分类", "剧情列表", "角色列表"]),
             dict(id="story.random", name="nb_unibot_story_random", description="随机选择一篇本地剧情并发送原剧情图片。",
-                 parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["随机剧情", "随便一篇故事"])]
+                 parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["随机剧情", "随便一篇故事"]),
+            dict(id="game.status", name="nb_unibot_game_status", description="查询当前群猜曲游戏状态，不泄露答案或图片本地路径。",
+                 parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["猜曲", "猜歌", "游戏状态"])]
 
 
 async def invoke_capability(name, arguments, context):
@@ -101,6 +103,12 @@ async def invoke_capability(name, arguments, context):
             EmptyArgs.model_validate(arguments)
             from .services.story import random_story
             output = await random_story(bot, event)
+        elif name == "game.status":
+            if not isinstance(event, GroupMessageEvent):
+                return outcome("GROUP_ONLY", "猜曲游戏只在群聊中可用。", status="denied")
+            EmptyArgs.model_validate(arguments)
+            from .services.game import status
+            output = await status(event.group_id)
         else:
             return outcome("CAPABILITY_DISABLED", "能力未注册。", status="unavailable")
     except ValidationError:
