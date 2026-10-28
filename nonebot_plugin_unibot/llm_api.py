@@ -41,6 +41,14 @@ class ManualScoreArgs(BaseModel):
     combo: str = Field("", max_length=24)
 
 
+class GameStartArgs(Arguments):
+    difficulty: Literal["bas", "adv", "exp", "mas", "ult"] = "mas"
+
+
+class GameGuessArgs(Arguments):
+    query: str = Field(min_length=1, max_length=120)
+
+
 class RecommendArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     filter: str = Field("", max_length=20, description="原推什么参数：等级如13+，或aj/ajc/fc；空为全部")
@@ -83,6 +91,10 @@ def describe_capabilities():
                  parameters=EmptyArgs.model_json_schema(), effect="write", keywords=["猜曲提示", "提示"]),
             dict(id="game.give_up", name="nb_unibot_game_give_up", description="结束当前群猜曲游戏并公布答案；需要确认。",
                  parameters=EmptyArgs.model_json_schema(), effect="write", keywords=["放弃猜曲", "放弃游戏"]),
+            dict(id="game.start", name="nb_unibot_game_start", description="开始当前群猜曲游戏；需要确认。",
+                 parameters=GameStartArgs.model_json_schema(), effect="write", keywords=["开始猜曲", "猜曲游戏"]),
+            dict(id="game.guess", name="nb_unibot_game_guess", description="在当前群猜曲状态中提交当前用户答案；需要确认。",
+                 parameters=GameGuessArgs.model_json_schema(), effect="write", keywords=["猜歌", "猜曲答案"]),
             dict(id="help.read", name="nb_unibot_help", description="发送原 UniBot 指令帮助图片，不包含模型管理权限。",
                  parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["帮助", "chuhelp", "命令列表"]),
             dict(id="player.bind", name="nb_unibot_bind", description="绑定当前真实发起人的落雪好友码；需要用户确认后写入。",
@@ -101,7 +113,7 @@ async def invoke_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
-    if name in {"player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up"} and not context.get("confirmed", False):
+    if name in {"player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up", "game.start", "game.guess"} and not context.get("confirmed", False):
         return outcome("AUTHORIZATION_REQUIRED", "需要当前用户核对操作预览并确认。", status="denied")
     try:
         if name == "song.search":
@@ -162,6 +174,18 @@ async def invoke_capability(name, arguments, context):
             EmptyArgs.model_validate(arguments)
             from .services.game import give_up
             output = await give_up(event.group_id)
+        elif name == "game.start":
+            if not isinstance(event, GroupMessageEvent):
+                return outcome("GROUP_ONLY", "猜曲游戏只在群聊中可用。", status="denied")
+            args = GameStartArgs.model_validate(arguments)
+            from .services.game import start
+            output = await start(event.group_id, args.difficulty)
+        elif name == "game.guess":
+            if not isinstance(event, GroupMessageEvent):
+                return outcome("GROUP_ONLY", "猜曲游戏只在群聊中可用。", status="denied")
+            args = GameGuessArgs.model_validate(arguments)
+            from .services.game import guess
+            output = await guess(event.group_id, args.query, str(event.user_id))
         elif name == "help.read":
             EmptyArgs.model_validate(arguments)
             from .services.help import read
