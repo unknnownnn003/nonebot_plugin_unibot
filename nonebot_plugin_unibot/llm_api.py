@@ -79,6 +79,10 @@ def describe_capabilities():
                  parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["随机剧情", "随便一篇故事"]),
             dict(id="game.status", name="nb_unibot_game_status", description="查询当前群猜曲游戏状态，不泄露答案或图片本地路径。",
                  parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["猜曲", "猜歌", "游戏状态"]),
+            dict(id="game.hint", name="nb_unibot_game_hint", description="为当前群猜曲游戏消耗一次提示并返回原提示结果；需要确认。",
+                 parameters=EmptyArgs.model_json_schema(), effect="write", keywords=["猜曲提示", "提示"]),
+            dict(id="game.give_up", name="nb_unibot_game_give_up", description="结束当前群猜曲游戏并公布答案；需要确认。",
+                 parameters=EmptyArgs.model_json_schema(), effect="write", keywords=["放弃猜曲", "放弃游戏"]),
             dict(id="help.read", name="nb_unibot_help", description="发送原 UniBot 指令帮助图片，不包含模型管理权限。",
                  parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["帮助", "chuhelp", "命令列表"]),
             dict(id="player.bind", name="nb_unibot_bind", description="绑定当前真实发起人的落雪好友码；需要用户确认后写入。",
@@ -97,7 +101,7 @@ async def invoke_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
-    if name in {"player.bind", "score.submit", "score.sync", "score.import_file"} and not context.get("confirmed", False):
+    if name in {"player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up"} and not context.get("confirmed", False):
         return outcome("AUTHORIZATION_REQUIRED", "需要当前用户核对操作预览并确认。", status="denied")
     try:
         if name == "song.search":
@@ -146,6 +150,18 @@ async def invoke_capability(name, arguments, context):
             EmptyArgs.model_validate(arguments)
             from .services.game import status
             output = await status(event.group_id)
+        elif name == "game.hint":
+            if not isinstance(event, GroupMessageEvent):
+                return outcome("GROUP_ONLY", "猜曲游戏只在群聊中可用。", status="denied")
+            EmptyArgs.model_validate(arguments)
+            from .services.game import hint
+            output = await hint(event.group_id)
+        elif name == "game.give_up":
+            if not isinstance(event, GroupMessageEvent):
+                return outcome("GROUP_ONLY", "猜曲游戏只在群聊中可用。", status="denied")
+            EmptyArgs.model_validate(arguments)
+            from .services.game import give_up
+            output = await give_up(event.group_id)
         elif name == "help.read":
             EmptyArgs.model_validate(arguments)
             from .services.help import read
