@@ -27,6 +27,16 @@ class RecommendArgs(BaseModel):
     filter: str = Field("", max_length=20, description="原推什么参数：等级如13+，或aj/ajc/fc；空为全部")
 
 
+class StoryArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    query: str = Field(min_length=1, max_length=120)
+
+
+class StoryCategoryArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    category: str = Field("", max_length=80)
+
+
 def describe_capabilities():
     return [dict(id="song.search", name="nb_unibot_song", description="中二节奏查歌、歌曲详情与歧义候选图。",
                  parameters=SearchArgs.model_json_schema(), effect="none", keywords=["中二", "是什么歌", "查歌", "歌曲", "曲目"]),
@@ -39,7 +49,13 @@ def describe_capabilities():
             dict(id="player.recommend", name="nb_unibot_recommend", description="原推什么算法推荐当前发起人可推的谱面；保留原图。",
                  parameters=RecommendArgs.model_json_schema(), effect="none", keywords=["推荐", "推什么", "推分"]),
             dict(id="song.aliases", name="nb_unibot_aliases", description="查询中二歌曲原本地别名；歧义时返回候选。",
-                 parameters=SearchArgs.model_json_schema(), effect="none", keywords=["别名", "外号"])]
+                 parameters=SearchArgs.model_json_schema(), effect="none", keywords=["别名", "外号"]),
+            dict(id="story.search", name="nb_unibot_story_search", description="按角色名查询本地剧情并发送原剧情图片。",
+                 parameters=StoryArgs.model_json_schema(), effect="none", keywords=["剧情", "角色", "故事"]),
+            dict(id="story.list", name="nb_unibot_story_list", description="查看本地剧情分类或分类下的角色名。",
+                 parameters=StoryCategoryArgs.model_json_schema(), effect="none", keywords=["剧情分类", "剧情列表", "角色列表"]),
+            dict(id="story.random", name="nb_unibot_story_random", description="随机选择一篇本地剧情并发送原剧情图片。",
+                 parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["随机剧情", "随便一篇故事"])]
 
 
 async def invoke_capability(name, arguments, context):
@@ -73,6 +89,18 @@ async def invoke_capability(name, arguments, context):
             args = RecommendArgs.model_validate(arguments)
             from .services.player import recommend
             output = await recommend(str(event.user_id), args.filter)
+        elif name == "story.search":
+            args = StoryArgs.model_validate(arguments)
+            from .services.story import search
+            output = await search(bot, event, args.query)
+        elif name == "story.list":
+            args = StoryCategoryArgs.model_validate(arguments)
+            from .services.story import categories
+            output = await categories(args.category)
+        elif name == "story.random":
+            EmptyArgs.model_validate(arguments)
+            from .services.story import random_story
+            output = await random_story(bot, event)
         else:
             return outcome("CAPABILITY_DISABLED", "能力未注册。", status="unavailable")
     except ValidationError:

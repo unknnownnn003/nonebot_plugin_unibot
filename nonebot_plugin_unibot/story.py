@@ -314,28 +314,20 @@ async def _(bot: Bot, event: Event):
 
 @cmd_list.handle()
 async def _(bot: Bot, event: Event, args: Message = CommandArg()):
-    data = load_index()
-    if not data.get("categories"):
-        await cmd_list.finish("尚未建立剧情索引，请联系管理员发送 /更新剧情。")
-        
     query = args.extract_plain_text().strip()
-    categories = data["categories"]
-    
+    from .services.story import categories
+    result = await categories(query)
+    if result["status"] != "ok":
+        await cmd_list.finish(result["fallback_text"])
+    data = result["data"]
     if not query:
-        cat_names = "\n".join(f"- {c} ({len(items)}篇)" for c, items in categories.items())
+        cat_names = "\n".join(f"- {item['name']} ({item['count']}篇)" for item in data["categories"])
         await cmd_list.finish(f"当前收录以下剧情分类：\n{cat_names}\n\n使用「/剧情分类 <分类名>」查看具体分类下的人物。")
-        
-    for cat, items in categories.items():
-        if query in cat:
-            names = [item["name"] for item in items]
-            msg = f"分类【{cat}】下的剧情有：\n" + "、".join(names)
-            
-            # 若字符太多则切断避免风控
-            if len(msg) > 500:
-                msg = msg[:500] + "\n...（内容过多已省略。请直接使用/查剧情 <人物>）"
-            await cmd_list.finish(msg)
-            
-    await cmd_list.finish(f"未找到相关分类，请检查名称。")
+    names = "、".join(data["stories"])
+    msg = f"分类【{data['category']}】下的剧情有：\n{names}"
+    if len(msg) > 500:
+        msg = msg[:500] + "\n...（内容过多已省略。请直接使用/查剧情 <人物>）"
+    await cmd_list.finish(msg)
 
 
 async def predownload_images(md_text: str) -> str:
@@ -506,47 +498,26 @@ async def render_and_send(bot: Bot, event: Event, name: str, file_path: str, mat
 
 @cmd_story.handle()
 async def _(bot: Bot, event: Event, args: Message = CommandArg()):
-    data = load_index()
-    if not data.get("mapping"):
-        await cmd_story.finish("并未建立剧情索引或空列表，请联系管理员发送 /更新剧情。")
-        
     name = args.extract_plain_text().strip()
     if not name:
         await cmd_story.finish("请输入要查询的角色名！例如：/查剧情 提亚马特")
-
-    matches = []
-    # 模糊搜索
-    for k, v in data["mapping"].items():
-        if name.lower() in k.lower():
-            matches.append((k, v))
-
-    if not matches:
-        await cmd_story.finish("本地未找到匹配的剧情索引记录，请检查名称。")
-        
-    target_name = ""
-    target_path = ""
-    if len(matches) > 1:
-        # 尝试完全匹配
-        exact = [m for m in matches if m[0].lower() == name.lower()]
-        if exact:
-            target_name, target_path = exact[0]
-        else:
-            names_str = "、".join([m[0] for m in matches])
-            if len(names_str) > 200:
-                names_str = names_str[:200] + "..."
+    from .services.story import search
+    result = await search(bot, event, name)
+    if result["status"] != "ok":
+        if result["code"] == "AMBIGUOUS_TARGET":
+            names_str = "、".join(item["name"] for item in result["data"].get("candidates", []))
             await cmd_story.finish(f"匹配到多个结果，请提供更精确的名称:\n{names_str}")
-    else:
-        target_name, target_path = matches[0]
-
-    await render_and_send(bot, event, target_name, target_path, cmd_story)
+        await cmd_story.finish(result["fallback_text"])
+    receipt = await result["artifacts"][0]["present"](bot, event)
+    if receipt.get("delivery") == "unknown":
+        await cmd_story.finish("渲染图片失败，请稍后重试或查看控制台日志。")
 
 @cmd_random.handle()
 async def _(bot: Bot, event: Event):
-    data = load_index()
-    mapping = data.get("mapping", {})
-    if not mapping:
-        await cmd_random.finish("并未建立剧情索引或空列表，请联系管理员发送 /更新剧情。")
-
-    target_name = random.choice(list(mapping.keys()))
-    target_path = mapping[target_name]
-    await render_and_send(bot, event, target_name, target_path, cmd_random)
+    from .services.story import random_story
+    result = await random_story(bot, event)
+    if result["status"] != "ok":
+        await cmd_random.finish(result["fallback_text"])
+    receipt = await result["artifacts"][0]["present"](bot, event)
+    if receipt.get("delivery") == "unknown":
+        await cmd_random.finish("渲染图片失败，请稍后重试或查看控制台日志。")
