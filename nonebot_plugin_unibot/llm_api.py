@@ -41,11 +41,13 @@ class ManualScoreArgs(BaseModel):
     combo: str = Field("", max_length=24)
 
 
-class GameStartArgs(Arguments):
+class GameStartArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     difficulty: Literal["bas", "adv", "exp", "mas", "ult"] = "mas"
 
 
-class GameGuessArgs(Arguments):
+class GameGuessArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     query: str = Field(min_length=1, max_length=120)
 
 
