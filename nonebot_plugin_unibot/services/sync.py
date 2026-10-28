@@ -209,7 +209,7 @@ async def submit(bot, event, user_id, *, origin="agent"):
 
 async def public_job(job):
     return dict(job_id=job.job_id, status=job.status, current_step=job.current_step,
-                queue_position=await _store.queue_position(job.job_id),
+                queue_position=await _store.queue_position(job.job_id), queue_position_scope="queued_only",
                 updated_at=job.updated_at, side_effect_state=job.side_effect_state,
                 delivery=job.delivery_state, notification=job.notification_state,
                 public_error_code=job.public_error_code, result=job.result)

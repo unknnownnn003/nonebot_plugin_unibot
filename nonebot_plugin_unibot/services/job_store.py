@@ -212,7 +212,7 @@ class JobStore:
             def op():
                 with self._connection() as db:
                     row = db.execute("SELECT * FROM jobs WHERE status='queued'" +
-                                     (" AND provider=?" if provider else "") + " ORDER BY created_at, rowid LIMIT 1",
+                                     (" AND provider=?" if provider else "") + " ORDER BY rowid LIMIT 1",
                                      (provider,) if provider else ()).fetchone()
                     if row is None:
                         return None
