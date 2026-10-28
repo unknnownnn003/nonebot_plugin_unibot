@@ -86,7 +86,9 @@ def describe_capabilities():
             dict(id="score.submit", name="nb_unibot_score_submit", description="给当前真实发起人保存一条手动成绩；需要用户确认后写入。",
                  parameters=ManualScoreArgs.model_json_schema(), effect="write", keywords=["传分", "手动成绩", "保存成绩"]),
             dict(id="score.sync", name="nb_unibot_score_sync", description="排队同步当前真实发起人的落雪成绩；需要用户确认后提交任务。",
-                 parameters=EmptyArgs.model_json_schema(), effect="write", long_task=True, keywords=["同步成绩", "lxupdate", "全量同步"])]
+                 parameters=EmptyArgs.model_json_schema(), effect="write", long_task=True, keywords=["同步成绩", "lxupdate", "全量同步"]),
+            dict(id="score.import_file", name="nb_unibot_score_import", description="导入当前消息附带的成绩文件；需要用户确认后写入。",
+                 parameters=EmptyArgs.model_json_schema(), effect="write", keywords=["上传成绩", "chuupdate", "成绩文件"])]
 
 
 async def invoke_capability(name, arguments, context):
@@ -95,7 +97,7 @@ async def invoke_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
-    if name in {"player.bind", "score.submit", "score.sync"} and not context.get("confirmed", False):
+    if name in {"player.bind", "score.submit", "score.sync", "score.import_file"} and not context.get("confirmed", False):
         return outcome("AUTHORIZATION_REQUIRED", "需要当前用户核对操作预览并确认。", status="denied")
     try:
         if name == "song.search":
@@ -160,6 +162,10 @@ async def invoke_capability(name, arguments, context):
             EmptyArgs.model_validate(arguments)
             from .services.sync import submit
             output = await submit(bot, event, str(event.user_id))
+        elif name == "score.import_file":
+            EmptyArgs.model_validate(arguments)
+            from .services.uploads import import_file
+            output = await import_file(bot, event, str(event.user_id))
         else:
             return outcome("CAPABILITY_DISABLED", "能力未注册。", status="unavailable")
     except ValidationError:
