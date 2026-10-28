@@ -7,7 +7,7 @@ import inspect
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "3.1.1"
+CAPABILITY_VERSION = "3.1.2"
 
 
 class SearchArgs(BaseModel):
