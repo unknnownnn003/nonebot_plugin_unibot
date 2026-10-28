@@ -2,6 +2,7 @@
 from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing import Literal
+import inspect
 
 API_VERSION = 1
 CAPABILITY_VERSION = "3.1.1"
@@ -25,6 +26,19 @@ class BestArgs(BaseModel):
 
 class EmptyArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class BindArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    friend_code: str = Field(min_length=1, max_length=32, pattern=r"^\d+$")
+
+
+class ManualScoreArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    query: str = Field(min_length=1, max_length=120)
+    level_index: int = Field(3, ge=0, le=5)
+    score: int = Field(ge=0, le=1010000)
+    combo: str = Field("", max_length=24)
 
 
 class RecommendArgs(BaseModel):
@@ -66,7 +80,11 @@ def describe_capabilities():
             dict(id="game.status", name="nb_unibot_game_status", description="查询当前群猜曲游戏状态，不泄露答案或图片本地路径。",
                  parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["猜曲", "猜歌", "游戏状态"]),
             dict(id="help.read", name="nb_unibot_help", description="发送原 UniBot 指令帮助图片，不包含模型管理权限。",
-                 parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["帮助", "chuhelp", "命令列表"])]
+                 parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["帮助", "chuhelp", "命令列表"]),
+            dict(id="player.bind", name="nb_unibot_bind", description="绑定当前真实发起人的落雪好友码；需要用户确认后写入。",
+                 parameters=BindArgs.model_json_schema(), effect="write", keywords=["绑定", "bind", "好友码"]),
+            dict(id="score.submit", name="nb_unibot_score_submit", description="给当前真实发起人保存一条手动成绩；需要用户确认后写入。",
+                 parameters=ManualScoreArgs.model_json_schema(), effect="write", keywords=["传分", "手动成绩", "保存成绩"])]
 
 
 async def invoke_capability(name, arguments, context):
@@ -75,6 +93,8 @@ async def invoke_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
+    if name in {"player.bind", "score.submit"} and not context.get("confirmed", False):
+        return outcome("AUTHORIZATION_REQUIRED", "需要当前用户核对操作预览并确认。", status="denied")
     try:
         if name == "song.search":
             args = SearchArgs.model_validate(arguments)
@@ -126,6 +146,14 @@ async def invoke_capability(name, arguments, context):
             EmptyArgs.model_validate(arguments)
             from .services.help import read
             output = await read()
+        elif name == "player.bind":
+            args = BindArgs.model_validate(arguments)
+            from .services.scores import bind
+            output = await bind(str(event.user_id), args.friend_code)
+        elif name == "score.submit":
+            args = ManualScoreArgs.model_validate(arguments)
+            from .services.scores import submit_manual
+            output = await submit_manual(str(event.user_id), args.query, args.level_index, args.score, args.combo)
         else:
             return outcome("CAPABILITY_DISABLED", "能力未注册。", status="unavailable")
     except ValidationError:
@@ -137,3 +165,13 @@ async def invoke_capability(name, arguments, context):
 def set_job_notifier(callback_or_none):
     global _job_notifier
     _job_notifier = callback_or_none
+
+
+async def notify_job(job):
+    callback = _job_notifier
+    if callback is None:
+        return False
+    value = callback(job)
+    if inspect.isawaitable(value):
+        await value
+    return True
