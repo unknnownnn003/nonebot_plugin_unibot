@@ -64,3 +64,18 @@ async def best(qq, mode="b", version="2026", *, migrate_legacy=False):
         return outcome("RENDER_FAILED", "生成 B30 图片失败。", status="unavailable")
     return outcome(data={"mode": "b30", "constant_source": "chunirec",
                          "b30_average": b.section_average(items, 30)}, artifacts=[image(content)])
+
+
+async def profile(qq):
+    from ..get_player_songlist import query_player_profile
+    return await query_player_profile(qq)
+
+
+async def progress(qq, query):
+    from ..overpower_list_local import query_progress
+    return await query_progress(qq, query)
+
+
+async def recommend(qq, query=""):
+    from ..recommendation import recommend_chart
+    return await recommend_chart(qq, "推什么 " + query)

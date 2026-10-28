@@ -1,3 +1,6 @@
+import asyncio
+import aiofiles
+from .services.results import outcome, image
 import json
 import os
 import random
@@ -110,128 +113,104 @@ def render_recommendation_image(song: dict, diff: dict, user_score: int, user_op
     final_img.convert("RGB").save(buf, format="JPEG", quality=90)
     return buf.getvalue()
 
-@recommend_cmd.handle()
-async def _(event: MessageEvent):
-    user_qq = str(event.get_user_id())
-    msg_raw = event.get_plaintext().strip()
-    
-    # 解析可能附带的等级或状态
-    prefix = "推什么"
+async def recommend_chart(user_qq, query_text, progress=None):
+    msg_raw = query_text
+    prefix = '推什么'
     level_filter = None
     status_filter = None
     if msg_raw.startswith(prefix):
         level_filter = msg_raw[len(prefix):].strip()
-        if level_filter.lower() in ("aj", "ajc", "fc"):
+        if level_filter.lower() in ('aj', 'ajc', 'fc'):
             status_filter = level_filter.lower()
             level_filter = None
         elif not level_filter:
             level_filter = None
-
     if not os.path.exists(SONGLIST_PATH):
-        await recommend_cmd.finish("未找到曲库数据，请先更新 songlist.json。")
+        return outcome('NOT_CONFIGURED', '未找到曲库数据，请先更新 songlist.json。', status='unavailable')
         return
-
     try:
-        with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        songs = data.get("songs", [])
+        async with aiofiles.open(SONGLIST_PATH, 'r', encoding='utf-8') as f:
+            data = json.loads(await f.read())
+        songs = data.get('songs', [])
     except Exception as e:
-        logger.error(f"读取 songlist.json 出错: {e}")
-        await recommend_cmd.finish("读取曲库数据失败。")
+        logger.error(f'读取 songlist.json 出错: {e}')
+        return outcome('INVALID_DATA', '读取曲库数据失败。', status='unavailable')
         return
-
-    score_path = os.path.join(SCORE_DIR, f"{user_qq}.json")
+    score_path = os.path.join(SCORE_DIR, f'{user_qq}.json')
     has_score = os.path.exists(score_path)
-    
     score_dict = {}
     if has_score:
         try:
-            with open(score_path, "r", encoding="utf-8") as f:
-                user_scores = json.load(f)
+            async with aiofiles.open(score_path, 'r', encoding='utf-8') as f:
+                user_scores = json.loads(await f.read())
             if isinstance(user_scores, list):
                 for s in user_scores:
-                    s_id = str(s.get("id"))
-                    s_lv = str(s.get("level_index"))
+                    s_id = str(s.get('id'))
+                    s_lv = str(s.get('level_index'))
                     if not s_id or not s_lv:
                         continue
-                    key = f"{s_id}_{s_lv}"
-                    old_s = score_dict.get(key, {}).get("score", 0)
-                    new_s = int(s.get("score", 0))
+                    key = f'{s_id}_{s_lv}'
+                    old_s = score_dict.get(key, {}).get('score', 0)
+                    new_s = int(s.get('score', 0))
                     if new_s >= old_s:
                         score_dict[key] = s
         except Exception as e:
-            logger.error(f"读取用户分数记录失败 {user_qq}: {e}")
+            logger.error(f'读取用户分数记录失败 {user_qq}: {e}')
             has_score = False
-
     candidates = []
-    
     for song in songs:
-        song_id = str(song.get("id"))
-        for diff in song.get("difficulties", []):
-            level_index = str(diff.get("difficulty", ""))
-            
-            # 只随机 Master (3) 和 Ultima (4) 难度
-            if level_index not in ("3", "4"):
+        song_id = str(song.get('id'))
+        for diff in song.get('difficulties', []):
+            level_index = str(diff.get('difficulty', ''))
+            if level_index not in ('3', '4'):
                 continue
-
-            level_str = str(diff.get("level", ""))
-            level_value = float(diff.get("level_value", 0.0))
-            
-            # 过滤指定等级
+            level_str = str(diff.get('level', ''))
+            level_value = float(diff.get('level_value', 0.0))
             if level_filter and level_str != level_filter:
                 continue
-                
             max_op = (level_value + 3.0) * 5.0
-            key = f"{song_id}_{level_index}"
-            
+            key = f'{song_id}_{level_index}'
             if has_score:
                 s_info = score_dict.get(key)
                 user_sc = 0
                 user_op = 0.0
-                fc = ""
+                fc = ''
                 if s_info:
-                    user_sc = int(s_info.get("score", 0))
-                    fc = str(s_info.get("full_combo", "")).lower()
+                    user_sc = int(s_info.get('score', 0))
+                    fc = str(s_info.get('full_combo', '')).lower()
                     user_op = calculate_op(level_value, user_sc, fc)
-
                 if status_filter:
                     can_push = False
-                    if status_filter == "ajc":
-                        can_push = (fc != "alljusticecritical")
-                    elif status_filter == "aj":
-                        can_push = (fc not in ("alljustice", "alljusticecritical"))
-                    elif status_filter == "fc":
-                        can_push = (fc not in ("fullcombo", "alljustice", "alljusticecritical"))
-                    
+                    if status_filter == 'ajc':
+                        can_push = fc != 'alljusticecritical'
+                    elif status_filter == 'aj':
+                        can_push = fc not in ('alljustice', 'alljusticecritical')
+                    elif status_filter == 'fc':
+                        can_push = fc not in ('fullcombo', 'alljustice', 'alljusticecritical')
                     if can_push:
                         candidates.append((song, diff, user_sc, user_op, max_op))
-                else:
-                    # 只有 overpower 还没推满的（不是100%）才加入候选项
-                    if max_op - user_op > 0.001:
-                        candidates.append((song, diff, user_sc, user_op, max_op))   
+                elif max_op - user_op > 0.001:
+                    candidates.append((song, diff, user_sc, user_op, max_op))
+            elif status_filter:
+                candidates.append((song, diff, 0, 0.0, max_op))
             else:
-                if status_filter:
-                    candidates.append((song, diff, 0, 0.0, max_op))
-                else:
-                    candidates.append((song, diff, 0, 0.0, max_op))
-
+                candidates.append((song, diff, 0, 0.0, max_op))
     if not candidates:
-        await recommend_cmd.finish("未找到符合条件可推的谱面。")  
+        return outcome('NOT_FOUND', '未找到符合条件可推的谱面。', status='needs_input')
         return
-
-    # 随机选择一首
     chosen_song, chosen_diff, user_score, user_op, max_op = random.choice(candidates)
-    
-    # 尝试下载/获取曲绘
-    song_id = int(chosen_song.get("id", 0))
+    song_id = int(chosen_song.get('id', 0))
     jacket_id = song_id
-    # 如果是WE谱面，jacket_id可能等于origin_id，此处若需要可做额外处理
-    if chosen_diff.get("difficulty") == 4:
-        jacket_id = chosen_song.get("origin_id", song_id)
-
+    if chosen_diff.get('difficulty') == 4:
+        jacket_id = chosen_song.get('origin_id', song_id)
     jacket_img = await download_jacket(jacket_id)
-    
-    # 生成图片
-    img_bytes = render_recommendation_image(chosen_song, chosen_diff, user_score, user_op, max_op, jacket_img, has_score)
-    
-    await recommend_cmd.finish(MessageSegment.image(img_bytes))
+    img_bytes = await asyncio.to_thread(render_recommendation_image, chosen_song, chosen_diff, user_score, user_op, max_op, jacket_img, has_score)
+    return outcome(data={'song_id': song_id, 'title': chosen_song.get('title'), 'score': user_score, 'current_op': user_op, 'theoretical_op': max_op}, artifacts=[image(img_bytes)])
+
+
+@recommend_cmd.handle()
+async def _(event: MessageEvent):
+    result = await recommend_chart(str(event.get_user_id()), event.get_plaintext().strip())
+    if result["artifacts"]:
+        await recommend_cmd.finish(MessageSegment.image(result["artifacts"][0]["content"]))
+    await recommend_cmd.finish(result["fallback_text"])

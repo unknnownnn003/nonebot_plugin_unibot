@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing import Literal
 
 API_VERSION = 1
-CAPABILITY_VERSION = "3.1.0"
+CAPABILITY_VERSION = "3.1.1"
 
 
 class SearchArgs(BaseModel):
@@ -18,11 +18,28 @@ class BestArgs(BaseModel):
     version: str = Field("2026", max_length=16)
 
 
+class EmptyArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class RecommendArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    filter: str = Field("", max_length=20, description="原推什么参数：等级如13+，或aj/ajc/fc；空为全部")
+
+
 def describe_capabilities():
     return [dict(id="song.search", name="nb_unibot_song", description="中二节奏查歌、歌曲详情与歧义候选图。",
                  parameters=SearchArgs.model_json_schema(), effect="none", keywords=["中二", "是什么歌", "查歌", "歌曲", "曲目"]),
             dict(id="player.best", name="nb_unibot_best", description="查询当前发起人的原始成绩图；b国服B30+N20，b30本地日服定数B30。",
-                 parameters=BestArgs.model_json_schema(), effect="none", keywords=["查分", "成绩", "b30", "b图", "rating", "最近打得"])]
+                 parameters=BestArgs.model_json_schema(), effect="none", keywords=["查分", "成绩", "b30", "b图", "rating", "最近打得"]),
+            dict(id="player.profile", name="nb_unibot_profile", description="当前发起人的原个人信息图，保留落雪与Rin回退。",
+                 parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["个人信息", "玩家信息", "个人资料"]),
+            dict(id="player.progress", name="nb_unibot_progress", description="当前发起人的原国服OP进度图（chulist）；query沿用难度/定数/版本/分类条件。",
+                 parameters=SearchArgs.model_json_schema(), effect="none", keywords=["进度", "chulist", "完成率"]),
+            dict(id="player.recommend", name="nb_unibot_recommend", description="原推什么算法推荐当前发起人可推的谱面；保留原图。",
+                 parameters=RecommendArgs.model_json_schema(), effect="none", keywords=["推荐", "推什么", "推分"]),
+            dict(id="song.aliases", name="nb_unibot_aliases", description="查询中二歌曲原本地别名；歧义时返回候选。",
+                 parameters=SearchArgs.model_json_schema(), effect="none", keywords=["别名", "外号"])]
 
 
 async def invoke_capability(name, arguments, context):
@@ -36,10 +53,26 @@ async def invoke_capability(name, arguments, context):
             args = SearchArgs.model_validate(arguments)
             from .services.song import search
             output = await search(args.query)
+        elif name == "song.aliases":
+            args = SearchArgs.model_validate(arguments)
+            from .services.song import aliases
+            output = await aliases(args.query)
         elif name == "player.best":
             args = BestArgs.model_validate(arguments)
             from .services.player import best
             output = await best(str(event.user_id), args.mode, args.version)
+        elif name == "player.profile":
+            EmptyArgs.model_validate(arguments)
+            from .services.player import profile
+            output = await profile(str(event.user_id))
+        elif name == "player.progress":
+            args = SearchArgs.model_validate(arguments)
+            from .services.player import progress
+            output = await progress(str(event.user_id), args.query)
+        elif name == "player.recommend":
+            args = RecommendArgs.model_validate(arguments)
+            from .services.player import recommend
+            output = await recommend(str(event.user_id), args.filter)
         else:
             return outcome("CAPABILITY_DISABLED", "能力未注册。", status="unavailable")
     except ValidationError:

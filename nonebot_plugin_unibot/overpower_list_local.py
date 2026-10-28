@@ -1,3 +1,6 @@
+import asyncio
+import aiofiles
+from .services.results import outcome, image
 import json
 import os
 import time
@@ -555,84 +558,62 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
     img.save(buf, format="PNG")
     return buf.getvalue()
 
-@chulist_cmd.handle()
-async def _(event: Event, msg: Message = CommandArg()):
-    query_text = msg.extract_plain_text().strip()
-    
+async def query_progress(user_qq, query_text, progress=None):
     no_cat = False
-    if "--nocat" in query_text:
+    if '--nocat' in query_text:
         no_cat = True
-        query_text = query_text.replace("--nocat", "").strip()
-
+        query_text = query_text.replace('--nocat', '').strip()
     if not query_text:
-        await chulist_cmd.finish("请提供查询条件（难度/定数/版本/分类等），例如: /chulist 13+ sun 车万")
+        return outcome('INVALID_ARGUMENT', '请提供查询条件（难度/定数/版本/分类等），例如: /chulist 13+ sun 车万', status='needs_input')
         return
-        
-    user_qq = str(event.get_user_id())
-    user_best, upload_date = parse_user_data(user_qq)
+    user_best, upload_date = await asyncio.to_thread(parse_user_data, user_qq)
     if user_best is None:
-        await chulist_cmd.finish("数据不存在，请发送/chuupdate")
+        return outcome('NO_SCORES', '数据不存在，请发送/chuupdate', status='needs_input')
         return
-        
-    target_charts = get_target_charts(query_text)
+    target_charts = await asyncio.to_thread(get_target_charts, query_text)
     if not target_charts:
-        await chulist_cmd.finish("未找到符合条件的谱面！")
+        return outcome('NOT_FOUND', '未找到符合条件的谱面！', status='needs_input')
         return
-        
-    await chulist_cmd.send("收到，正在处理...")
+    if progress:
+        await progress()
     player_info = await get_player_info_api(user_qq)
-    
     draw_items = []
     song_stats = {}
-
     for c in target_charts:
-        key = f'{c["song_id"]}_{c["level_index"]}'
-        theoretical_op = c["theoretical_op"]
-
+        key = f"{c['song_id']}_{c['level_index']}"
+        theoretical_op = c['theoretical_op']
         play = user_best.get(key)
         if play:
-            score = play["score"]
-            fc = play["full_combo"]
-            op = calculate_op(c["level_value"], score, fc)
+            score = play['score']
+            fc = play['full_combo']
+            op = calculate_op(c['level_value'], score, fc)
         else:
             op = 0.0
             score = 0
-            fc = ""
-
-        s_id = str(c["song_id"])
+            fc = ''
+        s_id = str(c['song_id'])
         if s_id not in song_stats:
-            song_stats[s_id] = {"max_op": 0.0, "max_theoretical_op": 0.0}
-            
-        if op > song_stats[s_id]["max_op"]:
-            song_stats[s_id]["max_op"] = op
-            
-        if theoretical_op > song_stats[s_id]["max_theoretical_op"]:
-            song_stats[s_id]["max_theoretical_op"] = theoretical_op
-
+            song_stats[s_id] = {'max_op': 0.0, 'max_theoretical_op': 0.0}
+        if op > song_stats[s_id]['max_op']:
+            song_stats[s_id]['max_op'] = op
+        if theoretical_op > song_stats[s_id]['max_theoretical_op']:
+            song_stats[s_id]['max_theoretical_op'] = theoretical_op
         percent = op / theoretical_op * 100 if theoretical_op > 0 else 0.0
-
-        draw_items.append({
-            "song_name": c.get("song_name", "Unknown"),
-            "song_id": c["song_id"],
-            "jacket_id": c.get("jacket_id", c["song_id"]),
-            "level_index": int(c["level_index"]),
-            "level_value": c["level_value"],
-            "score": score,
-            "over_power": op,
-            "percent": percent,
-            "full_combo": fc,
-            "theoretical_op": theoretical_op
-        })
-        
-
-    total_op = sum(stats["max_op"] for stats in song_stats.values())
-    total_theoretical_op = sum(stats["max_theoretical_op"] for stats in song_stats.values())
-
+        draw_items.append({'song_name': c.get('song_name', 'Unknown'), 'song_id': c['song_id'], 'jacket_id': c.get('jacket_id', c['song_id']), 'level_index': int(c['level_index']), 'level_value': c['level_value'], 'score': score, 'over_power': op, 'percent': percent, 'full_combo': fc, 'theoretical_op': theoretical_op})
+    total_op = sum((stats['max_op'] for stats in song_stats.values()))
+    total_theoretical_op = sum((stats['max_theoretical_op'] for stats in song_stats.values()))
     try:
-        img_bytes = draw_chulist_image(draw_items, total_op, total_theoretical_op, query_text, player_info, upload_date, no_cat=no_cat)
+        img_bytes = await asyncio.to_thread(draw_chulist_image, draw_items, total_op, total_theoretical_op, query_text, player_info, upload_date, no_cat=no_cat)
     except Exception as e:
-        logger.error(f"Image gen failed: {e}")
-        await chulist_cmd.finish("生成图片失败。")
+        logger.error(f'Image gen failed: {e}')
+        return outcome('RENDER_FAILED', '生成图片失败。', status='unavailable')
         return
-        
-    await chulist_cmd.finish(MessageSegment.image(img_bytes))
+    return outcome(data={'total_op': total_op, 'theoretical_op': total_theoretical_op, 'chart_count': len(draw_items), 'constant_source': 'lx'}, artifacts=[image(img_bytes)])
+
+
+@chulist_cmd.handle()
+async def _(event: Event, msg: Message = CommandArg()):
+    result = await query_progress(str(event.get_user_id()), msg.extract_plain_text().strip(), progress=lambda: chulist_cmd.send("收到，正在处理..."))
+    if result["artifacts"]:
+        await chulist_cmd.finish(MessageSegment.image(result["artifacts"][0]["content"]))
+    await chulist_cmd.finish(result["fallback_text"])

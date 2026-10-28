@@ -27,3 +27,15 @@ async def search(query):
     content = await asyncio.to_thread(s.render_song_image, local_song, detail, jacket)
     return outcome(data={"id": song_id, "title": local_song.get("title"),
                          "data_source": local_song.get("data_source")}, artifacts=[image(content)])
+
+
+async def aliases(query):
+    from .. import song as s
+    matches = await asyncio.to_thread(s.find_song_matches, query, limit=8)
+    song, ambiguous = s.pick_song_match(matches)
+    if ambiguous:
+        return outcome("AMBIGUOUS_TARGET", "请提供更精确的名称或ID。", status="needs_input",
+                       data={"candidates": [{"id": m["song"].get("id"), "title": m["song"].get("title")} for m in ambiguous[:8]]})
+    if song is None:
+        return outcome("NOT_FOUND", "未找到匹配的曲目。", status="needs_input")
+    return outcome(data={"id": song.get("id"), "title": song.get("title"), "aliases": song.get("aliases", [])})
