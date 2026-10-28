@@ -144,6 +144,8 @@ async def random_story(bot, event):
     import random
     name = random.choice(list(mapping))
     path = mapping[name]
+    if _safe_local_path(story, str(path)) is None:
+        return outcome("INVALID_DATA", "剧情索引包含越权路径，已拒绝读取。", status="unavailable")
     async def present(current_bot, current_event):
         return await _present(current_bot, current_event, str(name), str(path))
     return outcome(data={"name": str(name), "scope": "local_story_index"},
