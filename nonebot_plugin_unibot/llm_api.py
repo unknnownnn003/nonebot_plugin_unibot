@@ -12,6 +12,11 @@ class SearchArgs(BaseModel):
     query: str = Field(min_length=1, max_length=120)
 
 
+class SongIdArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    song_id: str = Field(min_length=1, max_length=40)
+
+
 class BestArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     mode: Literal["b", "b30"] = "b"
@@ -40,6 +45,8 @@ class StoryCategoryArgs(BaseModel):
 def describe_capabilities():
     return [dict(id="song.search", name="nb_unibot_song", description="中二节奏查歌、歌曲详情与歧义候选图。",
                  parameters=SearchArgs.model_json_schema(), effect="none", keywords=["中二", "是什么歌", "查歌", "歌曲", "曲目"]),
+            dict(id="song.detail", name="nb_unibot_song_detail", description="按明确歌曲 ID 查询中二节奏详情并发送原曲目图片。",
+                 parameters=SongIdArgs.model_json_schema(), effect="none", keywords=["歌曲详情", "曲目详情", "歌曲ID"]),
             dict(id="player.best", name="nb_unibot_best", description="查询当前发起人的原始成绩图；b国服B30+N20，b30本地日服定数B30。",
                  parameters=BestArgs.model_json_schema(), effect="none", keywords=["查分", "成绩", "b30", "b图", "rating", "最近打得"]),
             dict(id="player.profile", name="nb_unibot_profile", description="当前发起人的原个人信息图，保留落雪与Rin回退。",
@@ -71,6 +78,10 @@ async def invoke_capability(name, arguments, context):
             args = SearchArgs.model_validate(arguments)
             from .services.song import search
             output = await search(args.query)
+        elif name == "song.detail":
+            args = SongIdArgs.model_validate(arguments)
+            from .services.song import detail
+            output = await detail(args.song_id)
         elif name == "song.aliases":
             args = SearchArgs.model_validate(arguments)
             from .services.song import aliases

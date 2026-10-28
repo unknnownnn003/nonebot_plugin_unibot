@@ -39,3 +39,24 @@ async def aliases(query):
     if song is None:
         return outcome("NOT_FOUND", "未找到匹配的曲目。", status="needs_input")
     return outcome(data={"id": song.get("id"), "title": song.get("title"), "aliases": song.get("aliases", [])})
+
+
+async def detail(song_id):
+    """Render details for one explicit local song ID without fuzzy selection."""
+    from .. import song as s
+
+    matches = await asyncio.to_thread(s.find_song_matches, str(song_id), limit=8)
+    local_song = next((item["song"] for item in matches
+                       if str(item.get("song", {}).get("id")) == str(song_id)), None)
+    if local_song is None:
+        return outcome("NOT_FOUND", "没有找到这个曲目 ID。", status="needs_input")
+    detail_data = await s.fetch_song_detail(local_song.get("id"))
+    if not detail_data:
+        if local_song.get("data_source") == "chunirec":
+            detail_data = local_song
+        else:
+            return outcome("UPSTREAM_UNAVAILABLE", "已找到曲目，但获取详情失败，请稍后重试。", status="unavailable")
+    jacket = await s.download_jacket(local_song.get("id"))
+    content = await asyncio.to_thread(s.render_song_image, local_song, detail_data, jacket)
+    return outcome(data={"id": local_song.get("id"), "title": local_song.get("title"),
+                         "data_source": local_song.get("data_source")}, artifacts=[image(content)])
