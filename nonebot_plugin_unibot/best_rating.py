@@ -830,77 +830,21 @@ def parse_version(raw: str) -> str:
 
 @best_rating_cmd.handle()
 async def _(event: MessageEvent, msg: Message = CommandArg()):
+    from .services.player import best
     version = parse_version(msg.extract_plain_text())
-    if version != SUPPORTED_VERSION:
-        if version in KNOWN_FUTURE_VERSIONS:
-            await best_rating_cmd.finish(f"当前只能生成 {SUPPORTED_VERSION} 的 B30/N20。{version} 属于日服新版本，当前本地曲库与落雪中二数据还不支持。")
-        await best_rating_cmd.finish("版本参数暂不支持。可用：/b 或 /b 2026")
-    if not config.lxns_token:
-        await best_rating_cmd.finish("未配置落雪开发者密钥，无法从落雪获取 B30/N20。")
-
-    qq = str(event.get_user_id())
-    await best_rating_cmd.send("收到，正在处理...")
-    async with httpx.AsyncClient() as client:
-        friend_code, player = await resolve_player(client, qq)
-    if not friend_code:
-        await best_rating_cmd.finish("未找到落雪玩家信息，请先使用 /bind 绑定好友码，或确认落雪已绑定当前账号。")
-
-    raw_b30, raw_n20, err = await fetch_lxns_bests(friend_code)
-    if err:
-        logger.warning(f"获取落雪 Best 失败: {err}")
-        await best_rating_cmd.finish("获取落雪 B30/N20 失败，请稍后再试。")
-
-    songs, new_versions = load_song_data()
-    chart_meta = build_chart_meta(songs, const_source="lx")
-    b30_items = [item for item in (normalize_lxns_item(row, chart_meta) for row in raw_b30 if isinstance(row, dict)) if item]
-    n20_items = [item for item in (normalize_lxns_item(row, chart_meta) for row in raw_n20 if isinstance(row, dict)) if item]
-    b30_items.sort(key=lambda x: (x["rating"], x["score"]), reverse=True)
-    n20_items.sort(key=lambda x: (x["rating"], x["score"]), reverse=True)
-    if not b30_items and not n20_items:
-        await best_rating_cmd.finish("落雪没有返回可展示的 B30/N20 数据。")
-
-    local_scores = load_local_scores(qq)
-    suggestions = build_recommendations(local_scores, chart_meta, b30_items[:30], n20_items[:20], new_versions)
-    player = dict(player)
-    player["rating"] = total_rating_raw(b30_items, n20_items)
-    try:
-        jacket_images = await prepare_jackets(b30_items[:30] + n20_items[:20] + suggestions)
-        img_bytes = draw_best_image(player, b30_items[:30], n20_items[:20], suggestions, jacket_images, version)
-    except Exception as e:
-        logger.exception(f"生成 B30/N20 图片失败: {e}")
-        await best_rating_cmd.finish("生成 B30/N20 图片失败。")
-    await best_rating_cmd.finish(MessageSegment.image(img_bytes))
+    if version == SUPPORTED_VERSION and config.lxns_token:
+        await best_rating_cmd.send("收到，正在处理...")
+    result = await best(str(event.get_user_id()), "b", version)
+    if result["artifacts"]:
+        await best_rating_cmd.finish(MessageSegment.image(result["artifacts"][0]["content"]))
+    await best_rating_cmd.finish(result["fallback_text"])
 
 
 @best_rating_30_cmd.handle()
 async def _(event: MessageEvent):
-    qq = str(event.get_user_id())
+    from .services.player import best
     await best_rating_30_cmd.send("收到，正在处理...")
-    migrate_legacy_manual_scores(qq)
-
-    songs, _new_versions = load_song_data()
-    chart_meta = build_chart_meta(songs, const_source="chunirec")
-    local_scores = load_b30_scores(qq)
-    if not local_scores:
-        await best_rating_30_cmd.finish("本地没有可用成绩。请先使用 /lxupdate、/chuupdate 或 /传分。")
-
-    items = [
-        item
-        for item in (normalize_local_item(row, chart_meta, const_source="chunirec") for row in local_scores.values())
-        if item and safe_float(item.get("level_value"), 0.0) > 0 and safe_int(item.get("score"), 0) > 0
-    ]
-    items.sort(key=lambda x: (x["rating"], x["score"]), reverse=True)
-    b30_items = items[:30]
-    if not b30_items:
-        await best_rating_30_cmd.finish("本地成绩中没有可用于计算 B30 的谱面。")
-
-    player: Dict[str, Any] = {"UserName": "Local Player", "Level": 0}
-    player.update(load_player_info(qq))
-
-    try:
-        jacket_images = await prepare_jackets(b30_items)
-        img_bytes = draw_b30_image(player, b30_items, jacket_images)
-    except Exception as e:
-        logger.exception(f"生成 B30 图片失败: {e}")
-        await best_rating_30_cmd.finish("生成 B30 图片失败。")
-    await best_rating_30_cmd.finish(MessageSegment.image(img_bytes))
+    result = await best(str(event.get_user_id()), "b30", migrate_legacy=True)
+    if result["artifacts"]:
+        await best_rating_30_cmd.finish(MessageSegment.image(result["artifacts"][0]["content"]))
+    await best_rating_30_cmd.finish(result["fallback_text"])

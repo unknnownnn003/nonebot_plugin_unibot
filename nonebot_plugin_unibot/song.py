@@ -530,36 +530,12 @@ async def _(event: MessageEvent):
     if not match_str:
         return
 
-    matches = find_song_matches(match_str, limit=8)
-    local_song, ambiguous_matches = pick_song_match(matches)
-    if ambiguous_matches:
-        jacket_tasks = [download_match_jacket(m) for m in ambiguous_matches[:8]]
-        jacket_imgs = await asyncio.gather(*jacket_tasks)
-        image_bytes = render_song_candidates_image(match_str, ambiguous_matches[:8], list(jacket_imgs))
-        await song_query.finish(MessageSegment.image(image_bytes))
-        return
-
-    if not local_song:
-        await song_query.finish("没有找到匹配的曲目。")
-        return
-        
-    song_id = local_song.get("id")
-    if not song_id:
-        await song_query.finish("匹配到的曲目数据中缺少ID。")
-        return
-        
-    detail = await fetch_song_detail(song_id)
-    if not detail:
-        if local_song.get("data_source") == "chunirec":
-            detail = local_song
-        else:
-            await song_query.finish("已匹配到曲目，但在获取详情时失败，可能网络连接有误或接口异常。")
-            return
-        
-    jacket_img = await download_jacket(song_id)
-    image_bytes = render_song_image(local_song, detail, jacket_img)
-    
-    await song_query.finish(MessageSegment.image(image_bytes))
+    from .services.song import search
+    result = await search(match_str)
+    for artifact in result["artifacts"]:
+        await song_query.send(MessageSegment.image(artifact["content"]))
+    if not result["artifacts"] and result["fallback_text"]:
+        await song_query.finish(result["fallback_text"])
 
 # ==== 别名管理功能 ====
 add_alias_cmd = on_command("添加别名", priority=10, block=True)
