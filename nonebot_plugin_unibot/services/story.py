@@ -9,6 +9,8 @@ from .results import outcome
 
 def _load_matches(story, query: str):
     index = story.load_index()
+    if not isinstance(index, dict):
+        index = {}
     mapping = index.get("mapping", {}) if isinstance(index, dict) else {}
     if not isinstance(mapping, dict):
         mapping = {}
