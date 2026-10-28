@@ -17,6 +17,24 @@ from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
 
+async def _db_thread(function):
+    """Cancellation must not abandon a thread still holding a SQLite connection."""
+    work = asyncio.create_task(asyncio.to_thread(function))
+    try:
+        return await asyncio.shield(work)
+    except asyncio.CancelledError:
+        while not work.done():
+            try:
+                await asyncio.shield(work)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if work.done() and not work.cancelled():
+            work.exception()  # observe any DB error while preserving cancellation
+        raise
+
+
 TERMINAL = {"succeeded", "failed", "partial", "cancelled", "interrupted", "unknown"}
 
 
@@ -126,7 +144,7 @@ class JobStore:
         if not self._ready:
             async with self._lock:
                 if not self._ready:
-                    await asyncio.to_thread(self._init_sync)
+                    await _db_thread(self._init_sync)
                     self._ready = True
 
     @staticmethod
@@ -175,7 +193,7 @@ class JobStore:
                      json.dumps(payload or {}, ensure_ascii=False), "{}"))
                 return self._row(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()), True
         async with self._lock:
-            return await asyncio.to_thread(op)
+            return await _db_thread(op)
 
     async def get(self, job_id: str) -> Job | None:
         await self.init()
@@ -185,7 +203,7 @@ class JobStore:
                 return self._row(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone())
             finally:
                 db.close()
-        return await asyncio.to_thread(op)
+        return await _db_thread(op)
 
     async def list(self, *, context_id: str, actor_id: str | None = None,
                    bot_id=None, context_type=None, limit: int = 20) -> list[Job]:
@@ -203,7 +221,7 @@ class JobStore:
             finally:
                 db.close()
             return [self._row(row) for row in rows]
-        return await asyncio.to_thread(op)
+        return await _db_thread(op)
 
     async def claim_next(self, provider=None) -> Job | None:
         await self.init()
@@ -221,7 +239,7 @@ class JobStore:
                     if not changed:
                         return None
                     return self._row(db.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone())
-            return await asyncio.to_thread(op)
+            return await _db_thread(op)
 
     async def update(self, job_id: str, *, status: str | None = None, current_step: str | None = None,
                      result: dict[str, Any] | None = None, public_error_code: str | None = None,
@@ -247,7 +265,7 @@ class JobStore:
                 with self._connection() as db:
                     db.execute("UPDATE jobs SET " + ",".join(fields) + " WHERE job_id=?", values)
                     return self._row(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone())
-            return await asyncio.to_thread(op)
+            return await _db_thread(op)
 
     async def cancel(self, job_id: str, *, actor_id: str, allow_other: bool = False,
                      bot_id=None, context_type=None, context_id=None) -> Job | None:
@@ -266,7 +284,7 @@ class JobStore:
                                (status, status, time.time(), time.time() if status == "cancelled" else None, job_id))
                 return self._row(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone())
         async with self._lock:
-            return await asyncio.to_thread(op)
+            return await _db_thread(op)
 
     async def mark_interrupted(self):
         await self.init()
@@ -278,7 +296,7 @@ class JobStore:
                         current_step='interrupted',public_error_code='JOB_INTERRUPTED',updated_at=?,finished_at=?
                         WHERE status IN ('queued','running','cancel_requested')""", (now, now))
                     db.execute("UPDATE jobs SET notification_state='unknown',delivery_state='unknown' WHERE notification_state='sending'")
-            await asyncio.to_thread(op)
+            await _db_thread(op)
 
     async def claim_notification(self, job_id):
         await self.init()
@@ -287,7 +305,7 @@ class JobStore:
                 return db.execute("UPDATE jobs SET notification_state='sending' WHERE job_id=? AND notification_state='pending' AND status IN ('succeeded','failed','partial','cancelled','interrupted','unknown')",
                                   (job_id,)).rowcount == 1
         async with self._lock:
-            return await asyncio.to_thread(op)
+            return await _db_thread(op)
 
     async def pending_notifications(self, provider=None, limit=20):
         await self.init()
@@ -300,7 +318,7 @@ class JobStore:
                 return [self._row(row) for row in rows]
             finally:
                 db.close()
-        return await asyncio.to_thread(op)
+        return await _db_thread(op)
 
     async def claim_expression(self, job_id):
         await self.init()
@@ -308,14 +326,14 @@ class JobStore:
             with self._connection() as db:
                 return db.execute("UPDATE jobs SET expression_state='attempted' WHERE job_id=? AND expression_state='pending'",
                                   (job_id,)).rowcount == 1
-        return await asyncio.to_thread(op)
+        return await _db_thread(op)
 
     async def save_expression(self, job_id, text):
         await self.init()
         def op():
             with self._connection() as db:
                 db.execute("UPDATE jobs SET expression_state='done',expression_text=? WHERE job_id=?", (text, job_id))
-        await asyncio.to_thread(op)
+        await _db_thread(op)
 
     async def queue_position(self, job_id):
         await self.init()
@@ -329,7 +347,7 @@ class JobStore:
                                   (row["provider"], row["rowid"])).fetchone()[0]
             finally:
                 db.close()
-        return await asyncio.to_thread(op)
+        return await _db_thread(op)
 
 
 class QueueFull(RuntimeError):
