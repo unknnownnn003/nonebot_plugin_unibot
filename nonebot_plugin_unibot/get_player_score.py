@@ -340,13 +340,8 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
         "updated_at": now,
     }
 
-    target_json_path = _manual_score_path(str(event.get_user_id()))
-    song_meta = _load_song_meta()
-    old_items = _read_score_json(target_json_path)
-    merged = _replace_manual_score(old_items, row)
-    new_items = _inject_level_value(merged, song_meta)
-    with open(target_json_path, "w", encoding="utf-8") as f:
-        json.dump(new_items, f, ensure_ascii=False, indent=4)
+    from .services.storage import commit_scores
+    await asyncio.to_thread(commit_scores, str(event.get_user_id()), [row], manual=True)
 
     await manual_score.finish(
         f"手动成绩已保存：{local_song.get('title')} {DIFF_NAMES.get(level_index, level_index)} {score}"
@@ -594,11 +589,16 @@ def _parse_file(file_path: str) -> tuple[bool, str, list, dict]:
     """
     try:
         with open(file_path, "rb") as f:
-            raw_data = f.read()
+            raw_data = f.read(10 * 1024 * 1024 + 1)
+        if len(raw_data) > 10 * 1024 * 1024:
+            return False, "文件超过10MB大小限制。", [], {}
             
         if raw_data.startswith(b"\x1f\x8b"):
             try:
-                raw_data = gzip.decompress(raw_data)
+                with gzip.GzipFile(fileobj=io.BytesIO(raw_data)) as compressed:
+                    raw_data = compressed.read(10 * 1024 * 1024 + 1)
+                if len(raw_data) > 10 * 1024 * 1024:
+                    return False, "解压后的文件超过10MB大小限制。", [], {}
             except Exception:
                 pass
                 
@@ -717,69 +717,15 @@ def _parse_file(file_path: str) -> tuple[bool, str, list, dict]:
         return False, f"解析失败：{e}", [], {}
 
 @lxupdate_score.handle()
-async def _(event: MessageEvent):
-    user_qq = str(event.get_user_id())
-    token = (config.lxns_token or "").strip()
-    if not token:
+async def _(bot: Bot, event: MessageEvent):
+    from .services.sync import submit
+    if not (config.lxns_token or "").strip():
         await lxupdate_score.finish("未配置落雪开发者密钥，无法使用 /lxupdate。")
+    result = await submit(bot, event, str(event.user_id), origin="command")
+    if result["code"] in {"JOB_ACCEPTED", "JOB_EXISTS"}:
+        await lxupdate_score.finish(f"{result['public_hint']}\n任务ID：{result['data']['job_id']}")
+    await lxupdate_score.finish(result["fallback_text"])
 
-    await lxupdate_score.send("收到，正在从落雪同步全部成绩，曲目较多时可能耗时较长，请耐心等待...")
-
-    target_json_path = os.path.join(SCORE_DIR, f"{user_qq}.json")
-    info_path = os.path.join(SCORE_DIR, f"{user_qq}_info.json")
-
-    try:
-        async with httpx.AsyncClient() as client:
-            friend_code, player_data, _source = await _resolve_friend_code(client, user_qq, token)
-            if not friend_code:
-                await lxupdate_score.finish("未找到落雪好友码。请先在落雪绑定 QQ，或使用 /bind 好友码 后重试。")
-
-            score_items, status, song_count, failed_required_count, unavailable_required_count, failed_optional_count = await _fetch_lxns_all_scores(client, friend_code, token)
-            if status == 401:
-                await lxupdate_score.finish("落雪开发者密钥无效或权限不足，请检查配置。")
-            if status == 404:
-                await lxupdate_score.finish("落雪没有找到该玩家成绩，请确认好友码是否正确或数据是否已上传到落雪。")
-            if status != 200:
-                logger.error(f"lxns score api failed: status={status}")
-                await lxupdate_score.finish("落雪成绩接口请求失败，请稍后重试。")
-
-            parsed_items, missing_score = _normalize_lxns_score_items(score_items)
-            if not parsed_items:
-                if missing_score:
-                    await lxupdate_score.finish("落雪接口返回了成绩列表，但缺少 score 字段，暂时无法写入本地成绩。")
-                await lxupdate_score.finish("落雪接口没有返回可用成绩，暂未更新本地数据。")
-            if failed_required_count:
-                await lxupdate_score.finish(
-                    f"落雪同步未完成：MASTER/ULTIMA 谱面中有 {failed_required_count} 个请求失败，已取消写入，避免关键成绩变成不完整数据。请稍后重试。"
-                )
-
-            song_meta = _load_song_meta()
-            old_items = _read_score_json(target_json_path)
-            merged = _merge_score_items(old_items, parsed_items)
-            new_items = _inject_level_value(merged, song_meta)
-            with open(target_json_path, "w", encoding="utf-8") as f:
-                json.dump(new_items, f, ensure_ascii=False, indent=4)
-
-            if player_data:
-                with open(info_path, "w", encoding="utf-8") as f:
-                    json.dump(_normalize_lxns_player_info(player_data), f, ensure_ascii=False, indent=4)
-
-            failed_parts = []
-            if unavailable_required_count:
-                failed_parts.append(f"落雪未提供分数的 MASTER/ULTIMA 谱面数: {unavailable_required_count}")
-            if failed_optional_count:
-                failed_parts.append(f"低优先级谱面失败数: {failed_optional_count}")
-            failed_text = ("\n" + "\n".join(failed_parts)) if failed_parts else ""
-            await lxupdate_score.finish(
-                f"落雪同步成功\n本次查询曲目数: {song_count}\n本次获取谱面数: {len(parsed_items)}\n当前总谱面数: {len(new_items)}{failed_text}"
-            )
-    except FinishedException:
-        raise
-    except httpx.TimeoutException:
-        await lxupdate_score.finish("请求落雪接口超时，请稍后重试。")
-    except Exception as e:
-        logger.error(f"lxupdate failed: {e}")
-        await lxupdate_score.finish("从落雪同步成绩时发生意外错误，请查看控制台日志。")
 
 @update_score.handle()
 async def _(bot: Bot, event: MessageEvent, state: T_State):
@@ -800,119 +746,6 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
 
 @update_score.got("file_msg", prompt="请上传lxns查分器导出的分数csv文件或Rin导出的json文件")
 async def get_uploaded_file(bot: Bot, event: MessageEvent):
-    try:
-        user_qq = str(event.get_user_id())
-        msg = event.get_message()
-        file_url = ""
-        local_file = ""
-        base64_data = ""
-        
-        for seg in msg:
-            seg_type = getattr(seg, "type", None)
-            seg_data = getattr(seg, "data", {})
-            if not seg_type and isinstance(seg, dict):
-                seg_type = seg.get("type")
-                seg_data = seg.get("data", {})
-            elif not seg_type and isinstance(seg, tuple) and len(seg) >= 2:
-                seg_type = seg[0]
-                seg_data = seg[1] if isinstance(seg[1], dict) else {}
-                
-            if seg_type == "file":
-                file_url = seg_data.get("url", "")
-                file_id = seg_data.get("file_id")
-                if not file_url and file_id:
-                    try:
-                        file_info = await bot.call_api("get_file", file_id=file_id)
-                        target_info = file_info.get("data", file_info) if isinstance(file_info, dict) else file_info
-                        file_url = target_info.get("url", "")
-                        local_file = target_info.get("file", "")
-                        base64_data = target_info.get("base64", "")
-                    except Exception as e:
-                        logger.error(f"获取文件信息失败: {e}")
-                break
-
-        if not file_url and not local_file and not base64_data:
-            await update_score.finish("未检测到有效的文件，请在使用命令后上传有效文件。")
-
-        temp_file_path = os.path.join(SCORE_DIR, f"{user_qq}_temp.file")
-        target_json_path = os.path.join(SCORE_DIR, f"{user_qq}.json")
-        
-        logger.info(f"开始处理用户 {user_qq} 提供的成绩文件...")
-
-        if base64_data:
-            import base64
-            with open(temp_file_path, "wb") as f:
-                f.write(base64.b64decode(base64_data))
-        elif local_file and os.path.exists(local_file):
-            import shutil
-            shutil.copy2(local_file, temp_file_path)
-        elif file_url:
-            if isinstance(file_url, str):
-                if file_url.startswith("//"):
-                    file_url = f"http:{file_url}"
-                elif file_url.startswith("/") and not os.path.exists(file_url):
-                    file_url = f"http://{file_url}"
-
-            if not isinstance(file_url, str) or not (file_url.startswith("http://") or file_url.startswith("https://")):
-                await update_score.finish("接收到的不是有效的文件链接，更新操作已取消。")
-                
-            try:
-                async with httpx.AsyncClient() as client:
-                    async with client.stream("GET", file_url, timeout=30.0) as resp:
-                        if resp.status_code == 200:
-                            with open(temp_file_path, "wb") as f:
-                                size = 0
-                                async for chunk in resp.aiter_bytes():
-                                    size += len(chunk)
-                                    if size > 10 * 1024 * 1024:
-                                        raise ValueError("文件超过10MB大小限制")
-                                    f.write(chunk)
-                        else:
-                            await update_score.finish("下载文件失败，请稍后重试！")
-            except ValueError as ve:
-                logger.warning(f"上传成绩文件被拒绝: {ve}")
-                await update_score.finish("文件不符合上传要求，更新操作已取消。")
-            except Exception as e:
-                logger.error(f"下载文件发生错误: {e}")
-                await update_score.finish("下载文件时发生网络错误。")
-        else:
-            if isinstance(file_url, str) and os.path.exists(file_url):
-                import shutil
-                shutil.copy2(file_url, temp_file_path)
-            else:
-                await update_score.finish("未能成功提取文件，更新操作已取消。")
-        
-        success, info_msg, parsed_items, player_info_rin = _parse_file(temp_file_path)
-        
-        if os.path.exists(temp_file_path):
-            try:
-                os.remove(temp_file_path)
-            except Exception:
-                pass
-            
-        if success:
-            song_meta = _load_song_meta()
-            old_items = _read_score_json(target_json_path)
-            merged = _merge_score_items(old_items, parsed_items)
-            new_items = _inject_level_value(merged, song_meta)
-            with open(target_json_path, "w", encoding="utf-8") as f:
-                json.dump(new_items, f, ensure_ascii=False, indent=4)
-            
-            if player_info_rin:
-                info_path = os.path.join(SCORE_DIR, f"{user_qq}_info.json")
-                with open(info_path, "w", encoding="utf-8") as f:
-                    json.dump(player_info_rin, f, ensure_ascii=False, indent=4)
-            
-            if player_info_rin:
-                info_path = os.path.join(SCORE_DIR, f"{user_qq}_info.json")
-                with open(info_path, "w", encoding="utf-8") as f:
-                    json.dump(player_info_rin, f, ensure_ascii=False, indent=4)
-            await update_score.finish(f"保存成功\n{info_msg}\n当前总谱面数: {len(new_items)}")
-        else:
-            await update_score.finish("解析失败，请确认文件名和格式(CSV或Rin JSON)是否正确！")
-            
-    except FinishedException:
-        raise
-    except Exception as e:
-        logger.error(f"处理上传成绩文件错误: {e}")
-        await update_score.finish("处理文件时发生意外错误。")
+    from .services.uploads import import_file
+    result = await import_file(bot, event, str(event.user_id))
+    await update_score.finish(result["fallback_text"] or result["public_hint"])

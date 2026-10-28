@@ -42,11 +42,7 @@ async def best(qq, mode="b", version="2026", *, migrate_legacy=False):
         await asyncio.to_thread(b.migrate_legacy_manual_scores, qq)
     songs, _ = await asyncio.to_thread(b.load_song_data)
     meta = b.build_chart_meta(songs, const_source="chunirec")
-    scores = await asyncio.to_thread(b.load_b30_scores, qq)
-    if not migrate_legacy:
-        # Equivalent to migration + read, while leaving both legacy files untouched.
-        legacy = await asyncio.to_thread(b.load_legacy_manual_scores, qq)
-        scores = b.merge_score_rows(list((scores or {}).values()) + legacy)
+    scores = await asyncio.to_thread(b.load_b30_scores, qq, include_legacy=not migrate_legacy)
     if not scores:
         return outcome("NO_SCORES", "本地没有可用成绩。请先使用 /lxupdate、/chuupdate 或 /传分。", status="needs_input")
     items = [item for item in (b.normalize_local_item(r, meta, const_source="chunirec") for r in scores.values())

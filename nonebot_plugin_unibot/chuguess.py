@@ -12,6 +12,7 @@ from nonebot import get_bot, on_command, on_regex
 from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageEvent, MessageSegment
 from nonebot.log import logger
 from nonebot.params import CommandArg
+from .services.storage import atomic_json
 from .song import (
     get_font,
     get_version_name,
@@ -114,9 +115,7 @@ def load_scores() -> Dict[str, int]:
 
 
 def save_scores(scores: Dict[str, int]) -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(SCORE_FILE, "w", encoding="utf-8") as f:
-        json.dump(scores, f, ensure_ascii=False, indent=4)
+    atomic_json(SCORE_FILE, scores)
 
 
 def crop_jacket(img: Image.Image, ratio: int) -> Tuple[Image.Image, int, int, int, int]:
@@ -350,37 +349,20 @@ async def get_hint_text(game: Dict[str, Any]) -> Optional[Tuple[str, Any]]:
     return None
 
 
-async def game_timeout(group_id: str) -> None:
+async def game_timeout(group_id: str, expected=None) -> None:
+    from .services.game import give_up
+    expected = expected or active_games.get(group_id)
     await asyncio.sleep(GAME_TIMEOUT)
-    if group_id not in active_games:
+    result = await give_up(group_id, expected=expected, reason="timeout")
+    if result["status"] != "ok":
         return
-    game = active_games.pop(group_id, None)
-    game_tasks.pop(group_id, None)
-    if game is None:
-        return
-
-    result_img = make_game_result_image(
-        game["song"],
-        game["jacket"],
-        game["crop_x"],
-        game["crop_y"],
-        game["crop_w"],
-        game["crop_h"],
-        game["difficulty"],
-        game["score"],
-        guessed=False,
-    )
     try:
-        bot = get_bot()
-        await bot.send_group_msg(
-            group_id=int(group_id),
-            message=Message(
-                f"时间到！答案是：{game['song'].get('title', 'Unknown')}\n"
-                + MessageSegment.image(result_img)
-            ),
-        )
-    except Exception as e:
-        logger.error(f"发送超时消息失败: {e}")
+        bot = get_bot(expected.get("bot_id")) if expected.get("bot_id") else get_bot()
+        await bot.send_group_msg(group_id=int(group_id), message=Message(
+            MessageSegment.text(f"时间到！答案是：{result['data']['title']}\n")
+            + MessageSegment.image(result["artifacts"][0]["content"])))
+    except Exception as exc:
+        logger.warning(f"发送超时消息失败: {type(exc).__name__}")
 
 
 def parse_difficulty(text: str) -> Optional[str]:
@@ -392,271 +374,79 @@ def parse_difficulty(text: str) -> Optional[str]:
     return None
 
 
+async def present_game_result(matcher, result, mode):
+    if result["status"] != "ok":
+        await matcher.finish(result["fallback_text"])
+    data = result["data"]
+    if mode == "status":
+        cfg = DIFFICULTY_CONFIG[data["difficulty"]]
+        await matcher.finish(
+            f"当前游戏进行中 — {cfg['name']} 难度 (当前{data['score']}分)\n"
+            f"剩余时间: {data['remaining_seconds']}秒\n可用提示类型: {data['hints_remaining']} 种\n"
+            "发送 /chuguess <歌名> 答题 | /提示 获取提示 | /放弃 放弃")
+    if mode == "hint" and not result["artifacts"]:
+        await matcher.finish(data["hint"])
+    if mode == "start":
+        cfg = DIFFICULTY_CONFIG[data["difficulty"]]
+        text = (f"曲绘猜曲 - {cfg['name']} 难度\n猜出这首歌的名字！发送 /chuguess <歌名> 来答题\n"
+                f"发送 /提示 获取提示 | /放弃 放弃本题\n最多可获得 {cfg['score']} 分（使用提示会降低分数）\n")
+    elif mode == "guess":
+        extra = f" (使用了{data['hint_count']}个提示，基础{data['base_score']}分)" if data['hint_count'] else ""
+        text = f"恭喜猜中！答案是：{data['title']}\n+{data['score']} 分!{extra} (总分: {data['total_score']})\n"
+    elif mode == "give_up":
+        text = f"已放弃。答案是：{data['title']}\n"
+    else:
+        text = ""
+    outgoing = Message(MessageSegment.text(text)) if text else Message()
+    for artifact in result["artifacts"]:
+        if artifact["kind"] == "image":
+            outgoing += MessageSegment.image(artifact["content"])
+        else:
+            outgoing += artifact["content"]
+    await matcher.finish(outgoing)
+
+
 @chuguess_cmd.handle()
 async def _(event: MessageEvent, args: Message = CommandArg()):
-    arg_text = args.extract_plain_text().strip()
-    group_id = None
-    if isinstance(event, GroupMessageEvent):
-        group_id = str(event.group_id)
-    else:
+    from .services import game
+    if not isinstance(event, GroupMessageEvent):
         await chuguess_cmd.finish("曲绘猜曲仅在群聊中可用。")
-        return
-
-    async with await _get_group_lock(group_id):
-
-        # Check if there's an active game in this group
-        game = active_games.get(group_id)
-
-        if game and not arg_text:
-            # No args during active game — show current status
-            diff_cfg = DIFFICULTY_CONFIG[game["difficulty"]]
-            elapsed = int(time.time() - game["start_time"])
-            remaining = max(0, GAME_TIMEOUT - elapsed)
-            hints_remaining = [h for h in HINT_TYPES if h not in game["hints_used"] or h in ("more_area", "name_part")]
-            current_score = calc_actual_score(diff_cfg["score"], game["hints_used"])
-            await chuguess_cmd.finish(
-                f"当前游戏进行中 — {diff_cfg['name']} 难度 (当前{current_score}分)\n"
-                f"剩余时间: {remaining}秒\n"
-                f"可用提示类型: {len(hints_remaining)} 种\n"
-                f"发送 /chuguess <歌名> 答题 | /提示 获取提示 | /放弃 放弃"
-            )
-
-        if game and arg_text:
-            # Game active — treat arg as a guess (never restart with new diff)
-            query = arg_text
-            matched = match_song_by_query(query)
-            if not matched:
-                await chuguess_cmd.finish("没有匹配到歌曲，再猜猜看？")
-                return
-
-            matched_id = str(matched.get("id", ""))
-            game_song_id = str(game["song"].get("id", ""))
-
-            if matched_id == game_song_id:
-                # Correct!
-                old_task = game_tasks.pop(group_id, None)
-                if old_task:
-                    old_task.cancel()
-                active_games.pop(group_id, None)
-
-                qq = str(event.get_user_id())
-                base_score = game["score"]
-                actual_score = calc_actual_score(base_score, game["hints_used"])
-                async with _score_lock:
-                    scores = load_scores()
-                    scores[qq] = scores.get(qq, 0) + actual_score
-                    save_scores(scores)
-
-                result_img = make_game_result_image(
-                    game["song"],
-                    game["jacket"],
-                    game["crop_x"],
-                    game["crop_y"],
-                    game["crop_w"],
-                    game["crop_h"],
-                    game["difficulty"],
-                    actual_score,
-                    guessed=True,
-                    guesser_name=event.sender.card or event.sender.nickname or qq,
-                )
-
-                total_score = scores[qq]
-                hint_count = len(game["hints_used"] & SCORE_HINT_TYPES)
-                hint_info = f" (使用了{hint_count}个提示，基础{base_score}分)" if hint_count > 0 else ""
-                await chuguess_cmd.finish(
-                    Message(
-                        f"恭喜猜中！答案是：{game['song'].get('title', '')}\n"
-                        f"+{actual_score} 分!{hint_info} (总分: {total_score})\n"
-                        + MessageSegment.image(result_img)
-                    )
-                )
-            else:
-                await chuguess_cmd.finish("不对哦，再猜猜看～")
-            return
-
-        # Start a new game (only when no game is active)
-        diff_key = parse_difficulty(arg_text) if arg_text else "mas"
-        if diff_key is None:
-            diff_key = "mas"
-
-        # Cancel any existing game for this group (shouldn't have one, but be safe)
-        old_task = game_tasks.pop(group_id, None)
-        if old_task:
-            old_task.cancel()
-        active_games.pop(group_id, None)
-
-        result = pick_random_song_and_jacket()
-        if result is None:
-            await chuguess_cmd.finish("未能加载曲绘，请检查曲库和曲绘数据。")
-            return
-
-        song, jacket, _jacket_id = result
-        diff_cfg = DIFFICULTY_CONFIG[diff_key]
-
-        cropped, cx, cy, cw, ch = crop_jacket(jacket, diff_cfg["ratio"])
-
-        game_state = {
-            "song": song,
-            "jacket": jacket,
-            "crop_x": cx,
-            "crop_y": cy,
-            "crop_w": cw,
-            "crop_h": ch,
-            "difficulty": diff_key,
-            "score": diff_cfg["score"],
-            "start_time": time.time(),
-            "hints_used": set(),
-            "name_reveal_step": 0,
-            "revealed_areas": [(cx, cy, cw, ch)],
-            "group_id": group_id,
-        }
-
-        active_games[group_id] = game_state
-
-        # Start timeout task
-        task = asyncio.create_task(game_timeout(group_id))
-        game_tasks[group_id] = task
-
-        # Send the cropped image
-        crop_buf = io.BytesIO()
-        cropped.convert("RGB").save(crop_buf, format="JPEG", quality=90)
-
-        await chuguess_cmd.finish(
-            Message(
-                f"曲绘猜曲 - {diff_cfg['name']} 难度\n"
-                f"猜出这首歌的名字！发送 /chuguess <歌名> 来答题\n"
-                f"发送 /提示 获取提示 | /放弃 放弃本题\n"
-                f"最多可获得 {diff_cfg['score']} 分（使用提示会降低分数）\n"
-                + MessageSegment.image(crop_buf.getvalue())
-            )
-        )
+    query = args.extract_plain_text().strip()
+    state = await game.status(event.group_id)
+    if state["status"] == "ok":
+        if not query:
+            await present_game_result(chuguess_cmd, state, "status")
+        result = await game.guess(event.group_id, query, str(event.user_id),
+                                  guesser_name=event.sender.card or event.sender.nickname or str(event.user_id))
+        await present_game_result(chuguess_cmd, result, "guess")
+    difficulty = parse_difficulty(query) if query else "mas"
+    result = await game.start(event.group_id, difficulty or "mas", bot_id=str(event.self_id))
+    await present_game_result(chuguess_cmd, result, "start")
 
 
 @hint_cmd.handle()
 async def _(event: MessageEvent):
-    if not isinstance(event, GroupMessageEvent):
-        return
-    group_id = str(event.group_id)
-    game = active_games.get(group_id)
-    if not game:
-        await hint_cmd.finish("当前没有进行中的猜曲游戏。使用 /chuguess 开始一局！")
-        return
-
-    hint_result = await get_hint_text(game)
-    if hint_result is None:
-        await hint_cmd.finish("获取提示失败，请稍后再试。")
-        return
-
-    hint_type, hint_content = hint_result
-    if hint_type == "text":
-        await hint_cmd.finish(hint_content)
-    elif hint_type == "location":
-        await hint_cmd.finish(Message([MessageSegment.text("[提示] 截取位置:"), hint_content]))
-    elif hint_type == "more_area":
-        await hint_cmd.finish(Message([MessageSegment.text("[提示] 额外曲绘区域:"), hint_content]))
+    if isinstance(event, GroupMessageEvent):
+        from .services.game import hint
+        await present_game_result(hint_cmd, await hint(event.group_id), "hint")
 
 
 @giveup_cmd.handle()
 async def _(event: MessageEvent):
-    if not isinstance(event, GroupMessageEvent):
-        return
-    group_id = str(event.group_id)
-    game = active_games.pop(group_id, None)
-    task = game_tasks.pop(group_id, None)
-    if task:
-        task.cancel()
-
-    if not game:
-        await giveup_cmd.finish("当前没有进行中的猜曲游戏。")
-        return
-
-    result_img = make_game_result_image(
-        game["song"],
-        game["jacket"],
-        game["crop_x"],
-        game["crop_y"],
-        game["crop_w"],
-        game["crop_h"],
-        game["difficulty"],
-        game["score"],
-        guessed=False,
-        end_reason="giveup",
-    )
-    await giveup_cmd.finish(
-        Message(
-            f"已放弃。答案是：{game['song'].get('title', 'Unknown')}\n"
-            + MessageSegment.image(result_img)
-        )
-    )
+    if isinstance(event, GroupMessageEvent):
+        from .services.game import give_up
+        await present_game_result(giveup_cmd, await give_up(event.group_id), "give_up")
 
 
 @guess_cmd.handle()
 async def _(event: MessageEvent):
     if not isinstance(event, GroupMessageEvent):
         return
-    group_id = str(event.group_id)
-    game = active_games.get(group_id)
-    if not game:
-        return
-
-    # Extract the guess text from the regex match
-    msg = event.get_plaintext().strip()
-    # Remove leading ./。/猜 prefix
-    for prefix in ["猜 ", "猜", ".猜 ", ".猜", "/猜 ", "/猜", "。猜 ", "。猜"]:
-        if msg.startswith(prefix):
-            query = msg[len(prefix):].strip()
-            break
-    else:
-        query = ""
-
+    import re
+    query = re.sub(r"^[.。/]?猜\s*", "", event.get_plaintext().strip(), count=1)
     if not query:
         await guess_cmd.finish("请输入要猜的歌名，例如：/猜 月葬")
-        return
-
-    matched = match_song_by_query(query)
-    if not matched:
-        await guess_cmd.finish("没有匹配到歌曲，再猜猜看？")
-        return
-
-    matched_id = str(matched.get("id", ""))
-    game_song_id = str(game["song"].get("id", ""))
-
-    if matched_id == game_song_id:
-        old_task = game_tasks.pop(group_id, None)
-        if old_task:
-            old_task.cancel()
-        active_games.pop(group_id, None)
-
-        qq = str(event.get_user_id())
-        base_score = game["score"]
-        actual_score = calc_actual_score(base_score, game["hints_used"])
-        async with _score_lock:
-            scores = load_scores()
-            scores[qq] = scores.get(qq, 0) + actual_score
-            save_scores(scores)
-
-        result_img = make_game_result_image(
-            game["song"],
-            game["jacket"],
-            game["crop_x"],
-            game["crop_y"],
-            game["crop_w"],
-            game["crop_h"],
-            game["difficulty"],
-            actual_score,
-            guessed=True,
-            guesser_name=event.sender.card or event.sender.nickname or qq,
-        )
-
-        total_score = scores[qq]
-        hint_count = len(game["hints_used"] & SCORE_HINT_TYPES)
-        hint_info = f" (使用了{hint_count}个提示，基础{base_score}分)" if hint_count > 0 else ""
-        await guess_cmd.finish(
-            Message(
-                f"恭喜猜中！答案是：{game['song'].get('title', '')}\n"
-                f"+{actual_score} 分!{hint_info} (总分: {total_score})\n"
-                + MessageSegment.image(result_img)
-            )
-        )
-    else:
-        await guess_cmd.finish("不对哦，再猜猜看～")
+    from .services.game import guess
+    result = await guess(event.group_id, query, str(event.user_id),
+                         guesser_name=event.sender.card or event.sender.nickname or str(event.user_id))
+    await present_game_result(guess_cmd, result, "guess")

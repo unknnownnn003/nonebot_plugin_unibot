@@ -20,7 +20,8 @@ async def bind(user_id: str, friend_code: str):
         result["effect"] = "write"
         return result
     result = outcome(data={"user_id": str(user_id), "bound": True})
-    result["effect"] = "write"
+    result["effect"] = "local_write"
+    result["side_effect_state"] = "committed"
     return result
 
 
@@ -46,21 +47,15 @@ async def submit_manual(user_id: str, query: str, level_index: int, score: int, 
            "level_value": diff.get("level_value"), "lx_level_value": diff.get("lx_level_value"),
            "chunirec_level_value": diff.get("chunirec_level_value"), "rank": "", "clear": "",
            "full_combo": s.normalize_manual_combo(combo), "source": "manual", "manual": True, "updated_at": now}
-    path = s._manual_score_path(str(user_id))
-    def write():
-        old = s._read_score_json(path)
-        merged = s._replace_manual_score(old, row)
-        merged = s._inject_level_value(merged, s._load_song_meta())
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        temp = path + ".tmp"
-        with open(temp, "w", encoding="utf-8") as file:
-            json.dump(merged, file, ensure_ascii=False, indent=4)
-        os.replace(temp, path)
+    from .storage import commit_scores
     try:
-        await asyncio.to_thread(write)
+        await asyncio.to_thread(commit_scores, str(user_id), [row], manual=True)
     except Exception:
-        result = outcome("WRITE_FAILED", "手动成绩保存失败，请稍后重试。", status="unavailable"); result["effect"] = "write"; return result
+        result = outcome("WRITE_FAILED", "手动成绩保存失败，请稍后重试。", status="unavailable")
+        result["effect"] = "none"
+        return result
     result = outcome(data={"user_id": str(user_id), "song_id": str(song.get("id")),
                            "title": song.get("title", ""), "level_index": int(level_index), "score": int(score)})
-    result["effect"] = "write"
+    result["effect"] = "local_write"
+    result["side_effect_state"] = "committed"
     return result

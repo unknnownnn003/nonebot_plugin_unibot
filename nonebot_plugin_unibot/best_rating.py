@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 from .config import Config
 from .song import download_jacket
 from .user_bind import get_bind_info
+from .services.storage import locked_player, atomic_json
 
 config = get_plugin_config(Config)
 
@@ -194,12 +195,17 @@ def merge_score_rows(rows: List[Dict[str, Any]]) -> Optional[Dict[Tuple[str, int
     return best or None
 
 
-def load_b30_scores(qq: str) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]]:
-    rows = [row for row in load_score_file(os.path.join(SCORE_DIR, f"{qq}.json")) if row.get("source") != "manual"]
+@locked_player
+def load_b30_scores(qq: str, include_legacy: bool = False) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]]:
+    raw = load_score_file(os.path.join(SCORE_DIR, f"{qq}.json"))
+    rows = [row for row in raw if row.get("source") != "manual"]
     rows.extend(load_score_file(os.path.join(SCORE_DIR, f"{qq}_manual.json")))
+    if include_legacy:
+        rows.extend(row for row in raw if row.get("source") == "manual")
     return merge_score_rows(rows)
 
 
+@locked_player
 def load_player_info(qq: str) -> Dict[str, Any]:
     info_path = os.path.join(SCORE_DIR, f"{qq}_info.json")
     if not os.path.exists(info_path):
@@ -213,21 +219,23 @@ def load_player_info(qq: str) -> Dict[str, Any]:
         return {}
 
 
+@locked_player
 def load_legacy_manual_scores(qq: str) -> List[Dict[str, Any]]:
     rows = load_score_file(os.path.join(SCORE_DIR, f"{qq}.json"))
     return [row for row in rows if row.get("source") == "manual"]
 
 
+@locked_player
 def strip_legacy_manual_scores(qq: str) -> None:
     path = os.path.join(SCORE_DIR, f"{qq}.json")
     rows = load_score_file(path)
     if not rows or not any(row.get("source") == "manual" for row in rows):
         return
     cleaned = [row for row in rows if row.get("source") != "manual"]
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(cleaned, f, ensure_ascii=False, indent=4)
+    atomic_json(path, cleaned)
 
 
+@locked_player
 def migrate_legacy_manual_scores(qq: str) -> None:
     manual_path = os.path.join(SCORE_DIR, f"{qq}_manual.json")
     legacy = load_legacy_manual_scores(qq)
@@ -235,16 +243,17 @@ def migrate_legacy_manual_scores(qq: str) -> None:
         return
     merged = merge_score_rows(load_score_file(manual_path) + legacy)
     if merged:
-        with open(manual_path, "w", encoding="utf-8") as f:
-            json.dump(list(merged.values()), f, ensure_ascii=False, indent=4)
+        atomic_json(manual_path, list(merged.values()))
     strip_legacy_manual_scores(qq)
 
 
+@locked_player
 def load_local_scores_excluding_manual(qq: str) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]]:
     rows = [row for row in load_score_file(os.path.join(SCORE_DIR, f"{qq}.json")) if row.get("source") != "manual"]
     return merge_score_rows(rows)
 
 
+@locked_player
 def load_local_scores(qq: str) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]]:
     rows = [row for row in load_score_file(os.path.join(SCORE_DIR, f"{qq}.json")) if row.get("source") != "manual"]
     return merge_score_rows(rows)

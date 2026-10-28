@@ -4,6 +4,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing import Literal
 import inspect
 
+_job_notifier = None
+
 API_VERSION = 1
 CAPABILITY_VERSION = "3.1.1"
 
@@ -16,6 +18,11 @@ class SearchArgs(BaseModel):
 class SongIdArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     song_id: str = Field(min_length=1, max_length=40)
+
+
+class JobArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    job_id: str = Field(min_length=1, max_length=64)
 
 
 class BestArgs(BaseModel):
@@ -106,7 +113,50 @@ def describe_capabilities():
             dict(id="score.sync", name="nb_unibot_score_sync", description="排队同步当前真实发起人的落雪成绩；需要用户确认后提交任务。",
                  parameters=EmptyArgs.model_json_schema(), effect="write", long_task=True, keywords=["同步成绩", "lxupdate", "全量同步"]),
             dict(id="score.import_file", name="nb_unibot_score_import", description="导入当前消息附带的成绩文件；需要用户确认后写入。",
-                 parameters=EmptyArgs.model_json_schema(), effect="write", keywords=["上传成绩", "chuupdate", "成绩文件"])]
+                 parameters=EmptyArgs.model_json_schema(), effect="write", keywords=["上传成绩", "chuupdate", "成绩文件"]),
+            dict(id="job.list", name="nb_unibot_jobs", description="读取当前Bot/会话中自己的最近任务；不会重新提交任务。",
+                 parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["任务", "进度", "排队", "同步怎么样"]),
+            dict(id="job.get", name="nb_unibot_job", description="按任务ID获取当前会话中自己任务的新鲜状态。",
+                 parameters=JobArgs.model_json_schema(), effect="none", keywords=["任务状态", "任务详情"]),
+            dict(id="job.cancel", name="nb_unibot_cancel_job", description="请求取消当前会话中自己的任务；提交中只能请求取消，不能提前宣称已取消。",
+                 parameters=JobArgs.model_json_schema(), effect="write", keywords=["取消任务", "取消同步", "停止同步"])]
+
+
+async def prepare_capability(name, arguments, context):
+    """Resolve write targets before the user sees a concrete program preview."""
+    import asyncio
+    from nonebot.adapters.onebot.v11 import GroupMessageEvent, PrivateMessageEvent
+    from .services.results import outcome
+    event, bot = context["event"], context["bot"]
+    if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(event.self_id) != str(bot.self_id):
+        return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
+    models = {"player.bind": BindArgs, "score.submit": ManualScoreArgs, "score.sync": EmptyArgs,
+              "score.import_file": EmptyArgs, "game.start": GameStartArgs, "game.guess": GameGuessArgs,
+              "game.hint": EmptyArgs, "game.give_up": EmptyArgs, "job.cancel": JobArgs}
+    try:
+        normalized = models[name].model_validate(arguments).model_dump() if name in models else dict(arguments)
+    except ValidationError:
+        return outcome("INVALID_ARGUMENT", "请核对操作参数。", status="needs_input")
+    constraints = {}
+    if name == "score.submit":
+        from .song import find_song_matches, pick_song_match
+        song, ambiguous = pick_song_match(await asyncio.to_thread(find_song_matches, normalized["query"], 8))
+        if ambiguous:
+            return outcome("AMBIGUOUS_TARGET", "请先用明确歌曲ID指定传分目标。", status="needs_input",
+                           data={"candidates": [{"id": m["song"].get("id"), "title": m["song"].get("title")} for m in ambiguous[:8]]})
+        if not song:
+            return outcome("NOT_FOUND", "未找到匹配的曲目。", status="needs_input")
+        normalized["query"] = str(song["id"])
+        constraints["song_title"] = str(song.get("title", ""))
+    if name in {"game.guess", "game.hint", "game.give_up"}:
+        if not isinstance(event, GroupMessageEvent):
+            return outcome("GROUP_ONLY", "猜曲游戏只在群聊中可用。", status="denied")
+        from .services.game import binding
+        token = await binding(event.group_id)
+        if token is None:
+            return outcome("NO_ACTIVE_GAME", "当前没有进行中的猜曲游戏。", status="needs_input")
+        constraints["game_round_id"] = token
+    return dict(status="ok", code="OK", arguments=normalized, constraints=constraints)
 
 
 async def invoke_capability(name, arguments, context):
@@ -115,8 +165,10 @@ async def invoke_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
-    if name in {"player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up", "game.start", "game.guess"} and not context.get("confirmed", False):
+    if name in {"player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up", "game.start", "game.guess", "job.cancel"} and not context.get("confirmed", False):
         return outcome("AUTHORIZATION_REQUIRED", "需要当前用户核对操作预览并确认。", status="denied")
+    if name in {"game.guess", "game.hint", "game.give_up"} and not context.get("constraints", {}).get("game_round_id"):
+        return outcome("STATE_CHANGED", "操作没有绑定有效猜曲局，请重新预览。", status="needs_input")
     try:
         if name == "song.search":
             args = SearchArgs.model_validate(arguments)
@@ -169,25 +221,27 @@ async def invoke_capability(name, arguments, context):
                 return outcome("GROUP_ONLY", "猜曲游戏只在群聊中可用。", status="denied")
             EmptyArgs.model_validate(arguments)
             from .services.game import hint
-            output = await hint(event.group_id)
+            output = await hint(event.group_id, expected_round=context["constraints"]["game_round_id"])
         elif name == "game.give_up":
             if not isinstance(event, GroupMessageEvent):
                 return outcome("GROUP_ONLY", "猜曲游戏只在群聊中可用。", status="denied")
             EmptyArgs.model_validate(arguments)
             from .services.game import give_up
-            output = await give_up(event.group_id)
+            output = await give_up(event.group_id, expected_round=context["constraints"]["game_round_id"])
         elif name == "game.start":
             if not isinstance(event, GroupMessageEvent):
                 return outcome("GROUP_ONLY", "猜曲游戏只在群聊中可用。", status="denied")
             args = GameStartArgs.model_validate(arguments)
             from .services.game import start
-            output = await start(event.group_id, args.difficulty)
+            output = await start(event.group_id, args.difficulty, bot_id=str(bot.self_id))
         elif name == "game.guess":
             if not isinstance(event, GroupMessageEvent):
                 return outcome("GROUP_ONLY", "猜曲游戏只在群聊中可用。", status="denied")
             args = GameGuessArgs.model_validate(arguments)
             from .services.game import guess
-            output = await guess(event.group_id, args.query, str(event.user_id))
+            output = await guess(event.group_id, args.query, str(event.user_id),
+                                 guesser_name=event.sender.card or event.sender.nickname or str(event.user_id),
+                                 expected_round=context["constraints"]["game_round_id"])
         elif name == "help.read":
             EmptyArgs.model_validate(arguments)
             from .services.help import read
@@ -204,6 +258,10 @@ async def invoke_capability(name, arguments, context):
             EmptyArgs.model_validate(arguments)
             from .services.sync import submit
             output = await submit(bot, event, str(event.user_id))
+        elif name in {"job.list", "job.get", "job.cancel"}:
+            args = EmptyArgs.model_validate(arguments) if name == "job.list" else JobArgs.model_validate(arguments)
+            from .services.sync import query
+            output = await query(bot, event, name.split(".")[1], getattr(args, "job_id", None))
         elif name == "score.import_file":
             EmptyArgs.model_validate(arguments)
             from .services.uploads import import_file
@@ -227,5 +285,16 @@ async def notify_job(job):
         return False
     value = callback(job)
     if inspect.isawaitable(value):
-        await value
-    return True
+        value = await value
+    return value
+
+
+async def claim_job_expression(job_id):
+    from .services.sync import _store
+    return await _store.claim_expression(job_id) if _store is not None else False
+
+
+async def save_job_expression(job_id, text):
+    from .services.sync import _store
+    if _store is not None:
+        await _store.save_expression(job_id, text)
