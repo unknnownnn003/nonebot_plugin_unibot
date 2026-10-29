@@ -195,6 +195,19 @@ class JobStore:
         async with self._lock:
             return await _db_thread(op)
 
+    async def find_submission(self, *, provider, capability_id, operation_id, source_message_id,
+                              bot_id, context_type, context_id, actor_id):
+        await self.init()
+        fingerprint = _fingerprint(provider, capability_id, operation_id, context_id, actor_id, bot_id, context_type)
+        def op():
+            db = self._db()
+            try:
+                return self._row(db.execute("""SELECT * FROM jobs WHERE fingerprint=? AND source_message_id=?
+                    ORDER BY created_at DESC LIMIT 1""", (fingerprint, source_message_id)).fetchone())
+            finally:
+                db.close()
+        return await _db_thread(op)
+
     async def get(self, job_id: str) -> Job | None:
         await self.init()
         def op():
@@ -265,6 +278,16 @@ class JobStore:
                 with self._connection() as db:
                     db.execute("UPDATE jobs SET " + ",".join(fields) + " WHERE job_id=?", values)
                     return self._row(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone())
+            return await _db_thread(op)
+
+    async def start_effect(self, job_id: str, current_step: str) -> bool:
+        """Cancel and platform-attempt admission share one transaction boundary."""
+        await self.init()
+        def op():
+            with self._connection() as db:
+                return db.execute("""UPDATE jobs SET current_step=?,side_effect_state='preparing',updated_at=?
+                    WHERE job_id=? AND status='running'""", (current_step, time.time(), job_id)).rowcount == 1
+        async with self._lock:
             return await _db_thread(op)
 
     async def cancel(self, job_id: str, *, actor_id: str, allow_other: bool = False,

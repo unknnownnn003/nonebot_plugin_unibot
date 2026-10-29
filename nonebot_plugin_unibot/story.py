@@ -303,94 +303,11 @@ async def predownload_images(md_text: str) -> str:
 
 
 async def render_and_send(bot: Bot, event: Event, name: str, file_path: str, matcher):
-    local_path = DATA_DIR / file_path.lstrip('/')
-    if not local_path.exists():
-        await matcher.finish(f"此剧情虽然有索引，但本地文件未找到！请联系超级用户重新拉取文件。")
-        
-    with open(local_path, "r", encoding="utf-8") as f:
-        md_text = f.read()
-
-    # 预先定义护眼背景的CSS
-    base_style = """<style>
-.markdown-body {
-    background-color: #fdf6e3 !important;
-    color: #333333 !important;
-}
-.markdown-body table tr {
-    background-color: #fdf6e3 !important;
-}
-.markdown-body table tr:nth-child(2n) {
-    background-color: #f2e9ce !important;
-}
-</style>
-"""
-
-    if HTMLRENDER_AVAILABLE:
-        await matcher.send("收到，正在处理...")
-        try:
-            # 预下载所有图片以解决渲染时头图不显示的问题
-            md_text = await predownload_images(md_text)
-
-            # 对长文本进行分块，避免一次性渲染对低配服务器施加巨大压力
-            chunks = split_markdown(md_text, max_lines=400)
-            
-            nodes = []
-            nodes.append(
-                MessageSegment.node_custom(
-                    user_id=int(bot.self_id),
-                    nickname="uni",
-                    content=Message(f"当前角色：{name}")
-                )
-            )
-
-            # 遍历渲染每一块
-            for i, chunk in enumerate(chunks):
-                # 只有第一段加上角色大标题
-                header = f"\n# {name}\n\n" if i == 0 else ""
-                chunk_md = base_style + header + chunk
-                
-                # 开始渲染当前分块，适度降低DPI和使用JPEG格式，减少API发送超时风险
-                img_bytes = await md_to_pic(chunk_md, width=800, type="jpeg", quality=90, device_scale_factor=1.5)
-                
-                # 保险起见（某段没有空行或者超长情况），依旧使用 PIL 切分以适应QQ发送限制
-                pieces = split_image(img_bytes, max_height=6000)
-                for piece in pieces:
-                    nodes.append(
-                        MessageSegment.node_custom(
-                            user_id=int(bot.self_id),
-                            nickname="uni",
-                            content=Message(MessageSegment.image(piece))
-                        )
-                    )
-
-            is_group = getattr(event, "message_type", None) == "group"
-            try:
-                if is_group:
-                    await bot.call_api("send_group_forward_msg", group_id=event.group_id, messages=nodes)
-                else:
-                    await bot.call_api("send_private_forward_msg", user_id=event.user_id, messages=nodes)
-            except Exception as e:
-                logger.error(f"合并转发发送失败: {e}")
-                await matcher.send("由于合并转发限制或失败，将退回直接发送前两张图片：")
-                # nodes[1] 开始是图片（nodes[0]是文字来源）
-                img_sent = 0
-                for node in nodes[1:]:
-                    if img_sent >= 2: break
-                    # 这里尝试提取图片内容并发送
-                    try:
-                        img_node_content = node["data"]["content"]
-                        await matcher.send(img_node_content)
-                        img_sent += 1
-                    except:
-                        pass
-
-        except Exception as e:
-            import traceback; logger.error(f"Render failed: {traceback.format_exc()}")
-            await matcher.send("渲染图片失败，请稍后重试或查看控制台日志。")
-    else:
-        # 未安装 HtmlRender 时不降级发送原始 Markdown，避免文本中包含未处理的链接或路径。
-        msg = "未安装 HtmlRender 插件，暂时无法渲染剧情图片。请联系 Bot 管理员安装 Playwright 及 HTMLRender 插件。"
-        await matcher.send(msg)
+    """Compatibility entry: use the same durable story task as other commands."""
+    from .services.story import submit_selected
+    result = await submit_selected(bot, event, name, file_path, origin="command")
+    await matcher.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    return result
 
 
 @cmd_story.handle()
@@ -399,22 +316,22 @@ async def _(bot: Bot, event: Event, args: Message = CommandArg()):
     if not name:
         await cmd_story.finish("请输入要查询的角色名！例如：/查剧情 提亚马特")
     from .services.story import search
-    result = await search(bot, event, name)
-    if result["status"] != "ok":
+    result = await search(bot, event, name, origin="command")
+    if result["status"] not in {"ok", "running"}:
         if result["code"] == "AMBIGUOUS_TARGET":
             names_str = "、".join(item["name"] for item in result["data"].get("candidates", []))
             await cmd_story.finish(f"匹配到多个结果，请提供更精确的名称:\n{names_str}")
         await cmd_story.finish(result["fallback_text"])
-    receipt = await result["artifacts"][0]["present"](bot, event)
-    if receipt.get("delivery") == "unknown":
-        await cmd_story.finish("渲染图片失败，请稍后重试或查看控制台日志。")
+    await cmd_story.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    event.__dict__.setdefault("_native_capability_results", {})["story.search"] = dict(
+        status=result["status"], code=result["code"], delivery="sent")
 
 @cmd_random.handle()
 async def _(bot: Bot, event: Event):
     from .services.story import random_story
-    result = await random_story(bot, event)
-    if result["status"] != "ok":
+    result = await random_story(bot, event, origin="command")
+    if result["status"] not in {"ok", "running"}:
         await cmd_random.finish(result["fallback_text"])
-    receipt = await result["artifacts"][0]["present"](bot, event)
-    if receipt.get("delivery") == "unknown":
-        await cmd_random.finish("渲染图片失败，请稍后重试或查看控制台日志。")
+    await cmd_random.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    event.__dict__.setdefault("_native_capability_results", {})["story.random"] = dict(
+        status=result["status"], code=result["code"], delivery="sent")

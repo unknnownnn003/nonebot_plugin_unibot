@@ -8,7 +8,7 @@ from .services.permissions import native_superuser
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "3.1.4"
+CAPABILITY_VERSION = "3.1.5"
 
 
 class SearchArgs(BaseModel):
@@ -109,12 +109,12 @@ def describe_capabilities():
                  parameters=AliasArgs.model_json_schema(), effect="write", keywords=["添加别名", "加别名", "外号"]),
             dict(id="song.alias_delete", name="nb_unibot_alias_delete", description="删除明确歌曲ID的本地别名；仅SUPERUSER，需要确认。",
                  parameters=AliasArgs.model_json_schema(), effect="write", keywords=["删除别名", "删别名"]),
-            dict(id="story.search", name="nb_unibot_story_search", description="按角色名查询本地剧情并发送原剧情图片。",
-                 parameters=StoryArgs.model_json_schema(), effect="none", keywords=["剧情", "角色", "故事"]),
+            dict(id="story.search", name="nb_unibot_story_search", description="按角色名查询本地剧情，排队生成并发送原剧情图片；进度请查询原任务。",
+                 parameters=StoryArgs.model_json_schema(), effect="none", long_task=True, keywords=["剧情", "角色", "故事"]),
             dict(id="story.list", name="nb_unibot_story_list", description="查看本地剧情分类或分类下的角色名。",
                  parameters=StoryCategoryArgs.model_json_schema(), effect="none", keywords=["剧情分类", "剧情列表", "角色列表"]),
-            dict(id="story.random", name="nb_unibot_story_random", description="随机选择一篇本地剧情并发送原剧情图片。",
-                 parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["随机剧情", "随便一篇故事"]),
+            dict(id="story.random", name="nb_unibot_story_random", description="为本次消息固定随机剧情，排队生成原图；重复查询不会重新抽选。",
+                 parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["随机剧情", "随便一篇故事"]),
             dict(id="game.status", name="nb_unibot_game_status", description="查询当前群猜曲游戏状态，不泄露答案或图片本地路径。",
                  parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["猜曲", "猜歌", "游戏状态"]),
             dict(id="game.hint", name="nb_unibot_game_hint", description="为当前群猜曲游戏消耗一次提示并返回原提示结果；需要确认。",
@@ -140,7 +140,9 @@ def describe_capabilities():
             dict(id="job.get", name="nb_unibot_job", description="按任务ID获取当前会话中自己任务的新鲜状态。",
                  parameters=JobArgs.model_json_schema(), effect="none", keywords=["任务状态", "任务详情"]),
             dict(id="job.cancel", name="nb_unibot_cancel_job", description="请求取消当前会话中自己的任务；提交中只能请求取消，不能提前宣称已取消。",
-                 parameters=JobArgs.model_json_schema(), effect="write", keywords=["取消任务", "取消同步", "停止同步"])]
+                 parameters=JobArgs.model_json_schema(), effect="write", keywords=["取消任务", "取消同步", "停止同步"]),
+            dict(id="job.replay", name="nb_unibot_replay_job", description="只补发当前会话中自己的任务缓存媒体，不重新生成或随机选择；需要确认。",
+                 parameters=JobArgs.model_json_schema(), effect="platform_write", keywords=["补发中二任务", "补发剧情", "剧情没收到", "重发剧情"])]
 
 
 async def prepare_capability(name, arguments, context):
@@ -154,12 +156,18 @@ async def prepare_capability(name, arguments, context):
     models = {"player.bind": BindArgs, "score.submit": ManualScoreArgs, "score.sync": EmptyArgs,
               "maintenance.import_chunirec": EmptyArgs,
               "score.import_file": EmptyArgs, "game.start": GameStartArgs, "game.guess": GameGuessArgs,
-              "game.hint": EmptyArgs, "game.give_up": EmptyArgs, "job.cancel": JobArgs}
+              "game.hint": EmptyArgs, "game.give_up": EmptyArgs, "job.cancel": JobArgs, "job.replay": JobArgs}
     try:
         normalized = models[name].model_validate(arguments).model_dump() if name in models else dict(arguments)
     except ValidationError:
         return outcome("INVALID_ARGUMENT", "请核对操作参数。", status="needs_input")
     constraints = {}
+    if name == "job.replay":
+        from .services.sync import query
+        checked = await query(bot, event, "get", normalized["job_id"])
+        if checked["status"] != "ok":
+            return checked
+        constraints["cached_only"] = True
     if name == "maintenance.refresh":
         try:
             normalized = MaintenanceArgs.model_validate(arguments).model_dump()
@@ -227,7 +235,7 @@ async def invoke_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
-    if name in {"maintenance.refresh", "maintenance.import_chunirec", "song.alias_add", "song.alias_delete", "player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up", "game.start", "game.guess", "job.cancel"} and not context.get("confirmed", False):
+    if name in {"maintenance.refresh", "maintenance.import_chunirec", "song.alias_add", "song.alias_delete", "player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up", "game.start", "game.guess", "job.cancel", "job.replay"} and not context.get("confirmed", False):
         return outcome("AUTHORIZATION_REQUIRED", "需要当前用户核对操作预览并确认。", status="denied")
     if name in {"game.guess", "game.hint", "game.give_up"} and not context.get("constraints", {}).get("game_round_id"):
         return outcome("STATE_CHANGED", "操作没有绑定有效猜曲局，请重新预览。", status="needs_input")
@@ -339,6 +347,10 @@ async def invoke_capability(name, arguments, context):
             EmptyArgs.model_validate(arguments)
             from .services.sync import submit
             output = await submit(bot, event, str(event.user_id))
+        elif name == "job.replay":
+            args = JobArgs.model_validate(arguments)
+            from .services.sync import replay
+            output = await replay(bot, event, args.job_id)
         elif name in {"job.list", "job.get", "job.cancel"}:
             args = EmptyArgs.model_validate(arguments) if name == "job.list" else JobArgs.model_validate(arguments)
             from .services.sync import query

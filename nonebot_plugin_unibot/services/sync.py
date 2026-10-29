@@ -8,6 +8,7 @@ from .storage import commit_scores, PartialWriteError
 
 PROVIDER = "nonebot_plugin_unibot"
 _store = None
+_presentations = None
 _task = None
 _notifier_task = None
 _notify_wake = asyncio.Event()
@@ -25,7 +26,7 @@ def _scope(bot, event):
 
 
 async def ensure_started():
-    global _store, _task, _notifier_task, _closing
+    global _store, _presentations, _task, _notifier_task, _closing
     async with _lifecycle:
         if _store is None:
             from .. import get_player_score as s
@@ -34,6 +35,9 @@ async def ensure_started():
             # No reconstructed Event can manufacture old authorization. Jobs
             # whose real request context was lost are visible as interrupted.
             await _store.mark_interrupted()
+            from .presentation_store import PresentationStore
+            _presentations = PresentationStore(Path(_store.path).with_name("native_presentations.sqlite3"))
+            await _presentations.recover()
         if _task is None or _task.done():
             _closing = False
             _task = asyncio.create_task(_worker(), name="unibot-native-jobs")
@@ -139,6 +143,9 @@ async def _handle(job):
     if job.capability_id in {"maintenance.refresh", "maintenance.import_chunirec"}:
         from .maintenance import run
         return await run(bot, event, job, _store)
+    if job.capability_id in {"story.search", "story.random"}:
+        from .story import execute
+        return await execute(bot, event, job, _store, _presentations)
     if job.capability_id != "score.sync":
         return outcome("CAPABILITY_DISABLED", "任务能力已不可用。", status="unavailable")
     return await _run_sync(job.actor_id, job, _store)
@@ -146,14 +153,16 @@ async def _handle(job):
 
 async def _notify(job):
     from .. import llm_api
-    if job.response_owner == "agent" and llm_api._job_notifier is not None:
+    if job.response_owner == "agent":
+        if llm_api._job_notifier is None:
+            return {"deferred": True}
         return await llm_api.notify_job(job)
     from nonebot import get_bot
     try:
         bot = get_bot(job.bot_id)
     except KeyError:
         return {"deferred": True}
-    label = "资源维护" if job.capability_id.startswith("maintenance.") else "成绩同步"
+    label = "剧情" if job.capability_id.startswith("story.") else "资源维护" if job.capability_id.startswith("maintenance.") else "成绩同步"
     text = f"{label}任务 {job.job_id}：{job.result.get('public_hint') or job.status}"
     if job.context_type == "group":
         await bot.send_group_msg(group_id=int(job.context_id), message=text)
@@ -213,6 +222,19 @@ async def submit_operation(bot, event, capability_id, operation_id, payload, *, 
         return outcome("QUEUE_FULL", "任务队列已满，本次没有接单。", status="unavailable")
     _wake.set()
     job = await store.get(job.job_id)
+    return await submission_result(job, created)
+
+
+async def existing_source(bot, event, capability_id, operation_id):
+    if str(bot.self_id) != str(event.self_id):
+        return outcome("PERMISSION_DENIED", "任务身份不匹配。", status="denied")
+    store = await ensure_started()
+    job = await store.find_submission(provider=PROVIDER, capability_id=capability_id, operation_id=operation_id,
+        source_message_id=str(event.message_id), **_scope(bot, event))
+    return await submission_result(job, False) if job is not None else None
+
+
+async def submission_result(job, created):
     data = await public_job(job)
     state = {"queued": "running", "running": "running", "cancel_requested": "running", "succeeded": "ok",
              "cancelled": "ok", "partial": "partial", "unknown": "unknown"}.get(job.status, "unavailable")
@@ -246,3 +268,25 @@ async def query(bot, event, action="list", job_id=None):
         _wake.set()
         _notify_wake.set()
     return outcome(data=await public_job(job))
+
+
+async def replay(bot, event, job_id):
+    checked = await query(bot, event, "get", job_id)
+    if checked["status"] != "ok":
+        return checked
+    if checked["data"]["status"] in {"queued", "running", "cancel_requested"}:
+        return outcome("JOB_RUNNING", "原任务尚未结束，请先查询进度。", status="running", data=checked["data"])
+    if (await _store.get(job_id)).capability_id not in {"story.search", "story.random"}:
+        return outcome("NO_CACHED_MEDIA", "此任务没有可补投的媒体计划。", status="needs_input")
+    from .presentation_store import scope
+    if not await _presentations.exists(job_id, scope(bot, event)):
+        return outcome("NO_CACHED_MEDIA", "此任务尚未保存完整媒体计划，无法补投。", status="needs_input")
+    result = await _presentations.replay(job_id, bot, event)
+    if not result["remaining"]:
+        old = await _store.get(job_id)
+        saved = dict(old.result)
+        saved["data"] = dict(saved.get("data", {}), artifact_delivery="sent", media_cached=True)
+        saved["public_hint"] = "缓存媒体已全部送达；原任务执行状态保留，没有重新生成。"
+        await _store.update(job_id, result=saved)
+    return outcome(hint=("这条补发请求已处理，未再次发送。" if result.get("deduplicated") else f"已补投 {result['sent']} 条缓存内容。") +
+                   ("仍有未确认送达的内容，可稍后再次明确请求补投。" if result["remaining"] else ""), data=result)

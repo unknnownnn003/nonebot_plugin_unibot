@@ -7,6 +7,7 @@ from .services.sync import query
 
 jobs = on_command("中二任务", priority=1, block=True)
 cancel = on_command("取消中二任务", priority=1, block=True)
+replay = on_command("补发中二任务", priority=1, block=True)
 
 _STATUS = {"queued": "排队中", "running": "执行中", "cancel_requested": "已请求取消",
            "cancelled": "已取消", "succeeded": "已完成", "failed": "失败", "partial": "部分完成",
@@ -51,5 +52,17 @@ async def cancel_job(bot: Bot, event: MessageEvent, args: Message = CommandArg()
     result = await query(bot, event, "cancel", identity)
     await cancel.send(format_result(result))
     event.__dict__.setdefault("_native_capability_results", {})["job.cancel"] = dict(
+        status=result["status"], code=result["code"], delivery="sent")
+
+
+@replay.handle()
+async def replay_job(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
+    from .services.sync import replay as replay_cached
+    identity = args.extract_plain_text().strip()
+    if len(identity) != 32 or any(c not in "0123456789abcdef" for c in identity):
+        await replay.finish("用法：/补发中二任务 <任务ID>。仅补发缓存媒体，不重新生成。")
+    result = await replay_cached(bot, event, identity)
+    await replay.send(result["public_hint"])
+    event.__dict__.setdefault("_native_capability_results", {})["job.replay"] = dict(
         status=result["status"], code=result["code"], delivery="sent")
 
