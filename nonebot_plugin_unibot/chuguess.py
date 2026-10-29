@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image, ImageDraw
 from nonebot import get_bot, on_command, on_regex
-from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageEvent, MessageSegment
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageEvent, MessageSegment
 from nonebot.log import logger
 from nonebot.params import CommandArg
 from .services.storage import atomic_json
@@ -358,9 +358,18 @@ async def game_timeout(group_id: str, expected=None) -> None:
         return
     try:
         bot = get_bot(expected.get("bot_id")) if expected.get("bot_id") else get_bot()
-        await bot.send_group_msg(group_id=int(group_id), message=Message(
-            MessageSegment.text(f"时间到！答案是：{result['data']['title']}\n")
-            + MessageSegment.image(result["artifacts"][0]["content"])))
+        context = expected.get("delivery_context")
+        if context:
+            from .services.inline_media import deliver
+            _, event, owner = context
+            content = Message(MessageSegment.image(result["artifacts"][0]["content"]))
+            if owner == "command":
+                content = Message(MessageSegment.text(f"时间到！答案是：{result['data']['title']}\n")) + content
+            await deliver(bot, event, content, "game.timeout", result["data"], notify=owner == "agent")
+        else:
+            await bot.send_group_msg(group_id=int(group_id), message=Message(
+                MessageSegment.text(f"时间到！答案是：{result['data']['title']}\n")
+                + MessageSegment.image(result["artifacts"][0]["content"])))
     except Exception as exc:
         logger.warning(f"发送超时消息失败: {type(exc).__name__}")
 
@@ -374,7 +383,7 @@ def parse_difficulty(text: str) -> Optional[str]:
     return None
 
 
-async def present_game_result(matcher, result, mode):
+async def present_game_result(matcher, result, mode, bot, event):
     if result["status"] != "ok":
         await matcher.finish(result["fallback_text"])
     data = result["data"]
@@ -385,8 +394,8 @@ async def present_game_result(matcher, result, mode):
             f"剩余时间: {data['remaining_seconds']}秒\n可用提示类型: {data['hints_remaining']} 种\n"
             "发送 /chuguess <歌名> 答题 | /提示 获取提示 | /放弃 放弃")
     if mode == "hint" and not result["artifacts"]:
-        await matcher.finish(data["hint"])
-    if mode == "start":
+        text = data["hint"]
+    elif mode == "start":
         cfg = DIFFICULTY_CONFIG[data["difficulty"]]
         text = (f"曲绘猜曲 - {cfg['name']} 难度\n猜出这首歌的名字！发送 /chuguess <歌名> 来答题\n"
                 f"发送 /提示 获取提示 | /放弃 放弃本题\n最多可获得 {cfg['score']} 分（使用提示会降低分数）\n")
@@ -403,11 +412,16 @@ async def present_game_result(matcher, result, mode):
             outgoing += MessageSegment.image(artifact["content"])
         else:
             outgoing += artifact["content"]
-    await matcher.finish(outgoing)
+    from .services.inline_media import deliver
+    delivery = await deliver(bot, event, outgoing, "game." + mode, data)
+    if delivery.get("data", {}).get("artifact_delivery") == "sent":
+        await matcher.finish()
+    await matcher.finish(delivery["public_hint"] +
+        (f"\n媒体任务ID：{delivery['data']['job_id']}" if delivery.get("data", {}).get("job_id") else ""))
 
 
 @chuguess_cmd.handle()
-async def _(event: MessageEvent, args: Message = CommandArg()):
+async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     from .services import game
     if not isinstance(event, GroupMessageEvent):
         await chuguess_cmd.finish("曲绘猜曲仅在群聊中可用。")
@@ -415,31 +429,31 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
     state = await game.status(event.group_id)
     if state["status"] == "ok":
         if not query:
-            await present_game_result(chuguess_cmd, state, "status")
+            await present_game_result(chuguess_cmd, state, "status", bot, event)
         result = await game.guess(event.group_id, query, str(event.user_id),
                                   guesser_name=event.sender.card or event.sender.nickname or str(event.user_id))
-        await present_game_result(chuguess_cmd, result, "guess")
+        await present_game_result(chuguess_cmd, result, "guess", bot, event)
     difficulty = parse_difficulty(query) if query else "mas"
-    result = await game.start(event.group_id, difficulty or "mas", bot_id=str(event.self_id))
-    await present_game_result(chuguess_cmd, result, "start")
+    result = await game.start(event.group_id, difficulty or "mas", bot_id=str(event.self_id), delivery_context=(bot, event, "command"))
+    await present_game_result(chuguess_cmd, result, "start", bot, event)
 
 
 @hint_cmd.handle()
-async def _(event: MessageEvent):
+async def _(bot: Bot, event: MessageEvent):
     if isinstance(event, GroupMessageEvent):
         from .services.game import hint
-        await present_game_result(hint_cmd, await hint(event.group_id), "hint")
+        await present_game_result(hint_cmd, await hint(event.group_id), "hint", bot, event)
 
 
 @giveup_cmd.handle()
-async def _(event: MessageEvent):
+async def _(bot: Bot, event: MessageEvent):
     if isinstance(event, GroupMessageEvent):
         from .services.game import give_up
-        await present_game_result(giveup_cmd, await give_up(event.group_id), "give_up")
+        await present_game_result(giveup_cmd, await give_up(event.group_id), "give_up", bot, event)
 
 
 @guess_cmd.handle()
-async def _(event: MessageEvent):
+async def _(bot: Bot, event: MessageEvent):
     if not isinstance(event, GroupMessageEvent):
         return
     import re
@@ -449,4 +463,4 @@ async def _(event: MessageEvent):
     from .services.game import guess
     result = await guess(event.group_id, query, str(event.user_id),
                          guesser_name=event.sender.card or event.sender.nickname or str(event.user_id))
-    await present_game_result(guess_cmd, result, "guess")
+    await present_game_result(guess_cmd, result, "guess", bot, event)

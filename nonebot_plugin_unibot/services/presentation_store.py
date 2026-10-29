@@ -212,15 +212,15 @@ class PresentationStore:
         try:
             claimed = await _db_thread(claim)
         except asyncio.CancelledError:
-            await self._finish(attempt, "not_sent")
+            await self._finish(attempt, row["state"])
             raise
         if not claimed:
             return {"delivery": "unknown", "claimed": False}
-        state, receipt = "not_sent", None
+        state, receipt = row["state"], None
         try:
             content = await _db_thread(lambda: self._read(row))
             if before_send is not None and not await before_send():
-                return {"delivery": "not_sent", "claimed": True, "denied": True}
+                return {"delivery": state, "claimed": True, "denied": True}
             state = "unknown"
             if row["kind"] == "forward":
                 if getattr(event, "group_id", None) is not None:
@@ -238,16 +238,16 @@ class PresentationStore:
             await self._finish(attempt, state, receipt)
         return {"delivery": state, "claimed": True, "receipt": receipt}
 
-    async def replay(self, operation_id, bot, event, *, limit=20):
+    async def replay(self, operation_id, bot, event, *, limit=20, before_send=None):
         key = (str(self.path.resolve()), operation_id, scope(bot, event))
         lock = _replay_locks.get(key)
         if lock is None:
             lock = asyncio.Lock()
             _replay_locks[key] = lock
         async with lock:
-            return await self._replay(operation_id, bot, event, limit=limit)
+            return await self._replay(operation_id, bot, event, limit=limit, before_send=before_send)
 
-    async def _replay(self, operation_id, bot, event, *, limit=20):
+    async def _replay(self, operation_id, bot, event, *, limit=20, before_send=None):
         await self.init()
         identity = scope(bot, event)
         request_key = hashlib.sha256(json.dumps([operation_id, identity, str(event.message_id)]).encode()).hexdigest()
@@ -261,11 +261,30 @@ class PresentationStore:
         # The real event owns one attempt even if finalization fails or the
         # process stops. A fresh explicit message may retry remaining content.
         rows = await self.pending(operation_id, identity, limit=limit)
-        results = [await self.send(row, bot, event, allow_unknown=True) for row in rows]
+        results = []
+        for row in rows:
+            attempt = await self.send(row, bot, event, allow_unknown=True, before_send=before_send)
+            results.append(attempt)
+            if attempt.get("denied") or attempt["delivery"] != "sent":
+                break
         output = {"sent": sum(row["delivery"] == "sent" for row in results),
-                  "remaining": await self.outstanding(operation_id, identity), "business_reexecuted": False}
+                  "uncertain": max(sum(row.get("claimed", False) and row["delivery"] == "unknown" for row in results),
+                                   await self.uncertainties(operation_id, identity)),
+                  "remaining": await self.outstanding(operation_id, identity), "business_reexecuted": False,
+                  "blocked": any(row.get("denied") for row in results)}
         def finish():
             with self.connection() as db:
                 db.execute("UPDATE replay_requests SET result=? WHERE request_key=?", (json.dumps(output), request_key))
         await _db_thread(finish)
         return output
+
+    async def uncertainties(self, operation_id, identity):
+        def op():
+            with self.connection() as db:
+                return db.execute("""SELECT count(*) FROM presentations WHERE operation_id=? AND scope=?
+                    AND state IN ('unknown','sending') AND NOT (kind='forward' AND EXISTS (
+                        SELECT 1 FROM presentations part WHERE part.operation_id=presentations.operation_id AND part.scope=presentations.scope
+                        AND part.bundle=presentations.bundle AND part.kind='forward_part') AND NOT EXISTS (
+                        SELECT 1 FROM presentations part WHERE part.operation_id=presentations.operation_id AND part.scope=presentations.scope
+                        AND part.bundle=presentations.bundle AND part.kind='forward_part' AND part.state!='sent'))""", (operation_id, identity)).fetchone()[0]
+        return await _db_thread(op)

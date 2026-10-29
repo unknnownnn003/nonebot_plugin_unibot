@@ -99,7 +99,7 @@ async def give_up(group_id, *, expected=None, reason="giveup", expected_round=No
         return result
 
 
-async def start(group_id, difficulty="mas", *, bot_id=None):
+async def start(group_id, difficulty="mas", *, bot_id=None, delivery_context=None):
     from .. import chuguess as c
     key = str(group_id)
     async with await c._get_group_lock(key):
@@ -126,6 +126,8 @@ async def start(group_id, difficulty="mas", *, bot_id=None):
         game = dict(song=song, jacket=jacket, crop_x=x, crop_y=y, crop_w=w, crop_h=h,
                     difficulty=difficulty, score=config["score"], start_time=time.time(), hints_used=set(),
                     name_reveal_step=0, revealed_areas=[(x,y,w,h)], group_id=key, bot_id=bot_id, round_id=uuid4().hex)
+        if delivery_context is not None:
+            game["delivery_context"] = delivery_context
         c.active_games[key] = game
         c.game_tasks[key] = asyncio.create_task(c.game_timeout(key, game))
         result = outcome(data=_data(game, key), artifacts=[image(content)])

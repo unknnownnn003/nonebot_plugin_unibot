@@ -61,8 +61,8 @@ async def replay_job(bot: Bot, event: MessageEvent, args: Message = CommandArg()
     identity = args.extract_plain_text().strip()
     if len(identity) != 32 or any(c not in "0123456789abcdef" for c in identity):
         await replay.finish("用法：/补发中二任务 <任务ID>。仅补发缓存媒体，不重新生成。")
-    result = await replay_cached(bot, event, identity)
-    await replay.send(result["public_hint"])
+    result = await replay_cached(bot, event, identity, origin="command")
+    await replay.send(result["public_hint"] + (f"\n补发任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
     event.__dict__.setdefault("_native_capability_results", {})["job.replay"] = dict(
         status=result["status"], code=result["code"], delivery="sent")
 

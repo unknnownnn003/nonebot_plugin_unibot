@@ -199,6 +199,29 @@ class JobStore:
         async with self._lock:
             return await _db_thread(op)
 
+    async def begin_inline(self, *, provider, operation_id, source_message_id, bot_id, context_type,
+                           context_id, actor_id, payload, response_owner="inline", initial_result=None):
+        """Record already-generated media sent by the current native handler."""
+        await self.init()
+        now, job_id = time.time(), uuid4().hex
+        fingerprint = _fingerprint(provider, "media.inline", operation_id, context_id, actor_id, bot_id, context_type)
+        def op():
+            with self._connection() as db:
+                old = db.execute("SELECT * FROM jobs WHERE fingerprint=? AND source_message_id=? LIMIT 1",
+                                 (fingerprint, source_message_id)).fetchone()
+                if old:
+                    return self._row(old), False
+                db.execute("""INSERT INTO jobs (job_id,provider,capability_id,operation_id,fingerprint,bot_id,
+                    context_type,context_id,actor_id,source_message_id,status,current_step,response_owner,
+                    created_at,started_at,updated_at,payload,result,notification_state)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (job_id,provider,"media.inline",operation_id,fingerprint,bot_id,context_type,context_id,actor_id,
+                     source_message_id,"running","caching_media",response_owner,now,now,now,json.dumps(payload,ensure_ascii=False),
+                     json.dumps(initial_result or {},ensure_ascii=False),"not_required"))
+                return self._row(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()), True
+        async with self._lock:
+            return await _db_thread(op)
+
     async def find_submission(self, *, provider, capability_id, operation_id, source_message_id,
                               bot_id, context_type, context_id, actor_id):
         await self.init()

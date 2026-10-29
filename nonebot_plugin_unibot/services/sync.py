@@ -13,6 +13,7 @@ _task = None
 _notifier_task = None
 _notify_wake = asyncio.Event()
 _contexts = {}
+_inline_tasks = set()
 _wake = asyncio.Event()
 _gate = asyncio.Lock()
 _lifecycle = asyncio.Lock()
@@ -28,6 +29,8 @@ def _scope(bot, event):
 async def ensure_started():
     global _store, _presentations, _task, _notifier_task, _closing
     async with _lifecycle:
+        if _closing and _store is not None:
+            return _store
         if _store is None:
             from .. import get_player_score as s
             _store = JobStore(Path(s.SCORE_DIR).parent / "native_jobs.sqlite3")
@@ -51,6 +54,10 @@ async def stop_workers():
     global _closing
     _closing = True
     _wake.set()
+    inline = [task for task in _inline_tasks if task is not asyncio.current_task() and not task.done()]
+    for task in inline:
+        task.cancel()
+    await asyncio.gather(*inline, return_exceptions=True)
     if _task is not None:
         _task.cancel()
         await asyncio.gather(_task, return_exceptions=True)
@@ -140,6 +147,8 @@ async def _handle(job):
     bot, event = context
     if _scope(bot, event) != {key: getattr(job, key) for key in _scope(bot, event)} or (job.capability_id == "score.sync" and job.payload.get("user_id") != job.actor_id):
         return outcome("PERMISSION_DENIED", "任务归属核验失败，本次未执行。", status="denied")
+    if job.capability_id == "job.replay":
+        return await execute_replay(bot, event, job)
     if job.capability_id in {"maintenance.refresh", "maintenance.import_chunirec"}:
         from .maintenance import run
         return await run(bot, event, job, _store)
@@ -215,11 +224,16 @@ async def submit_operation(bot, event, capability_id, operation_id, payload, *, 
     if str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "任务身份不匹配。", status="denied")
     store = await ensure_started()
+    if _closing:
+        return outcome("PLUGIN_CLOSING", "插件关闭中，本次未接单。", status="unavailable")
     try:
         async with _gate:
             job, created = await store.submit(provider=PROVIDER, capability_id=capability_id,
                 operation_id=operation_id, source_message_id=str(event.message_id),
                 payload=payload, response_owner=origin, **_scope(bot, event))
+            if _closing:
+                await store.cancel(job.job_id, **_scope(bot, event))
+                return outcome("PLUGIN_CLOSING", "插件关闭中，本次未继续执行。", status="unavailable")
             if created:
                 _contexts[job.job_id] = (bot, event)
     except QueueFull:
@@ -247,7 +261,9 @@ async def submission_result(job, created):
 
 
 async def public_job(job):
-    return dict(job_id=job.job_id, status=job.status, current_step=job.current_step,
+    return dict(job_id=job.job_id, capability_id=job.capability_id,
+                source_capability=job.payload.get("source_capability", job.capability_id),
+                source_job_id=job.payload.get("source_job_id"), status=job.status, current_step=job.current_step,
                 queue_position=await _store.queue_position(job.job_id), queue_position_scope="queued_only",
                 updated_at=job.updated_at, side_effect_state=job.side_effect_state,
                 delivery=job.delivery_state, notification=job.notification_state,
@@ -274,19 +290,25 @@ async def query(bot, event, action="list", job_id=None):
     return outcome(data=await public_job(job))
 
 
-async def replay(bot, event, job_id):
+async def replay(bot, event, job_id, *, origin=None, before_send=None):
     checked = await query(bot, event, "get", job_id)
     if checked["status"] != "ok":
         return checked
     if checked["data"]["status"] in {"queued", "running", "cancel_requested"}:
         return outcome("JOB_RUNNING", "原任务尚未结束，请先查询进度。", status="running", data=checked["data"])
+    target = await _store.get(job_id)
+    if target.capability_id == "job.replay":
+        return await replay(bot, event, target.payload["source_job_id"], origin=origin, before_send=before_send)
     from .media_jobs import CAPABILITIES
-    if (await _store.get(job_id)).capability_id not in {"story.search", "story.random"} | CAPABILITIES:
+    if (await _store.get(job_id)).capability_id not in {"story.search", "story.random", "media.inline"} | CAPABILITIES:
         return outcome("NO_CACHED_MEDIA", "此任务没有可补投的媒体计划。", status="needs_input")
     from .presentation_store import scope
     if not await _presentations.exists(job_id, scope(bot, event)):
         return outcome("NO_CACHED_MEDIA", "此任务尚未保存完整媒体计划，无法补投。", status="needs_input")
-    result = await _presentations.replay(job_id, bot, event)
+    if origin is not None:
+        return await submit_operation(bot, event, "job.replay", f"replay:{event.message_id}:{job_id}",
+                                      {"source_job_id": job_id}, origin=origin)
+    result = await _presentations.replay(job_id, bot, event, limit=200 if before_send else 20, before_send=before_send)
     if not result["remaining"]:
         old = await _store.get(job_id)
         saved = dict(old.result)
@@ -297,3 +319,22 @@ async def replay(bot, event, job_id):
                    hint=("这条补发请求已处理，未再次发送。" if result.get("deduplicated") else f"已补投 {result['sent']} 条缓存内容。") +
                    ("仍有未确认送达的内容，可稍后再次明确请求补投。" if result["remaining"] else ""),
                    status="partial" if result["remaining"] and result["sent"] else "unknown" if result["remaining"] else "ok", data=result)
+
+
+async def execute_replay(bot, event, job):
+    count = 0
+    async def admit():
+        nonlocal count
+        count += 1
+        return await _store.start_effect(job.job_id, f"replaying_media:{count}")
+    output = await replay(bot, event, job.payload["source_job_id"], before_send=admit)
+    latest = await _store.get(job.job_id)
+    if latest.status == "cancel_requested" and output.get("data", {}).get("remaining", True):
+        uncertain = output.get("data", {}).get("uncertain", 0)
+        output.update(code="MEDIA_DELIVERY_UNKNOWN" if uncertain else "JOB_CANCELLED",
+                      public_hint="已停止后续补发；已开始的投递结果需要核对。" if uncertain else "已停止后续缓存补发，已送达的内容不会撤回。",
+                      status="partial" if output.get("data", {}).get("sent") else "unknown" if uncertain else "cancelled")
+        output.setdefault("data", {})["cancel_requested"] = True
+    output.setdefault("data", {})["source_job_id"] = job.payload["source_job_id"]
+    output["side_effect_state"] = "unknown" if output["status"] == "unknown" or output["data"].get("uncertain") else "committed" if output["data"].get("sent") else "none"
+    return output

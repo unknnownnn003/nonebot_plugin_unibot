@@ -8,7 +8,7 @@ from .services.permissions import native_superuser
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "3.1.6"
+CAPABILITY_VERSION = "3.1.7"
 
 
 class SearchArgs(BaseModel):
@@ -141,8 +141,8 @@ def describe_capabilities():
                  parameters=JobArgs.model_json_schema(), effect="none", keywords=["任务状态", "任务详情"]),
             dict(id="job.cancel", name="nb_unibot_cancel_job", description="请求取消当前会话中自己的任务；提交中只能请求取消，不能提前宣称已取消。",
                  parameters=JobArgs.model_json_schema(), effect="write", keywords=["取消任务", "取消同步", "停止同步"]),
-            dict(id="job.replay", name="nb_unibot_replay_job", description="只补发当前会话中自己的任务缓存媒体，不重新生成或随机选择；需要确认。",
-                 parameters=JobArgs.model_json_schema(), effect="platform_write", keywords=["补发中二任务", "补发剧情", "剧情没收到", "重发剧情"])]
+            dict(id="job.replay", name="nb_unibot_replay_job", description="提交当前会话本人缓存媒体的补发任务；可查询/取消，不重新生成，需要确认。",
+                 parameters=JobArgs.model_json_schema(), effect="platform_write", long_task=True, keywords=["补发中二任务", "补发剧情", "剧情没收到", "重发剧情"])]
 
 
 async def prepare_capability(name, arguments, context):
@@ -328,7 +328,7 @@ async def invoke_capability(name, arguments, context):
                 return outcome("GROUP_ONLY", "猜曲游戏只在群聊中可用。", status="denied")
             args = GameStartArgs.model_validate(arguments)
             from .services.game import start
-            output = await start(event.group_id, args.difficulty, bot_id=str(bot.self_id))
+            output = await start(event.group_id, args.difficulty, bot_id=str(bot.self_id), delivery_context=(bot, event, "agent"))
         elif name == "game.guess":
             if not isinstance(event, GroupMessageEvent):
                 return outcome("GROUP_ONLY", "猜曲游戏只在群聊中可用。", status="denied")
@@ -356,7 +356,7 @@ async def invoke_capability(name, arguments, context):
         elif name == "job.replay":
             args = JobArgs.model_validate(arguments)
             from .services.sync import replay
-            output = await replay(bot, event, args.job_id)
+            output = await replay(bot, event, args.job_id, origin="agent")
         elif name in {"job.list", "job.get", "job.cancel"}:
             args = EmptyArgs.model_validate(arguments) if name == "job.list" else JobArgs.model_validate(arguments)
             from .services.sync import query
@@ -369,6 +369,15 @@ async def invoke_capability(name, arguments, context):
             return outcome("CAPABILITY_DISABLED", "能力未注册。", status="unavailable")
     except ValidationError:
         return outcome("INVALID_ARGUMENT", "请按能力参数说明提供查询条件。", status="needs_input")
+    if name in {"game.start", "game.guess", "game.hint", "game.give_up"} and output["status"] == "ok" and output.get("artifacts"):
+        from .services.inline_media import deliver_artifacts
+        media = await deliver_artifacts(bot, event, output["artifacts"], name, output.get("data"))
+        output["artifacts"] = []
+        output.setdefault("data", {}).update(media_job_id=media.get("data", {}).get("job_id"),
+            artifact_delivery=media.get("data", {}).get("artifact_delivery", "unknown"))
+        if output["data"]["artifact_delivery"] != "sent":
+            output.update(status="partial", code="MEDIA_DELIVERY_INCOMPLETE",
+                          public_hint="猜曲操作已生效，媒体未确认送达；请补发缓存，不要再次消耗提示或记分。")
     output.pop("fallback_text", None)
     if name in {"song.alias_add", "song.alias_delete"} and output["status"] == "ok":
         output["effect"] = "local_write"
