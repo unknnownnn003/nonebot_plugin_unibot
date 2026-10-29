@@ -229,6 +229,8 @@ async def public_job(job):
 
 
 async def query(bot, event, action="list", job_id=None):
+    if str(bot.self_id) != str(event.self_id):
+        return outcome("PERMISSION_DENIED", "任务身份不匹配。", status="denied")
     store = await ensure_started()
     scope = _scope(bot, event)
     if action == "list":
