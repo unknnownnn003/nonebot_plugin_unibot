@@ -66,7 +66,7 @@ def download_image_sync(url: str, rel_path: str, force: bool = False):
         logger.error(f"Failed to download image {url} during scraping: {e}")
 
 
-def rewrite_links(md_text: str, md_path: str) -> str:
+def rewrite_links(md_text: str, md_path: str, downloader=None) -> str:
     """将 markdown 中的相对链接转换为绝对链接。对于图片则会统一下载到本地并映射。"""
     base_dir = BASE_URL + '/' + '/'.join(x for x in md_path.split('/')[:-1] if x)
     if not base_dir.endswith('/'):
@@ -91,7 +91,7 @@ def rewrite_links(md_text: str, md_path: str) -> str:
                 ext = target_url.split('.')[-1].split('?')[0]
                 img_rel = f"images/external/{abs(hash(target_url))}.{ext}"
                 
-            download_image_sync(target_url, img_rel, force=True)
+            (downloader or download_image_sync)(target_url, img_rel, force=True)
             return f"local://{img_rel}"
             
         # 对于其它非图片链接
@@ -203,113 +203,10 @@ cmd_list = on_command("剧情分类", aliases={"剧情列表"}, priority=5, bloc
 
 
 @cmd_update.handle()
-async def _(bot: Bot, event: Event):
-    await cmd_update.send("收到，正在处理...")
-    
-    def fetch_sidebar():
-        req = urllib.request.Request(f"{BASE_URL}/_sidebar.md", headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            return response.read().decode('utf-8')
-            
-    try:
-        sidebar_text = await asyncio.to_thread(fetch_sidebar)
-    except Exception as e:
-        logger.error(f"获取剧情目录失败: {e}")
-        await cmd_update.finish("获取目录失败，请稍后重试或查看控制台日志。")
-        return
-        
-    lines = sidebar_text.split('\n')
-    categories = {}
-    current_category = "未分类"
-    download_queue = {}
-    
-    for line in lines:
-        line = line.rstrip()
-        if not line:
-            continue
-            
-        # 粗略分类推断（通常以无链接的列表项表示）
-        cat_match = re.search(r'^\s*\*\s+([^\[\]]+)$', line)
-        if cat_match:
-            current_category = cat_match.group(1).strip()
-            if current_category not in categories:
-                categories[current_category] = []
-            continue
-            
-        link_match = re.search(r'\[([^\]]+)\]\((/[^\)]+)\)', line)
-        if link_match:
-            name = link_match.group(1).strip()
-            raw_url = link_match.group(2).strip()
-            file_path = raw_url.split('?')[0].split('#')[0]
-            if file_path.endswith('.md') and 'README' not in file_path:
-                if current_category not in categories:
-                    categories[current_category] = []
-                categories[current_category].append({"name": name, "path": file_path})
-                download_queue[file_path] = name
-                
-    if not download_queue:
-        await cmd_update.finish("获取目录成功，但没有解析到任何剧情条目；已取消更新，避免覆盖本地索引。")
-        return
-
-    if not DATA_DIR.exists():
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        
-    index_data = {"categories": categories, "mapping": {}}
-    for cat, items in categories.items():
-        for item in items:
-            index_data["mapping"][item["name"]] = item["path"]
-            
-    temp_index = INDEX_FILE.with_suffix(".json.tmp")
-    with open(temp_index, "w", encoding="utf-8") as f:
-        json.dump(index_data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    temp_index.replace(INDEX_FILE)
-        
-    # 统计缺失数量；实际下载会刷新所有远端条目，避免远端内容变化后本地不同步
-    missing_files = []
-    for file_path in download_queue.keys():
-        local_path = DATA_DIR / file_path.lstrip('/')
-        if not local_path.exists():
-            missing_files.append(file_path)
-            
-    await cmd_update.send("收到，正在处理...")
-    
-    def download_and_rewrite(f_path):
-        target_url = f"{BASE_URL}{urllib.parse.quote(f_path)}"
-        req = urllib.request.Request(target_url, headers={'User-Agent': 'Mozilla/5.0'})
-        try:
-            with urllib.request.urlopen(req, timeout=10) as response:
-                md_text = response.read().decode('utf-8')
-                return rewrite_links(md_text, f_path)
-        except Exception as e:
-            logger.error(f"Download failed for {f_path}: {e}")
-            return None
-
-    success_count = 0
-    fail_count = 0
-    
-    for file_path in download_queue.keys():
-        local_path = (DATA_DIR / file_path.lstrip('/')).resolve()
-        if not str(local_path).startswith(str(DATA_DIR.resolve())):
-            logger.warning(f"跳过包含越权路径的文件: {file_path}")
-            fail_count += 1
-            continue
-
-        local_dir = local_path.parent
-        if not local_dir.exists():
-            local_dir.mkdir(parents=True, exist_ok=True)
-            
-        md_content = await asyncio.to_thread(download_and_rewrite, file_path)
-        if md_content:
-            with open(local_path, "w", encoding="utf-8") as f:
-                f.write(md_content)
-            success_count += 1
-        else:
-            fail_count += 1
-            
-        await asyncio.sleep(0.1)
-        
-    await cmd_update.send(f"剧情爬取完毕！\n成功: {success_count}\n失败: {fail_count}")
+async def handle_update_stories(bot: Bot, event: Event):
+    from .services.maintenance import submit
+    result = await submit(bot, event, "stories", origin="command")
+    await cmd_update.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
 
 
 @cmd_list.handle()

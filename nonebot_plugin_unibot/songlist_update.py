@@ -518,175 +518,74 @@ def merge_chunirec_songs(
 
     return added, refreshed, skipped_lx
 
-@update_songlist.handle()
-async def handle_update_songlist():
-    """
-    更新 songlist 列表的主处理函数。
-    向 API 请求最新的 songlist，如果成功则覆盖写入本地 data/songlist.json 文件中。
-    """
-    # 发送提醒消息，表示已开始执行
-    await update_songlist.send("收到，正在处理...")
-    
-    # 确保 data 目录存在，如果不存在则自动创建
-    if not DATA_DIR.exists():
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        logger.info(f"已创建数据目录: {DATA_DIR}")
-        
-    # 完整的请求URL
-    target_url = BASE_URL + API_PATH
-    alias_url = BASE_URL + "/api/v0/chunithm/alias/list"
+def commit_lxns_songlist(songlist_data, alias_data):
+    if not isinstance(songlist_data, dict) or not isinstance(songlist_data.get("songs"), list):
+        raise ValueError("invalid songlist")
+    aliases = alias_data.get("aliases", []) if isinstance(alias_data, dict) else alias_data
+    if not isinstance(aliases, list):
+        raise ValueError("invalid aliases")
+    alias_map = {item["song_id"]: item.get("aliases", []) for item in aliases if isinstance(item, dict) and "song_id" in item}
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with SONGLIST_LOCK:
+        # 读取本地已存在的 songlist.json 保留用户自行添加的别名
+        local_data = load_local_songlist()
+        local_alias_map = build_local_alias_map(local_data)
+        old_by_id, old_by_title = build_local_song_maps(local_data)
 
-    try:
-        # 使用 httpx 进行异步 HTTP 请求
-        async with httpx.AsyncClient() as client:
-            response = await client.get(target_url, timeout=30.0)
-            # 检查响应状态码，如果不为 20x 则抛出 HTTPError 异常
-            response.raise_for_status()
-            # 解析获取到的 JSON 数据
-            songlist_data = response.json()
-            if not isinstance(songlist_data, dict) or not isinstance(songlist_data.get("songs"), list):
-                raise ValueError("songlist API 返回格式异常，未发现 songs 列表")
+        # 将别名数据合并到 songlist_data 中对应的每首歌曲下
+        if "songs" in songlist_data:
+            for song in songlist_data["songs"]:
+                song_id = song.get("id")
+                new_aliases = alias_map.get(song_id, [])
+                local_aliases = local_alias_map.get(str(song_id), [])
             
-            # 请求别名数据
-            alias_response = await client.get(alias_url, timeout=30.0)
-            alias_response.raise_for_status()
-            alias_data = alias_response.json()
-            
-            # 建立 song_id 到 aliases 的映射字典以提高查找效率
-            aliases_list = alias_data.get("aliases", []) if isinstance(alias_data, dict) else alias_data
-            if not isinstance(aliases_list, list):
-                aliases_list = []
-            alias_map = {item["song_id"]: item.get("aliases", []) for item in aliases_list if "song_id" in item}
-            
-            with SONGLIST_LOCK:
-                # 读取本地已存在的 songlist.json 保留用户自行添加的别名
-                try:
-                    local_data = load_local_songlist()
-                    local_alias_map = build_local_alias_map(local_data)
-                    old_by_id, old_by_title = build_local_song_maps(local_data)
-                except Exception:
-                    local_alias_map = {}
-                    old_by_id, old_by_title = {}, {}
-
-                # 将别名数据合并到 songlist_data 中对应的每首歌曲下
-                if "songs" in songlist_data:
-                    for song in songlist_data["songs"]:
-                        song_id = song.get("id")
-                        new_aliases = alias_map.get(song_id, [])
-                        local_aliases = local_alias_map.get(str(song_id), [])
+                # 取并集，并保持顺序 (先网络后本地补充)
+                merged = []
+                for a in new_aliases + local_aliases:
+                    if a not in merged:
+                        merged.append(a)
                     
-                        # 取并集，并保持顺序 (先网络后本地补充)
-                        merged = []
-                        for a in new_aliases + local_aliases:
-                            if a not in merged:
-                                merged.append(a)
-                            
-                        song["aliases"] = merged
-                        old_song = old_by_id.get(str(song_id)) or old_by_title.get(song_match_key(song))
-                        preserve_local_chart_consts(song, old_song)
+                song["aliases"] = merged
+                old_song = old_by_id.get(str(song_id)) or old_by_title.get(song_match_key(song))
+                preserve_local_chart_consts(song, old_song)
 
-                    lx_keys = {song_match_key(song) for song in songlist_data["songs"] if isinstance(song, dict)}
-                    lx_titles = {normalize_title_key(song.get("title")) for song in songlist_data["songs"] if isinstance(song, dict)}
-                    for old_song in old_by_id.values():
-                        if old_song.get("data_source") != CHUNIREC_SOURCE:
-                            continue
-                        if song_match_key(old_song) in lx_keys or normalize_title_key(old_song.get("title")) in lx_titles:
-                            continue
-                        songlist_data["songs"].append(old_song)
+            lx_keys = {song_match_key(song) for song in songlist_data["songs"] if isinstance(song, dict)}
+            lx_titles = {normalize_title_key(song.get("title")) for song in songlist_data["songs"] if isinstance(song, dict)}
+            for old_song in old_by_id.values():
+                if old_song.get("data_source") != CHUNIREC_SOURCE:
+                    continue
+                if song_match_key(old_song) in lx_keys or normalize_title_key(old_song.get("title")) in lx_titles:
+                    continue
+                songlist_data["songs"].append(old_song)
 
-                write_songlist_atomic(songlist_data)
+        write_songlist_atomic(songlist_data)
+    return dict(song_count=len(songlist_data["songs"]), alias_count=sum(len(row.get("aliases", []) or []) for row in songlist_data["songs"]),
+                mtime=datetime.fromtimestamp(SONGLIST_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"))
 
-            song_count = len(songlist_data.get("songs", []))
-            alias_count = sum(len(song.get("aliases", []) or []) for song in songlist_data.get("songs", []))
-            
-        # 记录日志，并回复用户更新成功
-        mtime = datetime.fromtimestamp(SONGLIST_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-        logger.success(f"songlist.json 和别名数据成功更新并合并: {SONGLIST_FILE}")
-        await update_songlist.send(
-            "更新成功！songlist.json 及歌曲别名已成功获取并覆盖。\n"
-            f"曲目数：{song_count}，别名数：{alias_count}\n"
-            f"文件修改时间：{mtime}"
-        )
-        
-    except httpx.HTTPError as http_err:
-        # 捕获 HTTP 网络请求相关的异常
-        logger.error(f"更新 songlist 网络请求异常: {http_err}")
-        await update_songlist.send("更新失败，网络请求异常，请稍后重试或查看控制台日志。")
-        
-    except Exception as e:
-        # 捕获其它的异常，例如 JSON 格式错误或文件写入失败等
-        logger.error(f"更新 songlist 写入或解析失败: {e}")
-        await update_songlist.send("更新失败，写入或解析发生错误，请查看控制台日志。")
+
+def commit_chunirec_songlist(payload, id_map):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with SONGLIST_LOCK:
+        local = load_local_songlist()
+        ensure_chunirec_versions(local)
+        added, refreshed, skipped = merge_chunirec_songs(local, payload, id_map)
+        write_songlist_atomic(local)
+    return dict(added=added, refreshed=refreshed, skipped_lx=skipped,
+                mtime=datetime.fromtimestamp(SONGLIST_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"))
+
+
+@update_songlist.handle()
+async def handle_update_songlist(bot: Bot, event: MessageEvent):
+    from .services.maintenance import submit
+    result = await submit(bot, event, "songlist", origin="command")
+    await update_songlist.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
 
 
 @update_chunirec_songlist.handle()
-async def handle_update_chunirec_songlist():
-    """
-    从 chunirec jp2 全曲数据库同步日服新曲，转换为落雪 songlist 兼容格式后合并到本地。
-    已存在的落雪曲目优先保留；本命令只新增或刷新 data_source=chunirec 的条目。
-    """
-    await update_chunirec_songlist.send("收到，正在从 chunirec 同步曲库...")
-
-    token = config.chunirec_token
-    if not token:
-        await update_chunirec_songlist.send("同步失败：未配置 chunirec_token。")
-        return
-
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    try:
-        naominet_id_map: Dict[Tuple[str, str], str] = {}
-        naominet_status = "未配置 naominet_token，跳过数字 ID 补全"
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                CHUNIREC_SHOWALL_URL,
-                params={"region": CHUNIREC_REGION, "token": token},
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, list):
-                raise ValueError("chunirec music/showall 返回格式异常，未得到列表")
-
-            naominet_token = (config.naominet_token or "").strip()
-            naominet_session = (config.naominet_session or "").strip() or None
-            if naominet_token:
-                try:
-                    naominet_id_map, naominet_status = await fetch_naominet_id_map(
-                        client,
-                        naominet_token,
-                        naominet_session,
-                    )
-                except PermissionError as e:
-                    naominet_status = str(e)
-                    logger.warning(naominet_status)
-                except Exception as e:
-                    naominet_status = f"naominet 数字 ID 补全失败: {type(e).__name__}"
-                    logger.warning(f"{naominet_status}: {e!r}")
-
-        with SONGLIST_LOCK:
-            local_data = load_local_songlist()
-            ensure_chunirec_versions(local_data)
-            added, refreshed, skipped_lx = merge_chunirec_songs(local_data, payload, naominet_id_map)
-            write_songlist_atomic(local_data)
-
-        mtime = datetime.fromtimestamp(SONGLIST_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-        logger.success(
-            f"chunirec 曲库同步完成: added={added}, refreshed={refreshed}, skipped_lx={skipped_lx}, "
-            f"naominet={naominet_status}, file={SONGLIST_FILE}"
-        )
-        await update_chunirec_songlist.send(
-            "chunirec 曲库同步完成！\n"
-            f"新增：{added}，刷新：{refreshed}，保留落雪已有：{skipped_lx}\n"
-            f"数字 ID：{naominet_status}\n"
-            f"文件修改时间：{mtime}"
-        )
-    except httpx.HTTPError as http_err:
-        logger.error(f"chunirec 曲库同步网络请求异常: {http_err}")
-        await update_chunirec_songlist.send("同步失败，网络请求异常，请稍后重试或查看控制台日志。")
-    except Exception as e:
-        logger.error(f"chunirec 曲库同步写入或解析失败: {e}")
-        await update_chunirec_songlist.send("同步失败，写入或解析发生错误，请查看控制台日志。")
+async def handle_update_chunirec_songlist(bot: Bot, event: MessageEvent):
+    from .services.maintenance import submit
+    result = await submit(bot, event, "chunirec", origin="command")
+    await update_chunirec_songlist.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
 
 
 @update_chunirec_upload.handle()
@@ -705,178 +604,7 @@ async def _(event: MessageEvent, state: T_State):
 
 
 @update_chunirec_upload.got("file_msg", prompt="请上传由 fetch_chunirec_data.py 生成的 JSON 数据文件")
-async def _(bot: Bot, event: MessageEvent):
-    """处理上传的 chunirec JSON 数据文件，合并到本地 songlist"""
-    try:
-        msg = event.get_message()
-        file_url = ""
-        local_file = ""
-        base64_data = ""
-
-        for seg in msg:
-            seg_type = getattr(seg, "type", None)
-            seg_data = getattr(seg, "data", {})
-            if not seg_type and isinstance(seg, dict):
-                seg_type = seg.get("type")
-                seg_data = seg.get("data", {})
-            elif not seg_type and isinstance(seg, tuple) and len(seg) >= 2:
-                seg_type = seg[0]
-                seg_data = seg[1] if isinstance(seg[1], dict) else {}
-
-            if seg_type == "file":
-                seg_url = seg_data.get("url", "")
-                file_id = seg_data.get("file_id", "")
-                logger.warning(
-                    f"chunirec 收到文件消息: seg_url={seg_url[:80] if seg_url else 'EMPTY'}..., "
-                    f"file_id={file_id}, seg_keys={list(seg_data.keys()) if isinstance(seg_data, dict) else 'N/A'}"
-                )
-                # 优先用 get_file API 获取 base64（避免 QQ CDN URL 返回错误文件）
-                if file_id:
-                    try:
-                        file_info = await bot.call_api("get_file", file_id=file_id)
-                        target_info = file_info.get("data", file_info) if isinstance(file_info, dict) else file_info
-                        base64_data = target_info.get("base64", "")
-                        file_url = target_info.get("url", "") if not base64_data else ""
-                        local_file = target_info.get("file", "")
-                        logger.warning(
-                            f"chunirec get_file 结果: base64={'YES' if base64_data else 'NO'}, "
-                            f"url={file_url[:80] if file_url else 'EMPTY'}..., "
-                            f"local_file={local_file}"
-                        )
-                    except Exception as e:
-                        logger.error(f"获取文件信息失败: {e}")
-                # fallback 到消息中的 URL
-                if not base64_data and not file_url and seg_url:
-                    file_url = seg_url
-                break
-
-        if not file_url and not local_file and not base64_data:
-            await update_chunirec_upload.finish("未检测到有效的文件，请在使用命令后上传 JSON 数据文件。")
-
-        import tempfile
-        temp_file_path = os.path.join(tempfile.gettempdir(), f"chunirec_upload_{datetime.now().strftime('%Y%m%d%H%M%S')}.json")
-
-        try:
-            if base64_data:
-                import base64
-                with open(temp_file_path, "wb") as f:
-                    f.write(base64.b64decode(base64_data))
-            elif local_file and os.path.exists(local_file):
-                import shutil
-                shutil.copy2(local_file, temp_file_path)
-            elif file_url:
-                if isinstance(file_url, str):
-                    if file_url.startswith("//"):
-                        file_url = f"http:{file_url}"
-                    elif file_url.startswith("/") and not os.path.exists(file_url):
-                        file_url = f"http://{file_url}"
-
-                if not isinstance(file_url, str) or not (file_url.startswith("http://") or file_url.startswith("https://")):
-                    await update_chunirec_upload.finish("接收到的不是有效的文件链接。")
-
-                try:
-                    async with httpx.AsyncClient() as client:
-                        async with client.stream("GET", file_url, timeout=30.0) as resp:
-                            if resp.status_code == 200:
-                                with open(temp_file_path, "wb") as f:
-                                    size = 0
-                                    async for chunk in resp.aiter_bytes():
-                                        size += len(chunk)
-                                        if size > 50 * 1024 * 1024:
-                                            raise ValueError("文件超过50MB大小限制")
-                                        f.write(chunk)
-                            else:
-                                await update_chunirec_upload.finish("下载文件失败，请稍后重试！")
-                except ValueError as ve:
-                    logger.warning(f"上传 chunirec 数据文件被拒绝: {ve}")
-                    await update_chunirec_upload.finish("文件不符合上传要求。")
-                except Exception as e:
-                    logger.error(f"下载 chunirec 数据文件错误: {e}")
-                    await update_chunirec_upload.finish("下载文件时发生网络错误。")
-            else:
-                await update_chunirec_upload.finish("未能成功提取文件。")
-        except FinishedException:
-            raise
-
-        try:
-            with open(temp_file_path, "rb") as f:
-                raw_bytes = f.read()
-
-            # 记录下载文件的原始字节预览，便于排查
-            preview = raw_bytes[:200]
-            logger.warning(
-                f"chunirec 上传文件已下载: size={len(raw_bytes)}, "
-                f"first_bytes={preview[:60]!r}"
-            )
-
-            upload_data = _parse_json_file(raw_bytes, temp_file_path)
-        except json.JSONDecodeError as e:
-            logger.warning(f"chunirec JSON 解析失败: {e}, preview={raw_bytes[:200]!r}")
-            await update_chunirec_upload.finish(f"JSON 解析失败: {e}")
-        except UnicodeDecodeError as e:
-            await update_chunirec_upload.finish(f"文件编码解析失败: {e}")
-        except ValueError as e:
-            logger.warning(f"chunirec 文件处理失败: {e}, preview={raw_bytes[:200]!r}")
-            await update_chunirec_upload.finish(f"文件处理失败: {e}")
-        finally:
-            if os.path.exists(temp_file_path):
-                try:
-                    os.remove(temp_file_path)
-                except Exception:
-                    pass
-
-        if not isinstance(upload_data, dict):
-            logger.warning(f"chunirec 上传数据不是 dict，实际类型: {type(upload_data).__name__}, value={str(upload_data)[:200]!r}")
-            await update_chunirec_upload.finish("文件格式错误：期望 JSON 对象。")
-
-        chunirec_payload = upload_data.get("chunirec_payload")
-        logger.warning(
-            f"chunirec 上传数据解析完成: keys={list(upload_data.keys())[:15]}, "
-            f"chunirec_payload={type(chunirec_payload).__name__}, "
-            f"len={len(chunirec_payload) if isinstance(chunirec_payload, list) else 'N/A'}"
-        )
-        if not isinstance(chunirec_payload, list) or not chunirec_payload:
-            logger.warning(
-                f"chunirec_payload 无效: type={type(chunirec_payload).__name__}, "
-                f"len={len(chunirec_payload) if isinstance(chunirec_payload, list) else 'N/A'}, "
-                f"keys_found={list(upload_data.keys())}"
-            )
-            await update_chunirec_upload.finish("文件格式错误：缺少 chunirec_payload 或不是有效列表。")
-
-        naominet_id_map: Dict[Tuple[str, str], str] = {}
-        naominet_status = upload_data.get("naominet_status", "未包含 naominet 数据")
-        raw_map = upload_data.get("naominet_id_map", [])
-        if isinstance(raw_map, list):
-            for entry in raw_map:
-                if isinstance(entry, list) and len(entry) >= 3:
-                    title_key, artist_key, numeric_id = entry[0], entry[1], entry[2]
-                    naominet_id_map[(title_key, artist_key)] = numeric_id
-
-        await update_chunirec_upload.send("收到，正在处理上传的 chunirec 数据...")
-
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        with SONGLIST_LOCK:
-            local_data = load_local_songlist()
-            ensure_chunirec_versions(local_data)
-            added, refreshed, skipped_lx = merge_chunirec_songs(
-                local_data, chunirec_payload, naominet_id_map,
-            )
-            write_songlist_atomic(local_data)
-
-        mtime = datetime.fromtimestamp(SONGLIST_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-        logger.success(
-            f"chunirec 上传曲库同步完成: added={added}, refreshed={refreshed}, skipped_lx={skipped_lx}, "
-            f"naominet={naominet_status}, file={SONGLIST_FILE}"
-        )
-        await update_chunirec_upload.send(
-            "chunirec 上传曲库同步完成！\n"
-            f"新增：{added}，刷新：{refreshed}，保留落雪已有：{skipped_lx}\n"
-            f"数字 ID：{naominet_status}\n"
-            f"文件修改时间：{mtime}"
-        )
-
-    except FinishedException:
-        raise
-    except Exception as e:
-        logger.error(f"chunirec 上传处理失败: {e}")
-        await update_chunirec_upload.send("处理上传数据时发生意外错误，请查看控制台日志。")
+async def handle_chunirec_upload(bot: Bot, event: MessageEvent):
+    from .services.maintenance import submit_import
+    result = await submit_import(bot, event, origin="command")
+    await update_chunirec_upload.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))

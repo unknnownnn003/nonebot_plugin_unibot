@@ -57,6 +57,7 @@ async def stop_workers():
         _notifier_task = None
     if _store is not None:
         await _store.mark_interrupted()
+    _contexts.clear()
 
 
 async def _fetch_with_cancel(awaitable, job, store):
@@ -133,8 +134,13 @@ async def _handle(job):
     if context is None:
         return outcome("JOB_INTERRUPTED", "原始请求上下文已丢失，任务未继续执行。", status="interrupted")
     bot, event = context
-    if _scope(bot, event) != {key: getattr(job, key) for key in _scope(bot, event)} or job.payload.get("user_id") != job.actor_id:
+    if _scope(bot, event) != {key: getattr(job, key) for key in _scope(bot, event)} or (job.capability_id == "score.sync" and job.payload.get("user_id") != job.actor_id):
         return outcome("PERMISSION_DENIED", "任务归属核验失败，本次未执行。", status="denied")
+    if job.capability_id in {"maintenance.refresh", "maintenance.import_chunirec"}:
+        from .maintenance import run
+        return await run(bot, event, job, _store)
+    if job.capability_id != "score.sync":
+        return outcome("CAPABILITY_DISABLED", "任务能力已不可用。", status="unavailable")
     return await _run_sync(job.actor_id, job, _store)
 
 
@@ -147,7 +153,8 @@ async def _notify(job):
         bot = get_bot(job.bot_id)
     except KeyError:
         return {"deferred": True}
-    text = f"成绩同步任务 {job.job_id}：{job.result.get('public_hint') or job.status}"
+    label = "资源维护" if job.capability_id.startswith("maintenance.") else "成绩同步"
+    text = f"{label}任务 {job.job_id}：{job.result.get('public_hint') or job.status}"
     if job.context_type == "group":
         await bot.send_group_msg(group_id=int(job.context_id), message=text)
     else:
@@ -188,16 +195,22 @@ async def _notifications():
 async def submit(bot, event, user_id, *, origin="agent"):
     if str(user_id) != str(event.user_id) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "任务必须属于真实发起人。", status="denied")
+    return await submit_operation(bot, event, "score.sync", f"lxns:{user_id}", {"user_id": str(user_id)}, origin=origin)
+
+
+async def submit_operation(bot, event, capability_id, operation_id, payload, *, origin="agent"):
+    if str(bot.self_id) != str(event.self_id):
+        return outcome("PERMISSION_DENIED", "任务身份不匹配。", status="denied")
     store = await ensure_started()
     try:
         async with _gate:
-            job, created = await store.submit(provider=PROVIDER, capability_id="score.sync",
-                operation_id=f"lxns:{user_id}", source_message_id=str(event.message_id),
-                payload={"user_id": str(user_id)}, response_owner=origin, **_scope(bot, event))
+            job, created = await store.submit(provider=PROVIDER, capability_id=capability_id,
+                operation_id=operation_id, source_message_id=str(event.message_id),
+                payload=payload, response_owner=origin, **_scope(bot, event))
             if created:
                 _contexts[job.job_id] = (bot, event)
     except QueueFull:
-        return outcome("QUEUE_FULL", "同步队列已满，本次没有接单。", status="unavailable")
+        return outcome("QUEUE_FULL", "任务队列已满，本次没有接单。", status="unavailable")
     _wake.set()
     job = await store.get(job.job_id)
     data = await public_job(job)
@@ -226,6 +239,8 @@ async def query(bot, event, action="list", job_id=None):
         return outcome("JOB_NOT_FOUND", "当前会话中没有你可访问的这个任务。", status="needs_input")
     if action == "cancel":
         job = await store.cancel(job.job_id, **scope)
+        if job.status == "cancelled":
+            _contexts.pop(job.job_id, None)
         _wake.set()
         _notify_wake.set()
     return outcome(data=await public_job(job))

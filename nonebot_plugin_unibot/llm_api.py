@@ -3,11 +3,12 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing import Literal
 import inspect
+from .services.permissions import native_superuser
 
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "3.1.3"
+CAPABILITY_VERSION = "3.1.4"
 
 
 class SearchArgs(BaseModel):
@@ -44,6 +45,12 @@ class BindArgs(BaseModel):
     friend_code: str = Field(min_length=1, max_length=32, pattern=r"^\d+$")
 
 
+class MaintenanceArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    resource: Literal["songlist", "chunirec", "jackets", "collections", "stories"]
+    full_refresh: bool = False
+
+
 class ManualScoreArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     query: str = Field(min_length=1, max_length=120)
@@ -78,7 +85,13 @@ class StoryCategoryArgs(BaseModel):
 
 
 def describe_capabilities():
-    return [dict(id="song.search", name="nb_unibot_song", description="中二节奏查歌、歌曲详情与歧义候选图。",
+    return [dict(id="maintenance.refresh", name="nb_unibot_maintenance", description="排队更新原曲库/chunirec/曲绘/收藏品/剧情资源；仅SUPERUSER，全局写入需确认。",
+                 parameters=MaintenanceArgs.model_json_schema(), effect="write", long_task=True,
+                 keywords=["更新曲库", "更新songlist", "更新chunirec", "更新曲绘", "更新收藏品", "更新剧情", "维护资源"]),
+            dict(id="maintenance.import_chunirec", name="nb_unibot_import_chunirec", description="将当前附件中的fetch_chunirec_data.py曲库JSON排队合并；仅SUPERUSER，需确认，不是个人成绩导入。",
+                 parameters=EmptyArgs.model_json_schema(), effect="write", long_task=True,
+                 keywords=["上传chunirec", "上传日服曲库", "导入曲库", "上传日服songlist"]),
+            dict(id="song.search", name="nb_unibot_song", description="中二节奏查歌、歌曲详情与歧义候选图。",
                  parameters=SearchArgs.model_json_schema(), effect="none", keywords=["中二", "是什么歌", "查歌", "歌曲", "曲目"]),
             dict(id="song.detail", name="nb_unibot_song_detail", description="按明确歌曲 ID 查询中二节奏详情并发送原曲目图片。",
                  parameters=SongIdArgs.model_json_schema(), effect="none", keywords=["歌曲详情", "曲目详情", "歌曲ID"]),
@@ -139,6 +152,7 @@ async def prepare_capability(name, arguments, context):
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(event.self_id) != str(bot.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
     models = {"player.bind": BindArgs, "score.submit": ManualScoreArgs, "score.sync": EmptyArgs,
+              "maintenance.import_chunirec": EmptyArgs,
               "score.import_file": EmptyArgs, "game.start": GameStartArgs, "game.guess": GameGuessArgs,
               "game.hint": EmptyArgs, "game.give_up": EmptyArgs, "job.cancel": JobArgs}
     try:
@@ -146,12 +160,37 @@ async def prepare_capability(name, arguments, context):
     except ValidationError:
         return outcome("INVALID_ARGUMENT", "请核对操作参数。", status="needs_input")
     constraints = {}
+    if name == "maintenance.refresh":
+        try:
+            normalized = MaintenanceArgs.model_validate(arguments).model_dump()
+        except ValidationError:
+            return outcome("INVALID_ARGUMENT", "请指定维护资源。", status="needs_input")
+        if not native_superuser(bot, event):
+            return outcome("PERMISSION_DENIED", "资源维护仅SUPERUSER可用。", status="denied")
+        if normalized["full_refresh"] and normalized["resource"] != "jackets":
+            return outcome("INVALID_ARGUMENT", "完整重下仅适用于曲绘。", status="needs_input")
+        if normalized["resource"] == "chunirec":
+            from .songlist_update import config
+            if not config.chunirec_token:
+                return outcome("NOT_CONFIGURED", "未配置chunirec令牌，当前不能在线同步该曲库。", status="unavailable")
+        constraints["scope"] = "global"
+    if name == "maintenance.import_chunirec":
+        EmptyArgs.model_validate(arguments)
+        if not native_superuser(bot, event):
+            return outcome("PERMISSION_DENIED", "资源维护仅SUPERUSER可用。", status="denied")
+        from .services.attachments import file_reference
+        import hashlib, json
+        reference = file_reference(event)
+        if reference is None:
+            return outcome("NEED_ATTACHMENT", "请在当前请求中附上曲库JSON文件。", status="needs_input")
+        constraints = dict(scope="global", attachment_reference=hashlib.sha256(json.dumps(reference, sort_keys=True, default=str).encode()).hexdigest(),
+                           attachment_name=str(reference.get("name") or reference.get("file_name") or "当前附件")[:120])
     if name in {"song.alias_add", "song.alias_delete"}:
         try:
             normalized = AliasArgs.model_validate(arguments).model_dump()
         except ValidationError:
             return outcome("INVALID_ARGUMENT", "请提供歌曲ID及别名。", status="needs_input")
-        if name == "song.alias_delete" and str(event.user_id) not in bot.config.superusers:
+        if name == "song.alias_delete" and not native_superuser(bot, event):
             return outcome("PERMISSION_DENIED", "只有SUPERUSER可以删除歌曲别名。", status="denied")
         from .services.song import aliases
         target = await aliases(normalized["song_id"])
@@ -188,14 +227,27 @@ async def invoke_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
-    if name in {"song.alias_add", "song.alias_delete", "player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up", "game.start", "game.guess", "job.cancel"} and not context.get("confirmed", False):
+    if name in {"maintenance.refresh", "maintenance.import_chunirec", "song.alias_add", "song.alias_delete", "player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up", "game.start", "game.guess", "job.cancel"} and not context.get("confirmed", False):
         return outcome("AUTHORIZATION_REQUIRED", "需要当前用户核对操作预览并确认。", status="denied")
     if name in {"game.guess", "game.hint", "game.give_up"} and not context.get("constraints", {}).get("game_round_id"):
         return outcome("STATE_CHANGED", "操作没有绑定有效猜曲局，请重新预览。", status="needs_input")
     try:
-        if name in {"song.alias_add", "song.alias_delete"}:
+        if name == "maintenance.refresh":
+            args = MaintenanceArgs.model_validate(arguments)
+            from .services.maintenance import submit
+            output = await submit(bot, event, args.resource, args.full_refresh)
+        elif name == "maintenance.import_chunirec":
+            EmptyArgs.model_validate(arguments)
+            prepared = await prepare_capability(name, arguments, context)
+            if prepared.get("status") != "ok":
+                return prepared
+            if prepared["constraints"].get("attachment_reference") != context.get("constraints", {}).get("attachment_reference"):
+                return outcome("STATE_CHANGED", "当前附件已变化，请重新预览。", status="needs_input")
+            from .services.maintenance import submit_import
+            output = await submit_import(bot, event)
+        elif name in {"song.alias_add", "song.alias_delete"}:
             args = AliasArgs.model_validate(arguments)
-            if name == "song.alias_delete" and str(event.user_id) not in bot.config.superusers:
+            if name == "song.alias_delete" and not native_superuser(bot, event):
                 return outcome("PERMISSION_DENIED", "只有SUPERUSER可以删除歌曲别名。", status="denied")
             from .services.song import change_alias
             output = await change_alias(args.song_id, args.alias, delete=name == "song.alias_delete")

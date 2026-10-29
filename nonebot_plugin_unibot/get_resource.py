@@ -5,7 +5,8 @@ import time
 
 import httpx
 from nonebot import on_command
-from nonebot.adapters import Message
+from pathlib import Path
+from nonebot.adapters.onebot.v11 import Message, Bot, MessageEvent
 from nonebot.log import logger
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
@@ -153,6 +154,8 @@ def purge_cached_jackets(ids: set[str]) -> int:
     for sid in ids:
         for ext in (".png", ".webp", ".jpg", ".jpeg"):
             path = os.path.join(JACKET_DIR, f"{sid}{ext}")
+            if Path(path).resolve().parent != Path(JACKET_DIR).resolve():
+                continue
             if os.path.exists(path):
                 os.remove(path)
                 removed += 1
@@ -160,141 +163,7 @@ def purge_cached_jackets(ids: set[str]) -> int:
 
 
 @update_jacket.handle()
-async def _(msg: Message = CommandArg()):
-    full_refresh = should_full_refresh(msg)
-    mode_text = "完整重下" if full_refresh else "增量更新"
-    await update_jacket.send(f"收到，正在处理（{mode_text}）...")
-
-    os.makedirs(JACKET_DIR, exist_ok=True)
-
-    try:
-        songlist_path = os.path.join(DATA_DIR, "songlist.json")
-        with open(songlist_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        songs = data.get("songs", [])
-        if not isinstance(songs, list) or not songs:
-            await update_jacket.send("曲目列表为空或格式异常，请先更新 songlist。")
-            return
-    except Exception as e:
-        logger.error(f"读取曲目列表失败: {e}")
-        await update_jacket.send("读取曲目列表失败，请先获取或更新曲目列表。")
-        return
-
-    targets = {}
-    for song in songs:
-        song_id = song.get("jacket_id") or song.get("rinnet_id") or song.get("id")
-        for diff in song.get("difficulties", []) or []:
-            if diff.get("difficulty") in (4, 5):
-                song_id = diff.get("origin_id", song_id)
-                break
-
-        if song_id is not None:
-            song_id_str = str(song_id)
-            if not should_use_lxns_jacket(song_id_str):
-                continue
-            targets[song_id_str] = song
-
-    jacket_status = load_jacket_status()
-    purged_count = 0
-    if full_refresh:
-        purge_ids = set(targets.keys()) | collect_chunirec_jacket_ids(songs)
-        purged_count = purge_cached_jackets(purge_ids)
-        for sid in purge_ids:
-            jacket_status.pop(sid, None)
-
-    lxns_semaphore = asyncio.Semaphore(LXNS_CONCURRENCY)
-    success_count = 0
-    skip_count = 0
-    missing_count = 0
-    fail_count = 0
-    deferred_count = 0
-    request_count = 0
-    rate_limited_count = 0
-    last_request_at = 0.0
-
-    async def fetch_and_save(client: httpx.AsyncClient, sid: str) -> str:
-        nonlocal success_count, missing_count, fail_count, rate_limited_count, last_request_at
-        file_path = os.path.join(JACKET_DIR, f"{sid}.png")
-        lxns_url = LXNS_JACKET_URL.format(song_id=sid)
-
-        for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
-            try:
-                async with lxns_semaphore:
-                    wait_seconds = LXNS_REQUEST_INTERVAL - (time.monotonic() - last_request_at)
-                    if wait_seconds > 0:
-                        await asyncio.sleep(wait_seconds)
-                    response = await client.get(lxns_url, timeout=10.0)
-                    last_request_at = time.monotonic()
-
-                if response.status_code == 429:
-                    rate_limited_count += 1
-                    retry_after = parse_retry_after(response)
-                    logger.warning(f"落雪曲绘接口限流，等待 {retry_after}s 后重试: {lxns_url}")
-                    if attempt < MAX_RATE_LIMIT_RETRIES:
-                        await asyncio.sleep(retry_after)
-                        continue
-                    mark_jacket_status(jacket_status, sid, "rate_limited", response.status_code)
-                    return "rate_limited"
-
-                if response.status_code == 200 and looks_like_png(response.content):
-                    await write_bytes_atomic(file_path, response.content)
-                    jacket_status.pop(sid, None)
-                    success_count += 1
-                    return "success"
-
-                if response.status_code == 404:
-                    missing_count += 1
-                    mark_jacket_status(jacket_status, sid, "missing", response.status_code)
-                    return "missing"
-
-                logger.warning(f"下载曲绘失败 (状态码 {response.status_code}, 大小 {len(response.content)}): {lxns_url}")
-                fail_count += 1
-                mark_jacket_status(jacket_status, sid, "failed", response.status_code)
-                return "failed"
-            except Exception as e:
-                fail_count += 1
-                mark_jacket_status(jacket_status, sid, "failed", 0)
-                logger.warning(f"下载曲绘出错: {lxns_url} - {type(e).__name__}: {e!r}")
-                return "failed"
-
-        fail_count += 1
-        mark_jacket_status(jacket_status, sid, "failed", 0)
-        return "failed"
-
-    async with httpx.AsyncClient() as client:
-        target_items = sorted(targets.items(), key=lambda item: int(item[0]))
-        now = time.time()
-        for index, (sid, _song) in enumerate(target_items):
-            file_path = os.path.join(JACKET_DIR, f"{sid}.png")
-            if is_existing_jacket_valid(file_path):
-                skip_count += 1
-                jacket_status.pop(sid, None)
-                continue
-
-            if not full_refresh and should_defer_jacket(jacket_status, sid, now):
-                deferred_count += 1
-                continue
-
-            if not full_refresh and request_count >= MAX_INCREMENTAL_REQUESTS:
-                deferred_count += len(target_items) - index
-                break
-
-            request_count += 1
-            result = await fetch_and_save(client, sid)
-            if result == "rate_limited":
-                deferred_count += len(target_items) - index - 1
-                break
-
-    write_jacket_status(jacket_status)
-
-    await update_jacket.send(
-        f"曲绘更新任务完成！（{mode_text}）\n"
-        f"成功下载：{success_count}\n"
-        f"跳过已有：{skip_count}\n"
-        f"本次请求：{request_count}\n"
-        f"暂缓跳过：{deferred_count}\n"
-        f"删除旧缓存：{purged_count}\n"
-        f"落雪缺失：{missing_count}\n"
-        f"下载失败：{fail_count}\n"
-        f"触发限流：{rate_limited_count}"
-    )
+async def handle_update_jacket(bot: Bot, event: MessageEvent, msg: Message = CommandArg()):
+    from .services.maintenance import submit
+    result = await submit(bot, event, "jackets", should_full_refresh(msg), origin="command")
+    await update_jacket.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))

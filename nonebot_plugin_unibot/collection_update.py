@@ -5,6 +5,7 @@ from pathlib import Path
 
 import aiofiles
 import httpx
+from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 from nonebot import on_command
 from nonebot.log import logger
 from nonebot.permission import SUPERUSER
@@ -66,91 +67,7 @@ def load_versions() -> list[int]:
 
 
 @update_collection.handle()
-async def _():
-    await update_collection.send("收到，正在处理...")
-
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    versions_list = load_versions()
-    semaphore = asyncio.Semaphore(15)
-
-    async def fetch_and_save_asset(client: httpx.AsyncClient, col_type: str, item_id: int, save_dir: Path):
-        file_path = save_dir / f"{item_id}.png"
-        if file_path.exists() and file_path.stat().st_size > 8:
-            return "skip"
-
-        url = f"{ASSETS_BASE_URL}{COLLECTIONS[col_type]['path'].format(id=item_id)}"
-        async with semaphore:
-            try:
-                response = await client.get(url, timeout=10.0)
-                if response.status_code == 404:
-                    return "404"
-                if response.status_code == 200 and looks_like_png(response.content):
-                    temp_file = file_path.with_suffix(".png.tmp")
-                    async with aiofiles.open(temp_file, "wb") as f:
-                        await f.write(response.content)
-                    temp_file.replace(file_path)
-                    return "success"
-                logger.warning(f"下载 {col_type} (ID: {item_id}) 失败: status={response.status_code}, size={len(response.content)}")
-                return "fail"
-            except Exception as e:
-                logger.error(f"下载 {col_type} (ID: {item_id}) 失败: {e}")
-                return "fail"
-
-    summary = []
-    async with httpx.AsyncClient() as client:
-        for col_type, info in COLLECTIONS.items():
-            all_items = {}
-            request_failures = 0
-
-            for version in versions_list:
-                api_url = f"{API_BASE_URL}/{col_type}/list?version={version}"
-                try:
-                    resp = await client.get(api_url, timeout=30.0)
-                    resp.raise_for_status()
-                    col_data = resp.json()
-                    items = col_data.get(info["key"], []) if isinstance(col_data, dict) else []
-                    if not isinstance(items, list):
-                        request_failures += 1
-                        logger.warning(f"获取 {col_type} (version: {version}) 返回格式异常")
-                        continue
-                    for item in items:
-                        if isinstance(item, dict) and item.get("id") is not None:
-                            all_items[item["id"]] = item
-                except Exception as e:
-                    request_failures += 1
-                    logger.warning(f"获取 {col_type} (version: {version}) 列表失败: {e}")
-
-            if not all_items:
-                msg = f"{col_type}: 未获取到有效数据，保留本地旧文件"
-                logger.error(msg)
-                summary.append(msg)
-                continue
-
-            merged_data = {info["key"]: list(all_items.values())}
-            json_path = DATA_DIR / f"{col_type}.json"
-            save_json_atomic(json_path, merged_data)
-
-            img_dir = DATA_DIR / col_type
-            img_dir.mkdir(parents=True, exist_ok=True)
-
-            tasks = [fetch_and_save_asset(client, col_type, item_id, img_dir) for item_id in all_items.keys()]
-            results = await asyncio.gather(*tasks)
-
-            success_c = results.count("success")
-            skip_c = results.count("skip")
-            fail_c = results.count("fail")
-            not_found_c = results.count("404")
-
-            logger.info(
-                f"{col_type} 资源更新完毕！数据总量: {len(all_items)}, 下载成功: {success_c}, "
-                f"跳过: {skip_c}, 不存在(或无图): {not_found_c}, 失败: {fail_c}, 接口失败: {request_failures}"
-            )
-            summary.append(
-                f"{col_type}: 数据 {len(all_items)}，下载 {success_c}，跳过 {skip_c}，404 {not_found_c}，失败 {fail_c}，接口失败 {request_failures}"
-            )
-
-    await update_collection.send(
-        "所有收藏品列表及资源已更新处理完毕！\n"
-        + "\n".join(summary)
-        + f"\n完成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    )
+async def handle_update_collection(bot: Bot, event: MessageEvent):
+    from .services.maintenance import submit
+    result = await submit(bot, event, "collections", origin="command")
+    await update_collection.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
