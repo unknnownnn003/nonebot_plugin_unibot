@@ -288,5 +288,7 @@ async def replay(bot, event, job_id):
         saved["data"] = dict(saved.get("data", {}), artifact_delivery="sent", media_cached=True)
         saved["public_hint"] = "缓存媒体已全部送达；原任务执行状态保留，没有重新生成。"
         await _store.update(job_id, result=saved)
-    return outcome(hint=("这条补发请求已处理，未再次发送。" if result.get("deduplicated") else f"已补投 {result['sent']} 条缓存内容。") +
-                   ("仍有未确认送达的内容，可稍后再次明确请求补投。" if result["remaining"] else ""), data=result)
+    return outcome("MEDIA_DELIVERY_INCOMPLETE" if result["remaining"] else "OK",
+                   hint=("这条补发请求已处理，未再次发送。" if result.get("deduplicated") else f"已补投 {result['sent']} 条缓存内容。") +
+                   ("仍有未确认送达的内容，可稍后再次明确请求补投。" if result["remaining"] else ""),
+                   status="partial" if result["remaining"] and result["sent"] else "unknown" if result["remaining"] else "ok", data=result)

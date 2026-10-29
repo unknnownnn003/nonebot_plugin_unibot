@@ -14,8 +14,11 @@ from pathlib import Path
 import sqlite3
 import time
 from uuid import uuid4
+from weakref import WeakValueDictionary
 
 from .job_store import _db_thread
+
+_replay_locks = WeakValueDictionary()
 
 
 def scope(bot, event):
@@ -196,7 +199,7 @@ class PresentationStore:
             raise ValueError("presentation changed")
         return decode(json.loads(raw))
 
-    async def send(self, row, bot, event, *, allow_unknown=False):
+    async def send(self, row, bot, event, *, allow_unknown=False, before_send=None):
         identity, token = scope(bot, event), uuid4().hex
         if row["scope"] != identity:
             raise ValueError("presentation does not belong to this context")
@@ -216,6 +219,8 @@ class PresentationStore:
         state, receipt = "not_sent", None
         try:
             content = await _db_thread(lambda: self._read(row))
+            if before_send is not None and not await before_send():
+                return {"delivery": "not_sent", "claimed": True, "denied": True}
             state = "unknown"
             if row["kind"] == "forward":
                 if getattr(event, "group_id", None) is not None:
@@ -234,6 +239,15 @@ class PresentationStore:
         return {"delivery": state, "claimed": True, "receipt": receipt}
 
     async def replay(self, operation_id, bot, event, *, limit=20):
+        key = (str(self.path.resolve()), operation_id, scope(bot, event))
+        lock = _replay_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            _replay_locks[key] = lock
+        async with lock:
+            return await self._replay(operation_id, bot, event, limit=limit)
+
+    async def _replay(self, operation_id, bot, event, *, limit=20):
         await self.init()
         identity = scope(bot, event)
         request_key = hashlib.sha256(json.dumps([operation_id, identity, str(event.message_id)]).encode()).hexdigest()

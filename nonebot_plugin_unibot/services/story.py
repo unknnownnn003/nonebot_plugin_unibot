@@ -106,10 +106,15 @@ async def execute(bot, event, job, store, presentations):
         nodes = await _render(bot, job.payload["name"], markdown, checkpoint)
         await checkpoint("saving_story_media")
         root = await presentations.stage_forward(job.job_id, scope(bot, event), nodes)
-        if not await store.start_effect(job.job_id, "sending_story_forward"):
+        async def admit():
+            nonlocal started
+            if not await store.start_effect(job.job_id, "sending_story_media"):
+                return False
+            started = True
+            return True
+        attempt = await presentations.send(root, bot, event, before_send=admit)
+        if attempt.get("denied"):
             raise StoryStopped()
-        started = True
-        attempt = await presentations.send(root, bot, event)
         delivery = attempt["delivery"]
         if delivery == "unknown" and attempt["claimed"]:
             # Preserve the original fallback limit; replay later uses only the
@@ -118,9 +123,9 @@ async def execute(bot, event, job, store, presentations):
             for part in parts:
                 if part["kind"] != "forward_part" or part["artifact_key"] not in {"main:part:000001", "main:part:000002"}:
                     continue
-                if not await store.start_effect(job.job_id, "sending_story_fallback"):
+                receipt = await presentations.send(part, bot, event, allow_unknown=True, before_send=admit)
+                if receipt.get("denied"):
                     break
-                receipt = await presentations.send(part, bot, event, allow_unknown=True)
                 sent += receipt["delivery"] == "sent"
             delivery = "partial" if sent else "unknown"
         output = outcome("OK" if delivery == "sent" else "MEDIA_DELIVERY_INCOMPLETE",
