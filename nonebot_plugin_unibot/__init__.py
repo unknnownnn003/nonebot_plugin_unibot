@@ -22,3 +22,6 @@ from nonebot import get_driver
 from .services.sync import ensure_started, stop_workers
 get_driver().on_startup(ensure_started)
 get_driver().on_shutdown(stop_workers)
+
+from .services.command_receipts import install as install_command_receipts
+_native_command_guards = install_command_receipts([globals()[name] for name in __all__])

@@ -153,6 +153,9 @@ async def prepare_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(event.self_id) != str(bot.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
+    from .services.command_receipts import source_owned
+    if await source_owned(bot, event):
+        return outcome("ALREADY_HANDLED", "原命令已接管这条消息，不再创建重复操作预览。", status="unknown")
     models = {"player.bind": BindArgs, "score.submit": ManualScoreArgs, "score.sync": EmptyArgs,
               "maintenance.import_chunirec": EmptyArgs,
               "score.import_file": EmptyArgs, "game.start": GameStartArgs, "game.guess": GameGuessArgs,
@@ -235,6 +238,9 @@ async def invoke_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
+    from .services.command_receipts import source_owned
+    if await source_owned(bot, event):
+        return outcome("ALREADY_HANDLED", "这条消息已由原命令接管，不能再次执行业务；请查询原任务或记录。", status="unknown")
     if name in {"maintenance.refresh", "maintenance.import_chunirec", "song.alias_add", "song.alias_delete", "player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up", "game.start", "game.guess", "job.cancel", "job.replay"} and not context.get("confirmed", False):
         return outcome("AUTHORIZATION_REQUIRED", "需要当前用户核对操作预览并确认。", status="denied")
     if name in {"game.guess", "game.hint", "game.give_up"} and not context.get("constraints", {}).get("game_round_id"):
