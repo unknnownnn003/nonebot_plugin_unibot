@@ -1,3 +1,5 @@
+from nonebot.adapters.onebot.v11 import Bot
+from .services.job_store import async_call
 import asyncio
 import aiofiles
 from .services.results import outcome, image
@@ -245,7 +247,7 @@ async def query_player_profile(user_qq, progress=None):
             except Exception as e:
                 logger.error(f'读取本地角色图片失败: {e}')
     try:
-        img_bytes = await asyncio.to_thread(draw_player_info, data, char_img_bytes)
+        img_bytes = await async_call(draw_player_info, data, char_img_bytes)
     except FinishedException:
         raise
     except Exception as e:
@@ -256,8 +258,8 @@ async def query_player_profile(user_qq, progress=None):
 
 
 @get_score.handle()
-async def _(event: Event):
-    result = await query_player_profile(str(event.get_user_id()), progress=lambda: get_score.send("收到，正在处理..."))
-    if result["artifacts"]:
-        await get_score.finish(MessageSegment.image(result["artifacts"][0]["content"]))
-    await get_score.finish(result["fallback_text"])
+async def _(bot: Bot, event: Event):
+    from .services.media_jobs import submit
+    result = await submit(bot, event, "player.profile", {}, origin="command")
+    await get_score.finish(result["fallback_text"] +
+        (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))

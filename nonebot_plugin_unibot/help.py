@@ -1,3 +1,4 @@
+from nonebot.adapters.onebot.v11 import Bot
 import io
 import os
 import platform
@@ -120,12 +121,8 @@ def draw_help():
     return buf.getvalue()
 
 @chuhelp_cmd.handle()
-async def _(event: Event):
-    try:
-        img_bytes = draw_help()
-        await chuhelp_cmd.finish(MessageSegment.image(img_bytes))
-    except FinishedException:
-        raise
-    except Exception as e:
-        logger.error(f"生成帮助图片失败: {e}")
-        await chuhelp_cmd.finish("生成帮助图片失败，请查看控制台日志。")
+async def _(bot: Bot, event: Event):
+    from .services.media_jobs import submit
+    result = await submit(bot, event, "help.read", {}, origin="command")
+    await chuhelp_cmd.finish(result["fallback_text"] +
+        (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))

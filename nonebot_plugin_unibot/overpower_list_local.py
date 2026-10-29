@@ -1,3 +1,5 @@
+from nonebot.adapters.onebot.v11 import Bot
+from .services.job_store import async_call
 import asyncio
 import aiofiles
 from .services.results import outcome, image
@@ -566,11 +568,11 @@ async def query_progress(user_qq, query_text, progress=None):
     if not query_text:
         return outcome('INVALID_ARGUMENT', '请提供查询条件（难度/定数/版本/分类等），例如: /chulist 13+ sun 车万', status='needs_input')
         return
-    user_best, upload_date = await asyncio.to_thread(parse_user_data, user_qq)
+    user_best, upload_date = await async_call(parse_user_data, user_qq)
     if user_best is None:
         return outcome('NO_SCORES', '数据不存在，请发送/chuupdate', status='needs_input')
         return
-    target_charts = await asyncio.to_thread(get_target_charts, query_text)
+    target_charts = await async_call(get_target_charts, query_text)
     if not target_charts:
         return outcome('NOT_FOUND', '未找到符合条件的谱面！', status='needs_input')
         return
@@ -603,7 +605,7 @@ async def query_progress(user_qq, query_text, progress=None):
     total_op = sum((stats['max_op'] for stats in song_stats.values()))
     total_theoretical_op = sum((stats['max_theoretical_op'] for stats in song_stats.values()))
     try:
-        img_bytes = await asyncio.to_thread(draw_chulist_image, draw_items, total_op, total_theoretical_op, query_text, player_info, upload_date, no_cat=no_cat)
+        img_bytes = await async_call(draw_chulist_image, draw_items, total_op, total_theoretical_op, query_text, player_info, upload_date, no_cat=no_cat)
     except Exception as e:
         logger.error(f'Image gen failed: {e}')
         return outcome('RENDER_FAILED', '生成图片失败。', status='unavailable')
@@ -612,8 +614,8 @@ async def query_progress(user_qq, query_text, progress=None):
 
 
 @chulist_cmd.handle()
-async def _(event: Event, msg: Message = CommandArg()):
-    result = await query_progress(str(event.get_user_id()), msg.extract_plain_text().strip(), progress=lambda: chulist_cmd.send("收到，正在处理..."))
-    if result["artifacts"]:
-        await chulist_cmd.finish(MessageSegment.image(result["artifacts"][0]["content"]))
-    await chulist_cmd.finish(result["fallback_text"])
+async def _(bot: Bot, event: Event, msg: Message = CommandArg()):
+    from .services.media_jobs import submit
+    result = await submit(bot, event, "player.progress", {"query": msg.extract_plain_text().strip()}, origin="command")
+    await chulist_cmd.finish(result["fallback_text"] +
+        (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))

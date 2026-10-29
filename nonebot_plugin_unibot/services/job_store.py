@@ -35,6 +35,10 @@ async def _db_thread(function):
         raise
 
 
+async def async_call(function, *args, **kwargs):
+    return await _db_thread(lambda: function(*args, **kwargs))
+
+
 TERMINAL = {"succeeded", "failed", "partial", "cancelled", "interrupted", "unknown"}
 
 

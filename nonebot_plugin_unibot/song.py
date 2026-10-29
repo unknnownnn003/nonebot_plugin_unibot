@@ -1,3 +1,4 @@
+from nonebot.adapters.onebot.v11 import Bot
 import json
 import os
 import difflib
@@ -593,18 +594,14 @@ async def download_match_jacket(match: Dict[str, Any]) -> Optional[Image.Image]:
 
 
 @song_query.handle()
-async def _(event: MessageEvent):
-    msg = event.get_plaintext().strip()
-    match_str = msg[:-4].strip()  # Remove "是什么歌"
-    if not match_str:
+async def _(bot: Bot, event: MessageEvent):
+    query = event.get_plaintext().strip()[:-4].strip()
+    if not query:
         return
-
-    from .services.song import search
-    result = await search(match_str)
-    for artifact in result["artifacts"]:
-        await song_query.send(MessageSegment.image(artifact["content"]))
-    if not result["artifacts"] and result["fallback_text"]:
-        await song_query.finish(result["fallback_text"])
+    from .services.media_jobs import submit
+    result = await submit(bot, event, "song.search", {"query": query}, origin="command")
+    await song_query.finish(result["fallback_text"] +
+        (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
 
 # ==== 别名管理功能 ====
 add_alias_cmd = on_command("添加别名", priority=10, block=True)

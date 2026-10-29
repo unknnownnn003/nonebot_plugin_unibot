@@ -1,3 +1,4 @@
+from nonebot.adapters.onebot.v11 import Bot
 import asyncio
 import io
 import json
@@ -838,22 +839,16 @@ def parse_version(raw: str) -> str:
 
 
 @best_rating_cmd.handle()
-async def _(event: MessageEvent, msg: Message = CommandArg()):
-    from .services.player import best
-    version = parse_version(msg.extract_plain_text())
-    if version == SUPPORTED_VERSION and config.lxns_token:
-        await best_rating_cmd.send("收到，正在处理...")
-    result = await best(str(event.get_user_id()), "b", version)
-    if result["artifacts"]:
-        await best_rating_cmd.finish(MessageSegment.image(result["artifacts"][0]["content"]))
-    await best_rating_cmd.finish(result["fallback_text"])
+async def _(bot: Bot, event: MessageEvent, msg: Message = CommandArg()):
+    from .services.media_jobs import submit
+    result = await submit(bot, event, "player.best", {"mode": "b", "version": parse_version(msg.extract_plain_text())}, origin="command")
+    await best_rating_cmd.finish(result["fallback_text"] +
+        (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
 
 
 @best_rating_30_cmd.handle()
-async def _(event: MessageEvent):
-    from .services.player import best
-    await best_rating_30_cmd.send("收到，正在处理...")
-    result = await best(str(event.get_user_id()), "b30", migrate_legacy=True)
-    if result["artifacts"]:
-        await best_rating_30_cmd.finish(MessageSegment.image(result["artifacts"][0]["content"]))
-    await best_rating_30_cmd.finish(result["fallback_text"])
+async def _(bot: Bot, event: MessageEvent):
+    from .services.media_jobs import submit
+    result = await submit(bot, event, "player.best", {"mode": "b30", "version": "2026"}, origin="command")
+    await best_rating_30_cmd.finish(result["fallback_text"] +
+        (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))

@@ -1,3 +1,4 @@
+from .job_store import async_call
 import asyncio
 from .results import outcome, image
 
@@ -9,7 +10,7 @@ async def change_alias(song_id, alias, *, delete=False):
     if not alias:
         return outcome("INVALID_ARGUMENT", "别名不能为空。", status="needs_input")
     try:
-        found, changed = await asyncio.to_thread(
+        found, changed = await async_call(
             s.remove_song_alias if delete else s.add_song_alias, song_id, alias)
     except (OSError, ValueError):
         return outcome("STORAGE_FAILED", "保存曲目列表失败，请检查数据文件。", status="unavailable")
@@ -19,13 +20,21 @@ async def change_alias(song_id, alias, *, delete=False):
                          "action": "delete" if delete else "add"})
 
 
-async def search(query):
+async def prepare(query):
     from .. import song as s
-    matches = await asyncio.to_thread(s.find_song_matches, query, limit=8)
+    matches = await async_call(s.find_song_matches, query, limit=8)
     local_song, ambiguous = s.pick_song_match(matches)
+    import copy
+    return copy.deepcopy({"song": local_song, "ambiguous": ambiguous})
+
+
+async def search(query, *, prepared=None):
+    from .. import song as s
+    resolved = prepared if prepared is not None else await prepare(query)
+    local_song, ambiguous = resolved["song"], resolved["ambiguous"]
     if ambiguous:
         jackets = await asyncio.gather(*(s.download_match_jacket(m) for m in ambiguous[:8]))
-        content = await asyncio.to_thread(s.render_song_candidates_image, query, ambiguous[:8], list(jackets))
+        content = await async_call(s.render_song_candidates_image, query, ambiguous[:8], list(jackets))
         return outcome("AMBIGUOUS_TARGET", "有多个候选，请用歌曲 ID 选择。", status="needs_input",
                        data={"candidates": [{"id": m["song"].get("id"), "title": m["song"].get("title")} for m in ambiguous[:8]]},
                        artifacts=[image(content)])
@@ -41,14 +50,14 @@ async def search(query):
         else:
             return outcome("UPSTREAM_UNAVAILABLE", "已匹配到曲目，但在获取详情时失败，可能网络连接有误或接口异常。", status="unavailable")
     jacket = await s.download_jacket(song_id)
-    content = await asyncio.to_thread(s.render_song_image, local_song, detail, jacket)
+    content = await async_call(s.render_song_image, local_song, detail, jacket)
     return outcome(data={"id": song_id, "title": local_song.get("title"),
                          "data_source": local_song.get("data_source")}, artifacts=[image(content)])
 
 
 async def aliases(query):
     from .. import song as s
-    matches = await asyncio.to_thread(s.find_song_matches, query, limit=8)
+    matches = await async_call(s.find_song_matches, query, limit=8)
     song, ambiguous = s.pick_song_match(matches)
     if ambiguous:
         return outcome("AMBIGUOUS_TARGET", "请提供更精确的名称或ID。", status="needs_input",
@@ -62,7 +71,7 @@ async def detail(song_id):
     """Render details for one explicit local song ID without fuzzy selection."""
     from .. import song as s
 
-    matches = await asyncio.to_thread(s.find_song_matches, str(song_id), limit=8)
+    matches = await async_call(s.find_song_matches, str(song_id), limit=8)
     local_song = next((item["song"] for item in matches
                        if str(item.get("song", {}).get("id")) == str(song_id)), None)
     if local_song is None:
@@ -74,6 +83,6 @@ async def detail(song_id):
         else:
             return outcome("UPSTREAM_UNAVAILABLE", "已找到曲目，但获取详情失败，请稍后重试。", status="unavailable")
     jacket = await s.download_jacket(local_song.get("id"))
-    content = await asyncio.to_thread(s.render_song_image, local_song, detail_data, jacket)
+    content = await async_call(s.render_song_image, local_song, detail_data, jacket)
     return outcome(data={"id": local_song.get("id"), "title": local_song.get("title"),
                          "data_source": local_song.get("data_source")}, artifacts=[image(content)])

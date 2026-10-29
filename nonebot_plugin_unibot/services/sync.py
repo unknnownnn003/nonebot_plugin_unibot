@@ -146,6 +146,10 @@ async def _handle(job):
     if job.capability_id in {"story.search", "story.random"}:
         from .story import execute
         return await execute(bot, event, job, _store, _presentations)
+    from .media_jobs import CAPABILITIES
+    if job.capability_id in CAPABILITIES:
+        from .media_jobs import execute
+        return await execute(bot, event, job, _store, _presentations)
     if job.capability_id != "score.sync":
         return outcome("CAPABILITY_DISABLED", "任务能力已不可用。", status="unavailable")
     return await _run_sync(job.actor_id, job, _store)
@@ -162,7 +166,7 @@ async def _notify(job):
         bot = get_bot(job.bot_id)
     except KeyError:
         return {"deferred": True}
-    label = "剧情" if job.capability_id.startswith("story.") else "资源维护" if job.capability_id.startswith("maintenance.") else "成绩同步"
+    label = "剧情" if job.capability_id.startswith("story.") else "资源维护" if job.capability_id.startswith("maintenance.") else "成绩同步" if job.capability_id == "score.sync" else "查询图片"
     text = f"{label}任务 {job.job_id}：{job.result.get('public_hint') or job.status}"
     if job.context_type == "group":
         await bot.send_group_msg(group_id=int(job.context_id), message=text)
@@ -276,7 +280,8 @@ async def replay(bot, event, job_id):
         return checked
     if checked["data"]["status"] in {"queued", "running", "cancel_requested"}:
         return outcome("JOB_RUNNING", "原任务尚未结束，请先查询进度。", status="running", data=checked["data"])
-    if (await _store.get(job_id)).capability_id not in {"story.search", "story.random"}:
+    from .media_jobs import CAPABILITIES
+    if (await _store.get(job_id)).capability_id not in {"story.search", "story.random"} | CAPABILITIES:
         return outcome("NO_CACHED_MEDIA", "此任务没有可补投的媒体计划。", status="needs_input")
     from .presentation_store import scope
     if not await _presentations.exists(job_id, scope(bot, event)):

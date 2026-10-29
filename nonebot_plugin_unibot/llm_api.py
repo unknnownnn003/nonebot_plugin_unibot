@@ -8,7 +8,7 @@ from .services.permissions import native_superuser
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "3.1.5"
+CAPABILITY_VERSION = "3.1.6"
 
 
 class SearchArgs(BaseModel):
@@ -92,17 +92,17 @@ def describe_capabilities():
                  parameters=EmptyArgs.model_json_schema(), effect="write", long_task=True,
                  keywords=["上传chunirec", "上传日服曲库", "导入曲库", "上传日服songlist"]),
             dict(id="song.search", name="nb_unibot_song", description="中二节奏查歌、歌曲详情与歧义候选图。",
-                 parameters=SearchArgs.model_json_schema(), effect="none", keywords=["中二", "是什么歌", "查歌", "歌曲", "曲目"]),
+                 parameters=SearchArgs.model_json_schema(), effect="none", long_task=True, keywords=["中二", "是什么歌", "查歌", "歌曲", "曲目"]),
             dict(id="song.detail", name="nb_unibot_song_detail", description="按明确歌曲 ID 查询中二节奏详情并发送原曲目图片。",
-                 parameters=SongIdArgs.model_json_schema(), effect="none", keywords=["歌曲详情", "曲目详情", "歌曲ID"]),
+                 parameters=SongIdArgs.model_json_schema(), effect="none", long_task=True, keywords=["歌曲详情", "曲目详情", "歌曲ID"]),
             dict(id="player.best", name="nb_unibot_best", description="查询当前发起人的原始成绩图；b国服B30+N20，b30本地日服定数B30。",
-                 parameters=BestArgs.model_json_schema(), effect="none", keywords=["查分", "成绩", "b30", "b图", "rating", "最近打得"]),
+                 parameters=BestArgs.model_json_schema(), effect="none", long_task=True, keywords=["查分", "成绩", "b30", "b图", "rating", "最近打得"]),
             dict(id="player.profile", name="nb_unibot_profile", description="当前发起人的原个人信息图，保留落雪与Rin回退。",
-                 parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["个人信息", "玩家信息", "个人资料"]),
+                 parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["个人信息", "玩家信息", "个人资料"]),
             dict(id="player.progress", name="nb_unibot_progress", description="当前发起人的原国服OP进度图（chulist）；query沿用难度/定数/版本/分类条件。",
-                 parameters=SearchArgs.model_json_schema(), effect="none", keywords=["进度", "chulist", "完成率"]),
+                 parameters=SearchArgs.model_json_schema(), effect="none", long_task=True, keywords=["进度", "chulist", "完成率"]),
             dict(id="player.recommend", name="nb_unibot_recommend", description="原推什么算法推荐当前发起人可推的谱面；保留原图。",
-                 parameters=RecommendArgs.model_json_schema(), effect="none", keywords=["推荐", "推什么", "推分"]),
+                 parameters=RecommendArgs.model_json_schema(), effect="none", long_task=True, keywords=["推荐", "推什么", "推分"]),
             dict(id="song.aliases", name="nb_unibot_aliases", description="查询中二歌曲原本地别名；歧义时返回候选。",
                  parameters=SearchArgs.model_json_schema(), effect="none", keywords=["别名", "外号"]),
             dict(id="song.alias_add", name="nb_unibot_alias_add", description="给明确歌曲ID添加本地别名；沿用普通用户权限，需要确认。",
@@ -126,7 +126,7 @@ def describe_capabilities():
             dict(id="game.guess", name="nb_unibot_game_guess", description="在当前群猜曲状态中提交当前用户答案；需要确认。",
                  parameters=GameGuessArgs.model_json_schema(), effect="write", keywords=["猜歌", "猜曲答案"]),
             dict(id="help.read", name="nb_unibot_help", description="发送原 UniBot 指令帮助图片，不包含模型管理权限。",
-                 parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["帮助", "chuhelp", "命令列表"]),
+                 parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["帮助", "chuhelp", "命令列表"]),
             dict(id="player.bind", name="nb_unibot_bind", description="绑定当前真实发起人的落雪好友码；需要用户确认后写入。",
                  parameters=BindArgs.model_json_schema(), effect="write", keywords=["绑定", "bind", "好友码"]),
             dict(id="score.submit", name="nb_unibot_score_submit", description="给当前真实发起人保存一条手动成绩；需要用户确认后写入。",
@@ -267,32 +267,32 @@ async def invoke_capability(name, arguments, context):
             output = await change_alias(args.song_id, args.alias, delete=name == "song.alias_delete")
         elif name == "song.search":
             args = SearchArgs.model_validate(arguments)
-            from .services.song import search
-            output = await search(args.query)
+            from .services.media_jobs import submit
+            output = await submit(bot, event, name, args.model_dump())
         elif name == "song.detail":
             args = SongIdArgs.model_validate(arguments)
-            from .services.song import detail
-            output = await detail(args.song_id)
+            from .services.media_jobs import submit
+            output = await submit(bot, event, name, args.model_dump())
         elif name == "song.aliases":
             args = SearchArgs.model_validate(arguments)
             from .services.song import aliases
             output = await aliases(args.query)
         elif name == "player.best":
             args = BestArgs.model_validate(arguments)
-            from .services.player import best
-            output = await best(str(event.user_id), args.mode, args.version)
+            from .services.media_jobs import submit
+            output = await submit(bot, event, name, args.model_dump())
         elif name == "player.profile":
             EmptyArgs.model_validate(arguments)
-            from .services.player import profile
-            output = await profile(str(event.user_id))
+            from .services.media_jobs import submit
+            output = await submit(bot, event, name, {})
         elif name == "player.progress":
             args = SearchArgs.model_validate(arguments)
-            from .services.player import progress
-            output = await progress(str(event.user_id), args.query)
+            from .services.media_jobs import submit
+            output = await submit(bot, event, name, args.model_dump())
         elif name == "player.recommend":
             args = RecommendArgs.model_validate(arguments)
-            from .services.player import recommend
-            output = await recommend(str(event.user_id), args.filter)
+            from .services.media_jobs import submit
+            output = await submit(bot, event, name, args.model_dump())
         elif name == "story.search":
             args = StoryArgs.model_validate(arguments)
             from .services.story import search
@@ -339,8 +339,8 @@ async def invoke_capability(name, arguments, context):
                                  expected_round=context["constraints"]["game_round_id"])
         elif name == "help.read":
             EmptyArgs.model_validate(arguments)
-            from .services.help import read
-            output = await read()
+            from .services.media_jobs import submit
+            output = await submit(bot, event, name, {})
         elif name == "player.bind":
             args = BindArgs.model_validate(arguments)
             from .services.scores import bind

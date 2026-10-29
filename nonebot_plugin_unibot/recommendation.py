@@ -1,3 +1,5 @@
+from nonebot.adapters.onebot.v11 import Bot
+from .services.job_store import async_call
 import asyncio
 import aiofiles
 from .services.results import outcome, image
@@ -204,13 +206,13 @@ async def recommend_chart(user_qq, query_text, progress=None):
     if chosen_diff.get('difficulty') == 4:
         jacket_id = chosen_song.get('origin_id', song_id)
     jacket_img = await download_jacket(jacket_id)
-    img_bytes = await asyncio.to_thread(render_recommendation_image, chosen_song, chosen_diff, user_score, user_op, max_op, jacket_img, has_score)
+    img_bytes = await async_call(render_recommendation_image, chosen_song, chosen_diff, user_score, user_op, max_op, jacket_img, has_score)
     return outcome(data={'song_id': song_id, 'title': chosen_song.get('title'), 'score': user_score, 'current_op': user_op, 'theoretical_op': max_op}, artifacts=[image(img_bytes)])
 
 
 @recommend_cmd.handle()
-async def _(event: MessageEvent):
-    result = await recommend_chart(str(event.get_user_id()), event.get_plaintext().strip())
-    if result["artifacts"]:
-        await recommend_cmd.finish(MessageSegment.image(result["artifacts"][0]["content"]))
-    await recommend_cmd.finish(result["fallback_text"])
+async def _(bot: Bot, event: MessageEvent):
+    from .services.media_jobs import submit
+    result = await submit(bot, event, "player.recommend", {"filter": event.get_plaintext().strip()[3:].strip()}, origin="command")
+    await recommend_cmd.finish(result["fallback_text"] +
+        (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
