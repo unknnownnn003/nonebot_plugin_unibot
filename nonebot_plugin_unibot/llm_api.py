@@ -7,7 +7,7 @@ import inspect
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "3.1.2"
+CAPABILITY_VERSION = "3.1.3"
 
 
 class SearchArgs(BaseModel):
@@ -23,6 +23,10 @@ class SongIdArgs(BaseModel):
 class JobArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     job_id: str = Field(min_length=1, max_length=64)
+
+
+class AliasArgs(SongIdArgs):
+    alias: str = Field(min_length=1, max_length=120)
 
 
 class BestArgs(BaseModel):
@@ -88,6 +92,10 @@ def describe_capabilities():
                  parameters=RecommendArgs.model_json_schema(), effect="none", keywords=["推荐", "推什么", "推分"]),
             dict(id="song.aliases", name="nb_unibot_aliases", description="查询中二歌曲原本地别名；歧义时返回候选。",
                  parameters=SearchArgs.model_json_schema(), effect="none", keywords=["别名", "外号"]),
+            dict(id="song.alias_add", name="nb_unibot_alias_add", description="给明确歌曲ID添加本地别名；沿用普通用户权限，需要确认。",
+                 parameters=AliasArgs.model_json_schema(), effect="write", keywords=["添加别名", "加别名", "外号"]),
+            dict(id="song.alias_delete", name="nb_unibot_alias_delete", description="删除明确歌曲ID的本地别名；仅SUPERUSER，需要确认。",
+                 parameters=AliasArgs.model_json_schema(), effect="write", keywords=["删除别名", "删别名"]),
             dict(id="story.search", name="nb_unibot_story_search", description="按角色名查询本地剧情并发送原剧情图片。",
                  parameters=StoryArgs.model_json_schema(), effect="none", keywords=["剧情", "角色", "故事"]),
             dict(id="story.list", name="nb_unibot_story_list", description="查看本地剧情分类或分类下的角色名。",
@@ -138,6 +146,21 @@ async def prepare_capability(name, arguments, context):
     except ValidationError:
         return outcome("INVALID_ARGUMENT", "请核对操作参数。", status="needs_input")
     constraints = {}
+    if name in {"song.alias_add", "song.alias_delete"}:
+        try:
+            normalized = AliasArgs.model_validate(arguments).model_dump()
+        except ValidationError:
+            return outcome("INVALID_ARGUMENT", "请提供歌曲ID及别名。", status="needs_input")
+        if name == "song.alias_delete" and str(event.user_id) not in bot.config.superusers:
+            return outcome("PERMISSION_DENIED", "只有SUPERUSER可以删除歌曲别名。", status="denied")
+        from .services.song import aliases
+        target = await aliases(normalized["song_id"])
+        if target["code"] != "OK" or str(target.get("data", {}).get("id")) != normalized["song_id"]:
+            return outcome("NOT_FOUND", "请先查歌选择明确歌曲ID。", status="needs_input")
+        normalized["alias"] = normalized["alias"].strip()
+        if not normalized["alias"]:
+            return outcome("INVALID_ARGUMENT", "别名不能为空。", status="needs_input")
+        constraints["song_title"] = target["data"].get("title", "")
     if name == "score.submit":
         from .song import find_song_matches, pick_song_match
         song, ambiguous = pick_song_match(await asyncio.to_thread(find_song_matches, normalized["query"], 8))
@@ -165,12 +188,18 @@ async def invoke_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
-    if name in {"player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up", "game.start", "game.guess", "job.cancel"} and not context.get("confirmed", False):
+    if name in {"song.alias_add", "song.alias_delete", "player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up", "game.start", "game.guess", "job.cancel"} and not context.get("confirmed", False):
         return outcome("AUTHORIZATION_REQUIRED", "需要当前用户核对操作预览并确认。", status="denied")
     if name in {"game.guess", "game.hint", "game.give_up"} and not context.get("constraints", {}).get("game_round_id"):
         return outcome("STATE_CHANGED", "操作没有绑定有效猜曲局，请重新预览。", status="needs_input")
     try:
-        if name == "song.search":
+        if name in {"song.alias_add", "song.alias_delete"}:
+            args = AliasArgs.model_validate(arguments)
+            if name == "song.alias_delete" and str(event.user_id) not in bot.config.superusers:
+                return outcome("PERMISSION_DENIED", "只有SUPERUSER可以删除歌曲别名。", status="denied")
+            from .services.song import change_alias
+            output = await change_alias(args.song_id, args.alias, delete=name == "song.alias_delete")
+        elif name == "song.search":
             args = SearchArgs.model_validate(arguments)
             from .services.song import search
             output = await search(args.query)
@@ -271,6 +300,8 @@ async def invoke_capability(name, arguments, context):
     except ValidationError:
         return outcome("INVALID_ARGUMENT", "请按能力参数说明提供查询条件。", status="needs_input")
     output.pop("fallback_text", None)
+    if name in {"song.alias_add", "song.alias_delete"} and output["status"] == "ok":
+        output["effect"] = "local_write"
     return output
 
 

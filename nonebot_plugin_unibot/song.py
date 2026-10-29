@@ -15,6 +15,7 @@ from nonebot.adapters.onebot.v11 import MessageEvent, MessageSegment, Message
 from nonebot.log import logger
 
 from .config import Config
+from .songlist_update import SONGLIST_LOCK
 
 config = get_plugin_config(Config)
 
@@ -101,7 +102,7 @@ def _score_term(query_variants: Set[str], term_variants: Set[str]) -> float:
             best = max(best, ratio)
     return best
 
-def _load_songlist_data() -> Optional[Dict[str, Any]]:
+def _read_songlist_data() -> Optional[Dict[str, Any]]:
     if not os.path.exists(SONGLIST_PATH):
         return None
     try:
@@ -110,6 +111,74 @@ def _load_songlist_data() -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"读取曲目列表失败: {e}")
         return None
+
+
+def _write_songlist_data(data: Dict[str, Any]) -> None:
+    temp_path = SONGLIST_PATH + ".tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+        f.write("\n")
+    os.replace(temp_path, SONGLIST_PATH)
+
+
+def _load_songlist_data() -> Optional[Dict[str, Any]]:
+    with SONGLIST_LOCK:
+        return _read_songlist_data()
+
+
+def set_song_aliases(song_id: str, aliases: List[str]) -> Optional[Dict[str, Any]]:
+    """Replace one song's local aliases and return the updated song."""
+    with SONGLIST_LOCK:
+        data = _read_songlist_data()
+        if data is None:
+            raise OSError("读取 songlist.json 失败")
+        if not isinstance(data, dict):
+            raise ValueError("songlist.json 格式异常")
+        for song_data in data.get("songs", []):
+            if isinstance(song_data, dict) and str(song_data.get("id")) == str(song_id):
+                song_data["aliases"] = list(aliases)
+                _write_songlist_data(data)
+                return song_data
+    return None
+
+
+def add_song_alias(song_id: str, alias_name: str) -> Tuple[bool, bool]:
+    """Add an alias using the same locked songlist writer as admin API."""
+    with SONGLIST_LOCK:
+        data = _read_songlist_data()
+        if not isinstance(data, dict):
+            return False, False
+        for song_data in data.get("songs", []):
+            if isinstance(song_data, dict) and str(song_data.get("id")) == str(song_id):
+                aliases = song_data.setdefault("aliases", [])
+                if not isinstance(aliases, list):
+                    aliases = []
+                    song_data["aliases"] = aliases
+                if alias_name in aliases:
+                    return True, False
+                aliases.append(alias_name)
+                _write_songlist_data(data)
+                return True, True
+    return False, False
+
+
+def remove_song_alias(song_id: str, alias_name: str) -> Tuple[bool, bool]:
+    """Remove an alias using the same locked songlist writer as admin API."""
+    with SONGLIST_LOCK:
+        data = _read_songlist_data()
+        if not isinstance(data, dict):
+            return False, False
+        for song_data in data.get("songs", []):
+            if isinstance(song_data, dict) and str(song_data.get("id")) == str(song_id):
+                aliases = song_data.get("aliases", [])
+                if not isinstance(aliases, list):
+                    return True, False
+                if alias_name not in aliases:
+                    return True, False
+                aliases.remove(alias_name)
+                _write_songlist_data(data)
+                return True, True
+    return False, False
 
 def find_song_matches(query: str, limit: int = 8) -> List[Dict[str, Any]]:
     data = _load_songlist_data()
@@ -550,30 +619,16 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
     
     song_id_str, alias_name = msg_args[0], msg_args[1].strip()
     song_id = song_id_str
-    
+
     try:
-        with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        found, _added = add_song_alias(song_id, alias_name)
     except Exception:
-        await add_alias_cmd.finish("读取曲目列表失败。")
+        await add_alias_cmd.finish("保存曲目列表失败。")
         return
-        
-    found = False
-    for song in data.get("songs", []):
-         if str(song.get("id")) == song_id:
-              found = True
-              aliases = song.setdefault("aliases", [])
-              if alias_name not in aliases:
-                   aliases.append(alias_name)
-              break
-              
     if not found:
          await add_alias_cmd.finish(f"未找到 ID 为 {song_id} 的曲目。")
          return
-         
-    with open(SONGLIST_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-        
+
     await add_alias_cmd.finish(f"已成功为 ID {song_id} 添加别名。")
 
 @del_alias_cmd.handle()
@@ -584,25 +639,12 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
     
     song_id_str, alias_name = msg_args[0], msg_args[1].strip()
     song_id = song_id_str
-    
+
     try:
-        with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        found, removed = remove_song_alias(song_id, alias_name)
     except Exception:
-        await del_alias_cmd.finish("读取曲目列表失败。")
+        await del_alias_cmd.finish("保存曲目列表失败。")
         return
-        
-    found = False
-    removed = False
-    for song in data.get("songs", []):
-         if str(song.get("id")) == song_id:
-              found = True
-              aliases = song.get("aliases", [])
-              if alias_name in aliases:
-                   aliases.remove(alias_name)
-                   removed = True
-              break
-              
     if not found:
         await del_alias_cmd.finish(f"未找到 ID 为 {song_id} 的曲目。")
         return
@@ -610,10 +652,7 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
     if not removed:
         await del_alias_cmd.finish(f"ID {song_id} 下不存在该别名。")
         return
-         
-    with open(SONGLIST_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-        
+
     await del_alias_cmd.finish(f"成功为 ID {song_id} 删除别名。")
 
 @view_alias_cmd.handle()

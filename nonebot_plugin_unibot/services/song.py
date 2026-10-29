@@ -2,6 +2,23 @@ import asyncio
 from .results import outcome, image
 
 
+async def change_alias(song_id, alias, *, delete=False):
+    """Use the original locked writer shared with native alias commands."""
+    from .. import song as s
+    alias = alias.strip()
+    if not alias:
+        return outcome("INVALID_ARGUMENT", "别名不能为空。", status="needs_input")
+    try:
+        found, changed = await asyncio.to_thread(
+            s.remove_song_alias if delete else s.add_song_alias, song_id, alias)
+    except (OSError, ValueError):
+        return outcome("STORAGE_FAILED", "保存曲目列表失败，请检查数据文件。", status="unavailable")
+    if not found:
+        return outcome("NOT_FOUND", "没有找到这个歌曲ID，请先查歌选择明确ID。", status="needs_input")
+    return outcome(data={"song_id": song_id, "alias": alias, "changed": changed,
+                         "action": "delete" if delete else "add"})
+
+
 async def search(query):
     from .. import song as s
     matches = await asyncio.to_thread(s.find_song_matches, query, limit=8)

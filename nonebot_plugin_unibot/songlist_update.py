@@ -1,6 +1,7 @@
 import json
 import os
 import httpx
+from threading import RLock
 from pathlib import Path
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -58,6 +59,7 @@ PLUGIN_DIR = Path(__file__).parent
 DATA_DIR = PLUGIN_DIR / "data"
 # 定义 songlist.json 保存路径
 SONGLIST_FILE = DATA_DIR / "songlist.json"
+SONGLIST_LOCK = RLock()
 
 # 注册命令 `/更新songlist`
 # permission=SUPERUSER 确保只有超级用户可以触发此命令
@@ -81,24 +83,26 @@ update_chunirec_upload = on_command(
 
 
 def load_local_songlist() -> Dict[str, Any]:
-    if not SONGLIST_FILE.exists():
-        return {"songs": [], "genres": [], "versions": []}
-    with open(SONGLIST_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError("本地 songlist.json 格式异常")
-    data.setdefault("songs", [])
-    data.setdefault("genres", [])
-    data.setdefault("versions", [])
-    return data
+    with SONGLIST_LOCK:
+        if not SONGLIST_FILE.exists():
+            return {"songs": [], "genres": [], "versions": []}
+        with open(SONGLIST_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("本地 songlist.json 格式异常")
+        data.setdefault("songs", [])
+        data.setdefault("genres", [])
+        data.setdefault("versions", [])
+        return data
 
 
 def write_songlist_atomic(songlist_data: Dict[str, Any]) -> None:
-    temp_file = SONGLIST_FILE.with_suffix(".json.tmp")
-    with open(temp_file, "w", encoding="utf-8") as f:
-        json.dump(songlist_data, f, ensure_ascii=False, indent=4)
-        f.write("\n")
-    temp_file.replace(SONGLIST_FILE)
+    with SONGLIST_LOCK:
+        temp_file = SONGLIST_FILE.with_suffix(".json.tmp")
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(songlist_data, f, ensure_ascii=False, indent=4)
+            f.write("\n")
+        temp_file.replace(SONGLIST_FILE)
 
 
 def build_local_alias_map(local_data: Dict[str, Any]) -> Dict[str, List[str]]:
@@ -554,42 +558,43 @@ async def handle_update_songlist():
                 aliases_list = []
             alias_map = {item["song_id"]: item.get("aliases", []) for item in aliases_list if "song_id" in item}
             
-            # 读取本地已存在的 songlist.json 保留用户自行添加的别名
-            try:
-                local_data = load_local_songlist()
-                local_alias_map = build_local_alias_map(local_data)
-                old_by_id, old_by_title = build_local_song_maps(local_data)
-            except Exception:
-                local_alias_map = {}
-                old_by_id, old_by_title = {}, {}
+            with SONGLIST_LOCK:
+                # 读取本地已存在的 songlist.json 保留用户自行添加的别名
+                try:
+                    local_data = load_local_songlist()
+                    local_alias_map = build_local_alias_map(local_data)
+                    old_by_id, old_by_title = build_local_song_maps(local_data)
+                except Exception:
+                    local_alias_map = {}
+                    old_by_id, old_by_title = {}, {}
 
-            # 将别名数据合并到 songlist_data 中对应的每首歌曲下
-            if "songs" in songlist_data:
-                for song in songlist_data["songs"]:
-                    song_id = song.get("id")
-                    new_aliases = alias_map.get(song_id, [])
-                    local_aliases = local_alias_map.get(str(song_id), [])
+                # 将别名数据合并到 songlist_data 中对应的每首歌曲下
+                if "songs" in songlist_data:
+                    for song in songlist_data["songs"]:
+                        song_id = song.get("id")
+                        new_aliases = alias_map.get(song_id, [])
+                        local_aliases = local_alias_map.get(str(song_id), [])
                     
-                    # 取并集，并保持顺序 (先网络后本地补充)
-                    merged = []
-                    for a in new_aliases + local_aliases:
-                        if a not in merged:
-                            merged.append(a)
+                        # 取并集，并保持顺序 (先网络后本地补充)
+                        merged = []
+                        for a in new_aliases + local_aliases:
+                            if a not in merged:
+                                merged.append(a)
                             
-                    song["aliases"] = merged
-                    old_song = old_by_id.get(str(song_id)) or old_by_title.get(song_match_key(song))
-                    preserve_local_chart_consts(song, old_song)
+                        song["aliases"] = merged
+                        old_song = old_by_id.get(str(song_id)) or old_by_title.get(song_match_key(song))
+                        preserve_local_chart_consts(song, old_song)
 
-                lx_keys = {song_match_key(song) for song in songlist_data["songs"] if isinstance(song, dict)}
-                lx_titles = {normalize_title_key(song.get("title")) for song in songlist_data["songs"] if isinstance(song, dict)}
-                for old_song in old_by_id.values():
-                    if old_song.get("data_source") != CHUNIREC_SOURCE:
-                        continue
-                    if song_match_key(old_song) in lx_keys or normalize_title_key(old_song.get("title")) in lx_titles:
-                        continue
-                    songlist_data["songs"].append(old_song)
+                    lx_keys = {song_match_key(song) for song in songlist_data["songs"] if isinstance(song, dict)}
+                    lx_titles = {normalize_title_key(song.get("title")) for song in songlist_data["songs"] if isinstance(song, dict)}
+                    for old_song in old_by_id.values():
+                        if old_song.get("data_source") != CHUNIREC_SOURCE:
+                            continue
+                        if song_match_key(old_song) in lx_keys or normalize_title_key(old_song.get("title")) in lx_titles:
+                            continue
+                        songlist_data["songs"].append(old_song)
 
-            write_songlist_atomic(songlist_data)
+                write_songlist_atomic(songlist_data)
 
             song_count = len(songlist_data.get("songs", []))
             alias_count = sum(len(song.get("aliases", []) or []) for song in songlist_data.get("songs", []))
@@ -659,10 +664,11 @@ async def handle_update_chunirec_songlist():
                     naominet_status = f"naominet 数字 ID 补全失败: {type(e).__name__}"
                     logger.warning(f"{naominet_status}: {e!r}")
 
-        local_data = load_local_songlist()
-        ensure_chunirec_versions(local_data)
-        added, refreshed, skipped_lx = merge_chunirec_songs(local_data, payload, naominet_id_map)
-        write_songlist_atomic(local_data)
+        with SONGLIST_LOCK:
+            local_data = load_local_songlist()
+            ensure_chunirec_versions(local_data)
+            added, refreshed, skipped_lx = merge_chunirec_songs(local_data, payload, naominet_id_map)
+            write_songlist_atomic(local_data)
 
         mtime = datetime.fromtimestamp(SONGLIST_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
         logger.success(
@@ -849,12 +855,13 @@ async def _(bot: Bot, event: MessageEvent):
         await update_chunirec_upload.send("收到，正在处理上传的 chunirec 数据...")
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        local_data = load_local_songlist()
-        ensure_chunirec_versions(local_data)
-        added, refreshed, skipped_lx = merge_chunirec_songs(
-            local_data, chunirec_payload, naominet_id_map,
-        )
-        write_songlist_atomic(local_data)
+        with SONGLIST_LOCK:
+            local_data = load_local_songlist()
+            ensure_chunirec_versions(local_data)
+            added, refreshed, skipped_lx = merge_chunirec_songs(
+                local_data, chunirec_payload, naominet_id_map,
+            )
+            write_songlist_atomic(local_data)
 
         mtime = datetime.fromtimestamp(SONGLIST_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
         logger.success(
