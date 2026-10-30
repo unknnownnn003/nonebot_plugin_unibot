@@ -441,6 +441,9 @@ async def notify_once(store: JobStore, job_id: str, callback: Callable[[Job], Aw
         return False
     try:
         receipt = await callback(job)
+        if isinstance(receipt, dict) and receipt.get("silent"):
+            await store.update(job_id, notification_state="suppressed")
+            return True
         if isinstance(receipt, dict) and receipt.get("deferred"):
             await store.update(job_id, notification_state="pending", delivery_state="not_sent")
             return False

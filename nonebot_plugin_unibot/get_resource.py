@@ -166,4 +166,5 @@ def purge_cached_jackets(ids: set[str]) -> int:
 async def handle_update_jacket(bot: Bot, event: MessageEvent, msg: Message = CommandArg()):
     from .services.maintenance import submit
     result = await submit(bot, event, "jackets", should_full_refresh(msg), origin="command")
-    await update_jacket.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(update_jacket, result, finish=False)

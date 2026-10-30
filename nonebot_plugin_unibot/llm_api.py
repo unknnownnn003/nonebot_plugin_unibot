@@ -8,7 +8,7 @@ from .services.permissions import native_superuser
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "3.1.8"
+CAPABILITY_VERSION = "3.1.9"
 
 
 class SearchArgs(BaseModel):

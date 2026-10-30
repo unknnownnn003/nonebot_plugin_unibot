@@ -54,7 +54,7 @@ async def _submit(bot, event, capability, arguments, key, *, origin):
 def attach_candidates(output, prepared):
     if output["code"] in {"JOB_ACCEPTED", "JOB_EXISTS"} and prepared and prepared["ambiguous"]:
         output["code"] = "AMBIGUOUS_TARGET"
-        output["public_hint"] = output["fallback_text"] = "有多个候选，请用歌曲ID选择；候选图由原任务生成。"
+        output["public_hint"] = output["fallback_text"] = "有多个候选，请用歌曲ID选择。"
         output.setdefault("data", {})["candidates"] = [
             {"id": match["song"].get("id"), "title": match["song"].get("title")} for match in prepared["ambiguous"][:8]]
     return output

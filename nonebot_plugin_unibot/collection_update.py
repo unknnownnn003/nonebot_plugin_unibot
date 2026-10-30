@@ -70,4 +70,5 @@ def load_versions() -> list[int]:
 async def handle_update_collection(bot: Bot, event: MessageEvent):
     from .services.maintenance import submit
     result = await submit(bot, event, "collections", origin="command")
-    await update_collection.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(update_collection, result, finish=False)

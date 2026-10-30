@@ -617,5 +617,5 @@ async def query_progress(user_qq, query_text, progress=None):
 async def _(bot: Bot, event: Event, msg: Message = CommandArg()):
     from .services.media_jobs import submit
     result = await submit(bot, event, "player.progress", {"query": msg.extract_plain_text().strip()}, origin="command")
-    await chulist_cmd.finish(result["fallback_text"] +
-        (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(chulist_cmd, result, finish=True)

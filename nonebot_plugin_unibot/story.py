@@ -206,7 +206,8 @@ cmd_list = on_command("剧情分类", aliases={"剧情列表"}, priority=5, bloc
 async def handle_update_stories(bot: Bot, event: Event):
     from .services.maintenance import submit
     result = await submit(bot, event, "stories", origin="command")
-    await cmd_update.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(cmd_update, result, finish=False)
 
 
 @cmd_list.handle()
@@ -306,7 +307,8 @@ async def render_and_send(bot: Bot, event: Event, name: str, file_path: str, mat
     """Compatibility entry: use the same durable story task as other commands."""
     from .services.story import submit_selected
     result = await submit_selected(bot, event, name, file_path, origin="command")
-    await matcher.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(matcher, result, finish=False)
     return result
 
 
@@ -322,7 +324,8 @@ async def _(bot: Bot, event: Event, args: Message = CommandArg()):
             names_str = "、".join(item["name"] for item in result["data"].get("candidates", []))
             await cmd_story.finish(f"匹配到多个结果，请提供更精确的名称:\n{names_str}")
         await cmd_story.finish(result["fallback_text"])
-    await cmd_story.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(cmd_story, result, finish=False)
     event.__dict__.setdefault("_native_capability_results", {})["story.search"] = dict(
         status=result["status"], code=result["code"], delivery="sent")
 
@@ -332,6 +335,7 @@ async def _(bot: Bot, event: Event):
     result = await random_story(bot, event, origin="command")
     if result["status"] not in {"ok", "running"}:
         await cmd_random.finish(result["fallback_text"])
-    await cmd_random.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(cmd_random, result, finish=False)
     event.__dict__.setdefault("_native_capability_results", {})["story.random"] = dict(
         status=result["status"], code=result["code"], delivery="sent")

@@ -578,14 +578,16 @@ def commit_chunirec_songlist(payload, id_map):
 async def handle_update_songlist(bot: Bot, event: MessageEvent):
     from .services.maintenance import submit
     result = await submit(bot, event, "songlist", origin="command")
-    await update_songlist.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(update_songlist, result, finish=False)
 
 
 @update_chunirec_songlist.handle()
 async def handle_update_chunirec_songlist(bot: Bot, event: MessageEvent):
     from .services.maintenance import submit
     result = await submit(bot, event, "chunirec", origin="command")
-    await update_chunirec_songlist.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(update_chunirec_songlist, result, finish=False)
 
 
 @update_chunirec_upload.handle()
@@ -607,4 +609,5 @@ async def _(event: MessageEvent, state: T_State):
 async def handle_chunirec_upload(bot: Bot, event: MessageEvent):
     from .services.maintenance import submit_import
     result = await submit_import(bot, event, origin="command")
-    await update_chunirec_upload.send(result["public_hint"] + (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(update_chunirec_upload, result, finish=False)

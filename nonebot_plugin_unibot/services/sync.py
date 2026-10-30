@@ -165,6 +165,9 @@ async def _handle(job):
 
 
 async def _notify(job):
+    from .results import redundant_media_notice
+    if redundant_media_notice(job):
+        return {"silent": True}
     from .. import llm_api
     if job.response_owner == "agent":
         if llm_api._job_notifier is None:
@@ -176,7 +179,7 @@ async def _notify(job):
     except KeyError:
         return {"deferred": True}
     label = "剧情" if job.capability_id.startswith("story.") else "资源维护" if job.capability_id.startswith("maintenance.") else "成绩同步" if job.capability_id == "score.sync" else "查询图片"
-    text = f"{label}任务 {job.job_id}：{job.result.get('public_hint') or job.status}"
+    text = job.result.get("public_hint") or f"{label}未能完成，请稍后重试或查询任务详情。"
     if job.context_type == "group":
         await bot.send_group_msg(group_id=int(job.context_id), message=text)
     else:

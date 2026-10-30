@@ -600,8 +600,8 @@ async def _(bot: Bot, event: MessageEvent):
         return
     from .services.media_jobs import submit
     result = await submit(bot, event, "song.search", {"query": query}, origin="command")
-    await song_query.finish(result["fallback_text"] +
-        (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(song_query, result, finish=True)
 
 # ==== 别名管理功能 ====
 add_alias_cmd = on_command("添加别名", priority=10, block=True)

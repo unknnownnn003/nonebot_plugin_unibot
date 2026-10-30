@@ -124,5 +124,5 @@ def draw_help():
 async def _(bot: Bot, event: Event):
     from .services.media_jobs import submit
     result = await submit(bot, event, "help.read", {}, origin="command")
-    await chuhelp_cmd.finish(result["fallback_text"] +
-        (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(chuhelp_cmd, result, finish=True)

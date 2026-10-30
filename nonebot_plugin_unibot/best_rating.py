@@ -842,13 +842,13 @@ def parse_version(raw: str) -> str:
 async def _(bot: Bot, event: MessageEvent, msg: Message = CommandArg()):
     from .services.media_jobs import submit
     result = await submit(bot, event, "player.best", {"mode": "b", "version": parse_version(msg.extract_plain_text())}, origin="command")
-    await best_rating_cmd.finish(result["fallback_text"] +
-        (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(best_rating_cmd, result, finish=True)
 
 
 @best_rating_30_cmd.handle()
 async def _(bot: Bot, event: MessageEvent):
     from .services.media_jobs import submit
     result = await submit(bot, event, "player.best", {"mode": "b30", "version": "2026"}, origin="command")
-    await best_rating_30_cmd.finish(result["fallback_text"] +
-        (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(best_rating_30_cmd, result, finish=True)

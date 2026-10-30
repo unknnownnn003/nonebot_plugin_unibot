@@ -416,8 +416,8 @@ async def present_game_result(matcher, result, mode, bot, event):
     delivery = await deliver(bot, event, outgoing, "game." + mode, data)
     if delivery.get("data", {}).get("artifact_delivery") == "sent":
         await matcher.finish()
-    await matcher.finish(delivery["public_hint"] +
-        (f"\n媒体任务ID：{delivery['data']['job_id']}" if delivery.get("data", {}).get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(matcher, delivery, finish=True)
 
 
 @chuguess_cmd.handle()

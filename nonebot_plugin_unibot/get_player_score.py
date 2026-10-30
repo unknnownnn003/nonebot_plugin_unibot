@@ -723,7 +723,8 @@ async def _(bot: Bot, event: MessageEvent):
         await lxupdate_score.finish("未配置落雪开发者密钥，无法使用 /lxupdate。")
     result = await submit(bot, event, str(event.user_id), origin="command")
     if result["code"] in {"JOB_ACCEPTED", "JOB_EXISTS"}:
-        await lxupdate_score.finish(f"{result['public_hint']}\n任务ID：{result['data']['job_id']}")
+        from .services.results import send_command_result
+        await send_command_result(lxupdate_score, result, finish=True)
     await lxupdate_score.finish(result["fallback_text"])
 
 

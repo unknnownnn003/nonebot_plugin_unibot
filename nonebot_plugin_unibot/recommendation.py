@@ -214,5 +214,5 @@ async def recommend_chart(user_qq, query_text, progress=None):
 async def _(bot: Bot, event: MessageEvent):
     from .services.media_jobs import submit
     result = await submit(bot, event, "player.recommend", {"filter": event.get_plaintext().strip()[3:].strip()}, origin="command")
-    await recommend_cmd.finish(result["fallback_text"] +
-        (f"\n任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    from .services.results import send_command_result
+    await send_command_result(recommend_cmd, result, finish=True)
