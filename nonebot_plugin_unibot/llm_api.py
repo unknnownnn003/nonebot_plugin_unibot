@@ -408,3 +408,9 @@ async def save_job_expression(job_id, text):
     from .services.sync import _store
     if _store is not None:
         await _store.save_expression(job_id, text)
+
+
+async def describe_context(context):
+    """Current local visibility; invocation still rechecks live authority."""
+    from .services.catalog import describe
+    return await describe(describe_capabilities(), context)
