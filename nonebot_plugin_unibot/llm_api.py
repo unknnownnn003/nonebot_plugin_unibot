@@ -8,7 +8,7 @@ from .services.permissions import native_superuser
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "3.1.7"
+CAPABILITY_VERSION = "3.1.8"
 
 
 class SearchArgs(BaseModel):
@@ -84,7 +84,7 @@ class StoryCategoryArgs(BaseModel):
     category: str = Field("", max_length=80)
 
 
-def describe_capabilities():
+def _describe_capabilities():
     return [dict(id="maintenance.refresh", name="nb_unibot_maintenance", description="排队更新原曲库/chunirec/曲绘/收藏品/剧情资源；仅SUPERUSER，全局写入需确认。",
                  parameters=MaintenanceArgs.model_json_schema(), effect="write", long_task=True,
                  keywords=["更新曲库", "更新songlist", "更新chunirec", "更新曲绘", "更新收藏品", "更新剧情", "维护资源"]),
@@ -143,6 +143,12 @@ def describe_capabilities():
                  parameters=JobArgs.model_json_schema(), effect="write", keywords=["取消任务", "取消同步", "停止同步"]),
             dict(id="job.replay", name="nb_unibot_replay_job", description="提交当前会话本人缓存媒体的补发任务；可查询/取消，不重新生成，需要确认。",
                  parameters=JobArgs.model_json_schema(), effect="platform_write", long_task=True, keywords=["补发中二任务", "补发剧情", "剧情没收到", "重发剧情"])]
+
+
+def describe_capabilities():
+    from .services.native_catalog import NATIVE_CATALOG
+    import copy
+    return [dict(spec, **copy.deepcopy(NATIVE_CATALOG[spec["id"]])) for spec in _describe_capabilities()]
 
 
 async def prepare_capability(name, arguments, context):
