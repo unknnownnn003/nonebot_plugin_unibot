@@ -11,7 +11,7 @@
 主要能力：
 
 - 绑定落雪（Lxns）好友码：`/bind <好友码>`
-- 上传或同步成绩：`/chuupdate`，当前工作区中 `get_player_score.py` 还包含未提交的 `/lxupdate` 开发改动
+- 上传或同步成绩：`/chuupdate`，其他同步入口以 `get_player_score.py` 当前注册命令和 README 为准，不以历史工作区状态推断
 - 查询个人信息与本地成绩进度：`/个人信息`、`/分数`、`/chuinfo`、`/chulist`
 - 查询曲目、管理本地别名、随机推荐歌曲：`是什么歌`、`/添加别名`、`/删除别名`、`/查看别名`、`推什么`
 - 更新曲库、曲绘、收藏品和剧情资源：`/更新songlist`、`/更新曲绘`、`/更新收藏品`、`/更新剧情`
@@ -61,7 +61,7 @@ pip install -r nonebot_plugin_unibot\requirements.txt
 
 ## 开发注意事项
 
-- 先检查 `git status --short --branch`。当前仓库可能存在用户未提交改动，尤其不要覆盖 `nonebot_plugin_unibot/get_player_score.py` 中已有的工作区变更。
+- 先检查 `git status --short --branch`。当前仓库可能存在用户未提交改动，特别注意 `nonebot_plugin_unibot/get_player_score.py`；是否存在既有变更以当次检查为准。
 - 该项目以中文命令和中文用户提示为主，编辑源码时保持 UTF-8 编码。
 - 网络请求主要使用 `httpx`，命令处理函数是 async；新增阻塞逻辑时避免卡住事件循环。
 - 图片生成依赖 Pillow 和本机字体，跨平台字体逻辑分散在多个模块中，改动渲染时要检查 Windows/Linux 字体路径兼容性。
@@ -90,7 +90,7 @@ git log --oneline -5
 
 ## Git 工作流状态
 
-本目录已经是 git 仓库，当前分支为 `main`，配置了 GitHub 远端 `origin`。仓库适合使用常规分支、提交、推送、PR 的 git 工作流，但当前工作区已有未提交改动；后续提交时应单独暂存目标文件，例如只提交本文档时使用：
+本目录是独立 Git 仓库。每次接手检查实际分支、远端及工作区，不把历史记录中的分支名或未提交状态当作固定要求。按范围暂存文件，例如只提交本文档时使用：
 
 ```powershell
 git add AGENTS.MD
@@ -105,3 +105,14 @@ git commit -m "Add agent project notes"
 - 现有运行环境必须先以已加入群和旧实际状态迁移，再加载新版本；不得在导入期猜测UniBot/LLM启用状态并覆写旧文件。
 - 原命令、工具目录与执行、后台任务、延迟通知及Bot出站API均遵守当前群策略；管理设置及本人任务查询/取消保持原权限可用。关闭期间不新增群聊上下文。
 - 群设置不改变私聊、SUPERUSER/群角色、绘图审核、额度、预算、账本与幂等规则。
+
+## Server Companion 协同与 Git（2026-11-15）
+
+- 本 App 工作区为 `E:/projects/my_app`，项目协作总入口见 [AGENTS.md](E:/projects/my_app/AGENTS.md)，详细用户需求见 [requirements.md](E:/projects/my_app/docs/requirements.md)，群策略迁移与验收见 [group-policy-update.md](E:/projects/my_app/docs/group-policy-update.md)。本插件业务细则仍以本文件及目标子目录规则为准。
+- 本地三仓库位于 `D:/Files/nonebot/nonebot_plugin_unknnownnn`、`D:/Files/nonebot/nonebot_plugin_unibot`、`D:/Files/nonebot/nonebot_plugin_llmchat`；UniBot 的规则文件名为 `AGENTS.MD`。跨插件修改须读取各自规则，其他插件不动。
+- 编辑前检查当前 Git 分支与工作区，先保护既有修改；用户已允许合理保存既有工作，提交时明确既有内容、本轮改动与实际验证范围。按范围提交，不能用全量暂存混入未经检查的数据，不重置或清理他人工作，不擅自推送、合并或发布。
+- 不提交真实 .env、令牌、密钥、聊天/账号/成绩数据、缓存、预览图和本地部署快照；公开模板使用占位值。中文用明确 UTF-8 读写，避免默认 ANSI 回写造成乱码。
+- 依赖缓存和临时验证文件优先使用 `E:/projects/my_app/.tools/`，可复用 `tools/env.ps1` 设置环境；不得为测试擅自安装完整 NoneBot 宿主、连接真实账号或发送群消息。只报告实际执行的验证，不把语法检查或 mock 测试称为线上闭环。
+- 先本地修改和验证，再按会话授权同步 `/root/robinbot/plugins/` 下的对应插件；检查线上基线、任务状态与配置，备份后再更新，保留可回滚版本。已明确授权的同一同步范围继续执行，不重复确认。
+- 服务使用 `robinbot.service`，必要时同时更新管理网关 `server-companion.service`；不无故重启 `napcat.service` 或退出 QQ。`qqbot` 必须显式指定组件。只修改协作文档无需部署运行代码或重启服务。
+- 统一策略检查不能仅依赖预处理器的 ContextVar 或普通 Bot API hook 异常：前者在子任务中不能回传，后者可能被 NoneBot 吞掉。原生命令、工具、排队任务与延迟通知均须遵守实际执行时的策略，拒绝不能伪装成功，相关测试须确认底层 API 未执行。
