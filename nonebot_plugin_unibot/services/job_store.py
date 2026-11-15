@@ -357,14 +357,31 @@ class JobStore:
         async with self._lock:
             return await _db_thread(op)
 
-    async def pending_notifications(self, provider=None, limit=20):
+    async def pending_notifications(self, provider=None, limit=20, *, include_unknown_agent=False):
         await self.init()
         def op():
             db = self._db()
             try:
-                rows = db.execute("SELECT * FROM jobs WHERE notification_state='pending' AND status IN ('succeeded','failed','partial','cancelled','interrupted','unknown')" +
-                                  (" AND provider=?" if provider else "") + " ORDER BY created_at LIMIT ?",
-                                  (provider, limit) if provider else (limit,)).fetchall()
+                terminal = "status IN ('succeeded','failed','partial','cancelled','interrupted','unknown')"
+                scope = " AND provider=?" if provider else ""
+                values = (provider,) if provider else ()
+                limit_value = max(1, min(int(limit), 100))
+                pending_cursor = getattr(self, "_pending_notice_cursor", 0)
+                pending_query = ("SELECT rowid AS scan_cursor,* FROM jobs WHERE notification_state='pending' AND " +
+                    terminal + scope + " AND rowid>? ORDER BY rowid LIMIT ?")
+                rows = list(db.execute(pending_query, (*values, pending_cursor, limit_value)).fetchall())
+                if not rows and pending_cursor:
+                    rows = list(db.execute(pending_query, (*values, 0, limit_value)).fetchall())
+                self._pending_notice_cursor = rows[-1]["scan_cursor"] if rows else 0
+                if include_unknown_agent:
+                    cursor = getattr(self, "_unknown_notice_cursor", 0)
+                    query = ("SELECT rowid AS scan_cursor,* FROM jobs WHERE notification_state='unknown' AND response_owner='agent' AND " +
+                        terminal + scope + " AND rowid>? ORDER BY rowid LIMIT ?")
+                    unknown = db.execute(query, (*values, cursor, limit_value)).fetchall()
+                    if not unknown and cursor:
+                        unknown = db.execute(query, (*values, 0, limit_value)).fetchall()
+                    self._unknown_notice_cursor = unknown[-1]["scan_cursor"] if unknown else 0
+                    rows.extend(unknown)
                 return [self._row(row) for row in rows]
             finally:
                 db.close()
@@ -411,14 +428,26 @@ async def run_one(store: JobStore, handler: Callable[[Job], Awaitable[dict[str, 
     try:
         result = await handler(job)
     except asyncio.CancelledError:
+        latest = await store.get(job.job_id)
         await store.update(job.job_id, status="unknown", current_step="unknown", public_error_code="RESULT_UNKNOWN",
-                           side_effect_state="unknown", notification_state="pending")
+                           side_effect_state="unknown", notification_state="pending",
+                           result=dict(latest.result if latest else {}, status="unknown", code="RESULT_UNKNOWN",
+                               public_hint="任务执行被中断，结果仍需核对。",
+                               diagnostic=dict(stage="execution", reason="task_cancelled", cause_known=True,
+                                   explanation="执行协程被取消；不能据此认定操作未执行或未扣费。"),
+                               recovery="先核对任务和已有缓存，不自动重执行业务。"))
         raise
-    except Exception:
+    except Exception as exc:
         latest = await store.get(job.job_id)
         state = "unknown" if latest and latest.side_effect_state != "none" else "failed"
         await store.update(job.job_id, status=state, current_step=state, public_error_code="RESULT_UNKNOWN" if state == "unknown" else "INTERNAL_ERROR",
-                           result={"status": "unavailable"}, notification_state="pending")
+                           result=dict(latest.result if latest else {}, status=state,
+                               code="RESULT_UNKNOWN" if state == "unknown" else "INTERNAL_ERROR",
+                               public_hint="任务执行出现异常，已保留可核对的状态。",
+                               diagnostic=dict(stage="execution", reason="unclassified_exception", cause_known=False,
+                                   exception_type=type(exc).__name__, error_id=uuid4().hex[:12],
+                                   explanation="程序捕获到异常，具体根因尚未确认。"),
+                               recovery="先核对已有任务与投递结果，不能自动重复有副作用的操作。"), notification_state="pending")
     else:
         job_status = str(result.get("status", "succeeded"))
         if job_status == "ok":
@@ -428,7 +457,8 @@ async def run_one(store: JobStore, handler: Callable[[Job], Awaitable[dict[str, 
         await store.update(job.job_id, status=job_status,
                            current_step=str(result.get("current_step", "finished")), result=result,
                            public_error_code=result.get("code"), side_effect_state=str(result.get("side_effect_state", "none")),
-                           delivery_state=str(result.get("delivery_state", "not_sent")), notification_state="pending")
+                           delivery_state=str(result.get("delivery_state", result.get("data", {}).get("artifact_delivery", "not_sent"))),
+                           retryable=bool(result.get("retryable", False)), notification_state="pending")
     return await store.get(job.job_id)
 
 
@@ -445,12 +475,12 @@ async def notify_once(store: JobStore, job_id: str, callback: Callable[[Job], Aw
             await store.update(job_id, notification_state="suppressed")
             return True
         if isinstance(receipt, dict) and receipt.get("deferred"):
-            await store.update(job_id, notification_state="pending", delivery_state="not_sent")
+            await store.update(job_id, notification_state="pending")
             return False
     except BaseException as exc:
-        await store.update(job_id, notification_state="unknown", delivery_state="unknown")
+        await store.update(job_id, notification_state="unknown")
         if isinstance(exc, asyncio.CancelledError):
             raise
         return False
-    await store.update(job_id, notification_state="sent", delivery_state="sent")
+    await store.update(job_id, notification_state="sent")
     return True

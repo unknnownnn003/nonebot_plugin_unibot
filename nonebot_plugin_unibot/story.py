@@ -1,3 +1,4 @@
+from .services.error_notices import error_call as _error_call, result_call as _result_call
 import asyncio
 import base64
 import io
@@ -216,7 +217,7 @@ async def _(bot: Bot, event: Event, args: Message = CommandArg()):
     from .services.story import categories
     result = await categories(query)
     if result["status"] != "ok":
-        await cmd_list.finish(result["fallback_text"])
+        await _result_call(result, cmd_list.finish, result["fallback_text"])
     data = result["data"]
     if not query:
         cat_names = "\n".join(f"- {item['name']} ({item['count']}篇)" for item in data["categories"])
@@ -316,14 +317,14 @@ async def render_and_send(bot: Bot, event: Event, name: str, file_path: str, mat
 async def _(bot: Bot, event: Event, args: Message = CommandArg()):
     name = args.extract_plain_text().strip()
     if not name:
-        await cmd_story.finish("请输入要查询的角色名！例如：/查剧情 提亚马特")
+        await _error_call(cmd_story.finish, "请输入要查询的角色名！例如：/查剧情 提亚马特")
     from .services.story import search
     result = await search(bot, event, name, origin="command")
     if result["status"] not in {"ok", "running"}:
         if result["code"] == "AMBIGUOUS_TARGET":
             names_str = "、".join(item["name"] for item in result["data"].get("candidates", []))
-            await cmd_story.finish(f"匹配到多个结果，请提供更精确的名称:\n{names_str}")
-        await cmd_story.finish(result["fallback_text"])
+            await _error_call(cmd_story.finish, f"匹配到多个结果，请提供更精确的名称:\n{names_str}")
+        await _result_call(result, cmd_story.finish, result["fallback_text"])
     from .services.results import send_command_result
     await send_command_result(cmd_story, result, finish=False)
     event.__dict__.setdefault("_native_capability_results", {})["story.search"] = dict(
@@ -334,7 +335,7 @@ async def _(bot: Bot, event: Event):
     from .services.story import random_story
     result = await random_story(bot, event, origin="command")
     if result["status"] not in {"ok", "running"}:
-        await cmd_random.finish(result["fallback_text"])
+        await _result_call(result, cmd_random.finish, result["fallback_text"])
     from .services.results import send_command_result
     await send_command_result(cmd_random, result, finish=False)
     event.__dict__.setdefault("_native_capability_results", {})["story.random"] = dict(

@@ -4,11 +4,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing import Literal
 import inspect
 from .services.permissions import native_superuser
+from .services import group_policy
 
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "3.1.9"
+CAPABILITY_VERSION = "3.2.0"
 
 
 class SearchArgs(BaseModel):
@@ -151,6 +152,7 @@ def describe_capabilities():
     return [dict(spec, **copy.deepcopy(NATIVE_CATALOG[spec["id"]])) for spec in _describe_capabilities()]
 
 
+@group_policy.checked
 async def prepare_capability(name, arguments, context):
     """Resolve write targets before the user sees a concrete program preview."""
     import asyncio
@@ -238,6 +240,7 @@ async def prepare_capability(name, arguments, context):
     return dict(status="ok", code="OK", arguments=normalized, constraints=constraints)
 
 
+@group_policy.checked
 async def invoke_capability(name, arguments, context):
     from nonebot.adapters.onebot.v11 import GroupMessageEvent, PrivateMessageEvent
     from .services.results import outcome
@@ -393,6 +396,17 @@ async def invoke_capability(name, arguments, context):
 def set_job_notifier(callback_or_none):
     global _job_notifier
     _job_notifier = callback_or_none
+
+
+async def get_job_materials(job_id, context):
+    from .services.sync import query
+    from .services.presentation_store import scope
+    bot, event = context["bot"], context["event"]
+    checked = await query(bot, event, "get", job_id)
+    if checked.get("status") != "ok":
+        return []
+    from .services.sync import _presentations
+    return await _presentations.model_images(job_id, scope(bot, event)) if _presentations else []
 
 
 async def notify_job(job):

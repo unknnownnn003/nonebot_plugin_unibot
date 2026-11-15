@@ -1,3 +1,4 @@
+from .services.error_notices import error_call as _error_call, result_call as _result_call
 import asyncio
 import io
 import json
@@ -350,6 +351,12 @@ async def get_hint_text(game: Dict[str, Any]) -> Optional[Tuple[str, Any]]:
 
 
 async def game_timeout(group_id: str, expected=None) -> None:
+    from .services.group_policy import enabled
+    from types import SimpleNamespace
+    if not enabled(SimpleNamespace(group_id=int(group_id)), "game.status"):
+        async with await _get_group_lock(group_id):
+            active_games.pop(str(group_id), None)
+        return
     from .services.game import give_up
     expected = expected or active_games.get(group_id)
     await asyncio.sleep(GAME_TIMEOUT)
@@ -385,7 +392,7 @@ def parse_difficulty(text: str) -> Optional[str]:
 
 async def present_game_result(matcher, result, mode, bot, event):
     if result["status"] != "ok":
-        await matcher.finish(result["fallback_text"])
+        await _result_call(result, matcher.finish, result["fallback_text"])
     data = result["data"]
     if mode == "status":
         cfg = DIFFICULTY_CONFIG[data["difficulty"]]
@@ -459,7 +466,7 @@ async def _(bot: Bot, event: MessageEvent):
     import re
     query = re.sub(r"^[.。/]?猜\s*", "", event.get_plaintext().strip(), count=1)
     if not query:
-        await guess_cmd.finish("请输入要猜的歌名，例如：/猜 月葬")
+        await _error_call(guess_cmd.finish, "请输入要猜的歌名，例如：/猜 月葬")
     from .services.game import guess
     result = await guess(event.group_id, query, str(event.user_id),
                          guesser_name=event.sender.card or event.sender.nickname or str(event.user_id))

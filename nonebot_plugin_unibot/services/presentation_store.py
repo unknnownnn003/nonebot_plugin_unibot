@@ -151,6 +151,59 @@ class PresentationStore:
                              kind="forward_part", bundle=bundle, held=True)
         return await self.stage(operation_id, identity, f"{bundle}:forward", nodes, kind="forward", bundle=bundle)
 
+    async def model_images(self, operation_id, identity, *, limit=4):
+        """Read owned cached image bytes only; no network or arbitrary paths."""
+        await self.init()
+        def collect():
+            from nonebot.adapters.onebot.v11 import MessageSegment, Message
+            from urllib.parse import urlsplit, unquote
+            from urllib.request import url2pathname
+            images, digests = [], set()
+            def walk(value):
+                if len(images) >= limit:
+                    return
+                if isinstance(value, MessageSegment) and value.type == "image":
+                    source = value.data.get("file")
+                    data = None
+                    if isinstance(source, bytes):
+                        data = source
+                    elif isinstance(source, str) and source.startswith("base64://") and len(source) < 16 * 1024 * 1024:
+                        data = base64.b64decode(source[9:], validate=True)
+                    elif isinstance(source, str) and source.startswith("file://"):
+                        parsed = urlsplit(source)
+                        if parsed.netloc not in {"", "localhost"}:
+                            return
+                        file = Path(url2pathname(unquote(parsed.path))).resolve()
+                        file.relative_to(self.files.resolve())
+                        if file.stat().st_size <= 12 * 1024 * 1024:
+                            data = file.read_bytes()
+                    if data and len(data) <= 12 * 1024 * 1024:
+                        digest = hashlib.sha256(data).hexdigest()
+                        if digest not in digests:
+                            digests.add(digest)
+                            images.append(data)
+                elif isinstance(value, Message):
+                    for part in value:
+                        walk(part)
+                elif isinstance(value, dict):
+                    for part in value.values():
+                        walk(part)
+                elif isinstance(value, (list, tuple)):
+                    for part in value:
+                        walk(part)
+            with self.connection() as db:
+                rows = db.execute("SELECT path FROM presentations WHERE operation_id=? AND scope=? ORDER BY rowid",
+                    (operation_id, identity)).fetchall()
+                for row in rows:
+                    file = Path(row["path"]).resolve()
+                    file.relative_to(self.files.resolve())
+                    if file.stat().st_size <= 20 * 1024 * 1024:
+                        walk(decode(json.loads(file.read_text(encoding="utf-8"))))
+                    if len(images) >= limit:
+                        break
+            return images
+        return await _db_thread(collect)
+
     async def pending(self, operation_id, identity, *, limit=20):
         await self.init()
         def op():

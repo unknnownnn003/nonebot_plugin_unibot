@@ -1,3 +1,4 @@
+from .services.error_notices import error_call as _error_call, result_call as _result_call
 import os
 import json
 import csv
@@ -304,14 +305,14 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
 
     query, level_index, score, combo = _parse_manual_score_args(raw)
     if not query or level_index is None or score is None:
-        await manual_score.finish("格式错误。请使用：/cf <歌名或ID> [难度] <分数> [fc/aj]")
+        await _error_call(manual_score.finish, "格式错误。请使用：/cf <歌名或ID> [难度] <分数> [fc/aj]")
 
     matches = find_song_matches(query, limit=8)
     local_song, ambiguous_matches = pick_song_match(matches)
     if ambiguous_matches:
         await manual_score.finish("匹配到多首曲目，请使用更精确的名称或 ID：\n" + _format_manual_candidates(ambiguous_matches))
     if not local_song:
-        await manual_score.finish("未找到匹配的曲目。")
+        await _error_call(manual_score.finish, "未找到匹配的曲目。")
 
     difficulties = local_song.get("difficulties", []) if isinstance(local_song, dict) else []
     diff_info = next(
@@ -720,12 +721,12 @@ def _parse_file(file_path: str) -> tuple[bool, str, list, dict]:
 async def _(bot: Bot, event: MessageEvent):
     from .services.sync import submit
     if not (config.lxns_token or "").strip():
-        await lxupdate_score.finish("未配置落雪开发者密钥，无法使用 /lxupdate。")
+        await _error_call(lxupdate_score.finish, "未配置落雪开发者密钥，无法使用 /lxupdate。")
     result = await submit(bot, event, str(event.user_id), origin="command")
     if result["code"] in {"JOB_ACCEPTED", "JOB_EXISTS"}:
         from .services.results import send_command_result
         await send_command_result(lxupdate_score, result, finish=True)
-    await lxupdate_score.finish(result["fallback_text"])
+    await _result_call(result, lxupdate_score.finish, result["fallback_text"])
 
 
 @update_score.handle()
@@ -749,4 +750,4 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
 async def get_uploaded_file(bot: Bot, event: MessageEvent):
     from .services.uploads import import_file
     result = await import_file(bot, event, str(event.user_id))
-    await update_score.finish(result["fallback_text"] or result["public_hint"])
+    await _result_call(result, update_score.finish, result["fallback_text"] or result["public_hint"])

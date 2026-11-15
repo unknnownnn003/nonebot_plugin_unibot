@@ -1,6 +1,7 @@
 nonebot2>=2.0.0
 nonebot-adapter-onebot
 nonebot-plugin-htmlrender
+fastapi
 Pillow
 httpx
 aiofiles

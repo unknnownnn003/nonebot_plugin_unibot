@@ -1,3 +1,5 @@
+from .services.error_notices import install as _install_error_notices
+_install_error_notices()
 from nonebot import get_plugin_config
 from nonebot.plugin import PluginMetadata
 
@@ -6,8 +8,8 @@ from . import songlist_update, get_resource, user_bind, get_player_songlist, get
 
 __plugin_meta__ = PluginMetadata(
     name="nonebot-plugin-unibot",
-    description="",
-    usage="",
+    description="CHUNITHM 查分、曲库、推荐、猜曲与剧情",
+    usage="/chuhelp [文字|分类] 查看完整帮助；日志群 /设置面板 可批量维护资源。",
     config=Config,
 )
 
@@ -25,3 +27,6 @@ get_driver().on_shutdown(stop_workers)
 
 from .services.command_receipts import install as install_command_receipts
 _native_command_guards = install_command_receipts([globals()[name] for name in __all__])
+
+from .services.group_policy import install as _install_group_policy
+_install_group_policy()

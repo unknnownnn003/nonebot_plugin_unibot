@@ -115,6 +115,8 @@ def install(modules, *, receipts=None):
     from nonebot.params import Depends
     from nonebot.rule import CommandRule, ShellCommandRule, RegexRule, FullmatchRule, StartswithRule, EndswithRule
     if receipts is None:
+        from nonebot import require
+        require("nonebot_plugin_localstore")
         from nonebot_plugin_localstore import get_plugin_data_file
         receipts = CommandReceipts(get_plugin_data_file("native_commands.sqlite3"))
     _receipts = receipts

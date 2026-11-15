@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 from .job_store import _db_thread
 from .permissions import native_superuser
+from .group_policy import enabled
 
 
 async def describe(specs, context):
@@ -28,6 +29,8 @@ def _describe(specs, context):
         code, hint = None, None
         if not valid:
             code, hint = "PERMISSION_DENIED", "无法核验当前Bot和真实发起者。"
+        elif group and not enabled(event, name):
+            code, hint = "FEATURE_DISABLED", "本群对应功能已关闭。"
         elif name.startswith("game.") and not group:
             code, hint = "GROUP_ONLY", "猜曲只在群聊中可用。"
         elif name in {"maintenance.refresh", "maintenance.import_chunirec", "song.alias_delete"} and not native_superuser(bot, event):

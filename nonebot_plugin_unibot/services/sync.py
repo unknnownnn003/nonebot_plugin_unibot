@@ -1,5 +1,6 @@
+from . import group_policy
 """Provider-owned persistent FIFO and one worker for all LXNS sync entry points."""
-from __future__ import annotations
+from .error_notices import result_call
 import asyncio
 from pathlib import Path
 from .results import outcome
@@ -120,6 +121,7 @@ async def _run_sync(user_id: str, job, store):
             return outcome("JOB_CANCELLED", "任务已取消，尚未写入成绩。", status="cancelled")
         await store.update(job.job_id, current_step="committing_scores", side_effect_state="preparing")
         profile = s._normalize_lxns_player_info(player) if player else None
+        group_policy.check()
         commit = asyncio.create_task(asyncio.to_thread(commit_scores, user_id, parsed, profile))
         try:
             total = await asyncio.shield(commit)
@@ -140,7 +142,7 @@ async def _run_sync(user_id: str, job, store):
         return outcome("UPSTREAM_UNAVAILABLE", "落雪接口暂时不可用，本次没有写入。", status="unavailable")
 
 
-async def _handle(job):
+async def _handle_unchecked(job):
     context = _contexts.get(job.job_id)
     if context is None:
         return outcome("JOB_INTERRUPTED", "原始请求上下文已丢失，任务未继续执行。", status="interrupted")
@@ -165,14 +167,22 @@ async def _handle(job):
 
 
 async def _notify(job):
+    if job.context_type == "group":
+        from types import SimpleNamespace
+        capability = job.capability_id
+        if capability == "job.replay":
+            source = await _store.get(job.payload.get("source_job_id", ""))
+            capability = source.capability_id if source is not None else ""
+        if not group_policy.enabled(SimpleNamespace(group_id=int(job.context_id)), capability):
+            return {"silent": True}
     from .results import redundant_media_notice
-    if redundant_media_notice(job):
-        return {"silent": True}
     from .. import llm_api
     if job.response_owner == "agent":
         if llm_api._job_notifier is None:
             return {"deferred": True}
         return await llm_api.notify_job(job)
+    if redundant_media_notice(job):
+        return {"silent": True}
     from nonebot import get_bot
     try:
         bot = get_bot(job.bot_id)
@@ -181,7 +191,8 @@ async def _notify(job):
     label = "剧情" if job.capability_id.startswith("story.") else "资源维护" if job.capability_id.startswith("maintenance.") else "成绩同步" if job.capability_id == "score.sync" else "查询图片"
     text = job.result.get("public_hint") or f"{label}未能完成，请稍后重试或查询任务详情。"
     if job.context_type == "group":
-        await bot.send_group_msg(group_id=int(job.context_id), message=text)
+        if not group_policy.enabled(type("Scope", (), {"group_id": int(job.context_id)})(), job.capability_id): return {"silent": True}
+        await result_call({"status": job.status}, bot.send_group_msg, group_id=int(job.context_id), message=text)
     else:
         await bot.send_private_msg(user_id=int(job.context_id), message=text)
 
@@ -209,7 +220,13 @@ async def _worker():
 async def _notifications():
     while not _closing:
         _notify_wake.clear()
-        for finished in await _store.pending_notifications(PROVIDER):
+        for finished in await _store.pending_notifications(PROVIDER, include_unknown_agent=True):
+            if finished.notification_state == "unknown":
+                from .. import llm_api
+                verify = getattr(llm_api._job_notifier, "can_recover_job", None)
+                if not callable(verify) or not await verify(finished):
+                    continue
+                await _store.update(finished.job_id, notification_state="pending")
             await notify_once(_store, finished.job_id, _notify)
         try:
             await asyncio.wait_for(_notify_wake.wait(), timeout=15)
@@ -226,6 +243,8 @@ async def submit(bot, event, user_id, *, origin="agent"):
 async def submit_operation(bot, event, capability_id, operation_id, payload, *, origin="agent"):
     if str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "任务身份不匹配。", status="denied")
+    if capability_id != "job.replay" and not group_policy.enabled(event, capability_id):
+        return outcome("FEATURE_DISABLED", "本群对应功能已关闭。", status="denied")
     store = await ensure_started()
     if _closing:
         return outcome("PLUGIN_CLOSING", "插件关闭中，本次未接单。", status="unavailable")
@@ -264,7 +283,8 @@ async def submission_result(job, created):
 
 
 async def public_job(job):
-    return dict(job_id=job.job_id, capability_id=job.capability_id,
+    return dict(job_id=job.job_id, capability_id=job.capability_id, provider=job.provider,
+                actor_id=job.actor_id, source_message_id=job.source_message_id,
                 source_capability=job.payload.get("source_capability", job.capability_id),
                 source_job_id=job.payload.get("source_job_id"), status=job.status, current_step=job.current_step,
                 queue_position=await _store.queue_position(job.job_id), queue_position_scope="queued_only",
@@ -302,6 +322,8 @@ async def replay(bot, event, job_id, *, origin=None, before_send=None):
     target = await _store.get(job_id)
     if target.capability_id == "job.replay":
         return await replay(bot, event, target.payload["source_job_id"], origin=origin, before_send=before_send)
+    if not group_policy.enabled(event, target.capability_id):
+        return outcome("FEATURE_DISABLED", "本群对应功能已关闭，不能补发。", status="denied")
     from .media_jobs import CAPABILITIES
     if (await _store.get(job_id)).capability_id not in {"story.search", "story.random", "media.inline"} | CAPABILITIES:
         return outcome("NO_CACHED_MEDIA", "此任务没有可补投的媒体计划。", status="needs_input")
@@ -341,3 +363,17 @@ async def execute_replay(bot, event, job):
     output.setdefault("data", {})["source_job_id"] = job.payload["source_job_id"]
     output["side_effect_state"] = "unknown" if output["status"] == "unknown" or output["data"].get("uncertain") else "committed" if output["data"].get("sent") else "none"
     return output
+
+
+async def _handle(job):
+    context = _contexts.get(job.job_id)
+    if context is None: return outcome("JOB_INTERRUPTED", "原请求上下文已丢失。", status="interrupted")
+    bot, event = context
+    capability = job.capability_id
+    if capability == "job.replay":
+        source = await _store.get(job.payload["source_job_id"])
+        capability = source.capability_id if source is not None else ""
+    if not group_policy.enabled(event, capability):
+        return outcome("FEATURE_DISABLED", "本群对应功能已关闭，任务未继续执行。", status="cancelled")
+    with group_policy.scope(event, capability):
+        return await _handle_unchecked(job)

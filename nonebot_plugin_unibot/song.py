@@ -1,3 +1,4 @@
+from .services.error_notices import error_call as _error_call
 from nonebot.adapters.onebot.v11 import Bot
 import json
 import os
@@ -249,21 +250,28 @@ def pick_song_match(matches: List[Dict[str, Any]]) -> Tuple[Optional[Dict[str, A
     return None, matches
 
 def get_font(size: int, weight: str = "Normal") -> ImageFont.FreeTypeFont:
-    try:
-        if platform.system() == "Windows":
-            return ImageFont.truetype("msyh.ttc", size)
-        else:
-            font_paths = [
-                f"/usr/share/fonts/opentype/SourceHanSans/SourceHanSansSC-{weight}.otf",
-                "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
-                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"
-            ]
-            for p in font_paths:
-                if os.path.exists(p):
-                    return ImageFont.truetype(p, size)
-            return ImageFont.load_default()
-    except Exception:
-        return ImageFont.load_default()
+    # Noto 使用 Regular 而非 Normal；常见发行版只安装 Regular/Bold。
+    noto_weight = "Regular" if weight == "Normal" else weight
+    if platform.system() == "Windows":
+        font_paths = ["msyh.ttc", "msgothic.ttc"]
+    else:
+        font_paths = [
+            f"/usr/share/fonts/opentype/SourceHanSans/SourceHanSansSC-{weight}.otf",
+            f"/usr/share/fonts/truetype/custom/SourceHanSansSC-{weight}.otf",
+            f"/usr/share/fonts/opentype/noto/NotoSansCJK-{noto_weight}.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/SourceHanSans/SourceHanSansSC-Normal.otf",
+            "/usr/share/fonts/truetype/custom/SourceHanSansSC-Normal.otf",
+            "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        ]
+    for path in font_paths:
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            # 一个字体不可用时继续尝试，不能提前退回不支持 CJK 的默认字体。
+            continue
+    return ImageFont.load_default()
 
 def draw_text(draw: ImageDraw.ImageDraw, pos: tuple, text: str, font: ImageFont.FreeTypeFont, fill=(255, 255, 255), anchor="la"):
     draw.text(pos, text, font=font, fill=fill, anchor=anchor)
@@ -612,7 +620,7 @@ view_alias_cmd = on_command("查看别名", priority=10, block=True)
 async def _(event: MessageEvent, args: Message = CommandArg()):
     msg_args = args.extract_plain_text().strip().split(maxsplit=1)
     if len(msg_args) < 2:
-        await add_alias_cmd.finish("格式错误。请使用: /添加别名 <song_id> <别名>")
+        await _error_call(add_alias_cmd.finish, "格式错误。请使用: /添加别名 <song_id> <别名>")
     
     song_id_str, alias_name = msg_args[0], msg_args[1].strip()
     song_id = song_id_str
@@ -620,10 +628,10 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
     try:
         found, _added = add_song_alias(song_id, alias_name)
     except Exception:
-        await add_alias_cmd.finish("保存曲目列表失败。")
+        await _error_call(add_alias_cmd.finish, "保存曲目列表失败。")
         return
     if not found:
-         await add_alias_cmd.finish(f"未找到 ID 为 {song_id} 的曲目。")
+         await _error_call(add_alias_cmd.finish, f"未找到 ID 为 {song_id} 的曲目。")
          return
 
     await add_alias_cmd.finish(f"已成功为 ID {song_id} 添加别名。")
@@ -632,7 +640,7 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
 async def _(event: MessageEvent, args: Message = CommandArg()):
     msg_args = args.extract_plain_text().strip().split(maxsplit=1)
     if len(msg_args) < 2:
-        await del_alias_cmd.finish("格式错误。请使用: /删除别名 <song_id> <别名>")
+        await _error_call(del_alias_cmd.finish, "格式错误。请使用: /删除别名 <song_id> <别名>")
     
     song_id_str, alias_name = msg_args[0], msg_args[1].strip()
     song_id = song_id_str
@@ -640,14 +648,14 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
     try:
         found, removed = remove_song_alias(song_id, alias_name)
     except Exception:
-        await del_alias_cmd.finish("保存曲目列表失败。")
+        await _error_call(del_alias_cmd.finish, "保存曲目列表失败。")
         return
     if not found:
-        await del_alias_cmd.finish(f"未找到 ID 为 {song_id} 的曲目。")
+        await _error_call(del_alias_cmd.finish, f"未找到 ID 为 {song_id} 的曲目。")
         return
          
     if not removed:
-        await del_alias_cmd.finish(f"ID {song_id} 下不存在该别名。")
+        await _error_call(del_alias_cmd.finish, f"ID {song_id} 下不存在该别名。")
         return
 
     await del_alias_cmd.finish(f"成功为 ID {song_id} 删除别名。")
@@ -656,7 +664,7 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
 async def _(event: MessageEvent, args: Message = CommandArg()):
     query = args.extract_plain_text().strip()
     if not query:
-        await view_alias_cmd.finish("格式错误。请使用: /查看别名 <模糊搜索/名字/ID/别名>")
+        await _error_call(view_alias_cmd.finish, "格式错误。请使用: /查看别名 <模糊搜索/名字/ID/别名>")
         
     matches = find_song_matches(query, limit=8)
     local_song, ambiguous_matches = pick_song_match(matches)
@@ -668,7 +676,7 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
         await view_alias_cmd.finish("匹配到多首曲目，请使用更精确的名称或 ID：\n" + "\n".join(lines))
 
     if not local_song:
-        await view_alias_cmd.finish("未找到匹配的曲目。")
+        await _error_call(view_alias_cmd.finish, "未找到匹配的曲目。")
         
     aliases = local_song.get("aliases", [])
     title = local_song.get("title", "")

@@ -10,7 +10,7 @@ NATIVE_CATALOG = json.loads(r'''{
           "chu放弃"
         ],
         "command": "放弃",
-        "line": 81,
+        "line": 82,
         "matcher": "giveup_cmd",
         "module": "chuguess",
         "registration": "on_command"
@@ -21,7 +21,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
-        "line": 82,
+        "line": 83,
         "matcher": "guess_cmd",
         "module": "chuguess",
         "pattern": "^[\\.。/]?猜\\s*(.+)?$",
@@ -31,7 +31,7 @@ NATIVE_CATALOG = json.loads(r'''{
       {
         "command": "chuguess",
         "condition": "当前群已有游戏，且命令参数为猜测内容。",
-        "line": 79,
+        "line": 80,
         "matcher": "chuguess_cmd",
         "module": "chuguess",
         "registration": "on_command"
@@ -46,7 +46,7 @@ NATIVE_CATALOG = json.loads(r'''{
           "chu提示"
         ],
         "command": "提示",
-        "line": 80,
+        "line": 81,
         "matcher": "hint_cmd",
         "module": "chuguess",
         "registration": "on_command"
@@ -59,7 +59,7 @@ NATIVE_CATALOG = json.loads(r'''{
       {
         "command": "chuguess",
         "condition": "当前群没有进行中的游戏；参数为难度或留空。",
-        "line": 79,
+        "line": 80,
         "matcher": "chuguess_cmd",
         "module": "chuguess",
         "registration": "on_command"
@@ -72,7 +72,7 @@ NATIVE_CATALOG = json.loads(r'''{
       {
         "command": "chuguess",
         "condition": "当前群已有游戏，且命令参数为空。",
-        "line": 79,
+        "line": 80,
         "matcher": "chuguess_cmd",
         "module": "chuguess",
         "registration": "on_command"
@@ -83,8 +83,11 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
+        "aliases": [
+          "中二帮助"
+        ],
         "command": "chuhelp",
-        "line": 13,
+        "line": 14,
         "matcher": "chuhelp_cmd",
         "module": "help",
         "registration": "on_command"
@@ -96,7 +99,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "取消中二任务",
-        "line": 9,
+        "line": 10,
         "matcher": "cancel",
         "module": "job_control",
         "registration": "on_command"
@@ -109,7 +112,7 @@ NATIVE_CATALOG = json.loads(r'''{
       {
         "command": "中二任务",
         "condition": "带当前会话本人任务ID。",
-        "line": 8,
+        "line": 9,
         "matcher": "jobs",
         "module": "job_control",
         "registration": "on_command"
@@ -122,7 +125,7 @@ NATIVE_CATALOG = json.loads(r'''{
       {
         "command": "中二任务",
         "condition": "不带任务ID。",
-        "line": 8,
+        "line": 9,
         "matcher": "jobs",
         "module": "job_control",
         "registration": "on_command"
@@ -134,7 +137,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "补发中二任务",
-        "line": 10,
+        "line": 11,
         "matcher": "replay",
         "module": "job_control",
         "registration": "on_command"
@@ -199,7 +202,7 @@ NATIVE_CATALOG = json.loads(r'''{
       },
       {
         "command": "更新剧情",
-        "line": 199,
+        "line": 200,
         "matcher": "cmd_update",
         "module": "story",
         "permission_source": "SUPERUSER",
@@ -231,7 +234,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "bind",
-        "line": 57,
+        "line": 58,
         "matcher": "bind_command",
         "module": "user_bind",
         "registration": "on_command"
@@ -283,7 +286,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "chuupdate",
-        "line": 34,
+        "line": 35,
         "matcher": "update_score",
         "module": "get_player_score",
         "registration": "on_command"
@@ -301,7 +304,7 @@ NATIVE_CATALOG = json.loads(r'''{
           "手动传分"
         ],
         "command": "传分",
-        "line": 36,
+        "line": 37,
         "matcher": "manual_score",
         "module": "get_player_score",
         "registration": "on_command"
@@ -313,7 +316,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "lxupdate",
-        "line": 35,
+        "line": 36,
         "matcher": "lxupdate_score",
         "module": "get_player_score",
         "registration": "on_command"
@@ -325,7 +328,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "添加别名",
-        "line": 607,
+        "line": 615,
         "matcher": "add_alias_cmd",
         "module": "song",
         "registration": "on_command"
@@ -337,7 +340,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "删除别名",
-        "line": 608,
+        "line": 616,
         "matcher": "del_alias_cmd",
         "module": "song",
         "permission_source": "SUPERUSER",
@@ -350,7 +353,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "查看别名",
-        "line": 609,
+        "line": 617,
         "matcher": "view_alias_cmd",
         "module": "song",
         "registration": "on_command"
@@ -361,7 +364,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
-        "line": 29,
+        "line": 30,
         "matcher": "song_query",
         "module": "song",
         "pattern": "^(.+)是什么歌$",
@@ -373,7 +376,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
-        "line": 29,
+        "line": 30,
         "matcher": "song_query",
         "module": "song",
         "pattern": "^(.+)是什么歌$",
@@ -389,7 +392,7 @@ NATIVE_CATALOG = json.loads(r'''{
           "剧情列表"
         ],
         "command": "剧情分类",
-        "line": 202,
+        "line": 203,
         "matcher": "cmd_list",
         "module": "story",
         "registration": "on_command"
@@ -401,7 +404,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "随机剧情",
-        "line": 201,
+        "line": 202,
         "matcher": "cmd_random",
         "module": "story",
         "registration": "on_command"
@@ -417,7 +420,7 @@ NATIVE_CATALOG = json.loads(r'''{
           "查询剧情"
         ],
         "command": "查剧情",
-        "line": 200,
+        "line": 201,
         "matcher": "cmd_story",
         "module": "story",
         "registration": "on_command"

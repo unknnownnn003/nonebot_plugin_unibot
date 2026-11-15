@@ -1,4 +1,5 @@
 """Human access to own queued jobs, including when the business feature is off."""
+from .services.error_notices import error_call as _error_call, result_call as _result_call
 from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent
 from nonebot.params import CommandArg
@@ -37,9 +38,9 @@ def format_result(result):
 async def show_jobs(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     identity = args.extract_plain_text().strip()
     if identity and (len(identity) != 32 or any(c not in "0123456789abcdef" for c in identity)):
-        await jobs.finish("用法：/中二任务 [任务ID]")
+        await _error_call(jobs.finish, "用法：/中二任务 [任务ID]")
     result = await query(bot, event, "get" if identity else "list", identity or None)
-    await jobs.send(format_result(result))
+    await _result_call(result, jobs.send, format_result(result))
     event.__dict__.setdefault("_native_capability_results", {})["job.get" if identity else "job.list"] = dict(
         status=result["status"], code=result["code"], delivery="sent")
 
@@ -48,9 +49,9 @@ async def show_jobs(bot: Bot, event: MessageEvent, args: Message = CommandArg())
 async def cancel_job(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     identity = args.extract_plain_text().strip()
     if len(identity) != 32 or any(c not in "0123456789abcdef" for c in identity):
-        await cancel.finish("用法：/取消中二任务 <任务ID>。执行中的任务只能请求取消。")
+        await _error_call(cancel.finish, "用法：/取消中二任务 <任务ID>。执行中的任务只能请求取消。")
     result = await query(bot, event, "cancel", identity)
-    await cancel.send(format_result(result))
+    await _result_call(result, cancel.send, format_result(result))
     event.__dict__.setdefault("_native_capability_results", {})["job.cancel"] = dict(
         status=result["status"], code=result["code"], delivery="sent")
 
@@ -60,9 +61,9 @@ async def replay_job(bot: Bot, event: MessageEvent, args: Message = CommandArg()
     from .services.sync import replay as replay_cached
     identity = args.extract_plain_text().strip()
     if len(identity) != 32 or any(c not in "0123456789abcdef" for c in identity):
-        await replay.finish("用法：/补发中二任务 <任务ID>。仅补发缓存媒体，不重新生成。")
+        await _error_call(replay.finish, "用法：/补发中二任务 <任务ID>。仅补发缓存媒体，不重新生成。")
     result = await replay_cached(bot, event, identity, origin="command")
-    await replay.send(result["public_hint"] + (f"\n补发任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
+    await _result_call(result, replay.send, result["public_hint"] + (f"\n补发任务ID：{result['data']['job_id']}" if result["data"].get("job_id") else ""))
     event.__dict__.setdefault("_native_capability_results", {})["job.replay"] = dict(
         status=result["status"], code=result["code"], delivery="sent")
 

@@ -1,5 +1,9 @@
 # AGENTS.MD
 
+## 群报错自动撤回
+
+`services/error_notices.py` 与另两个插件共享单个 OneBot 回执hook，群内报错成功发送后10秒撤回。只标记程序错误分支和失败结果，不按任意群消息关键词判断；私聊及正常结果保留。撤回目标只能来自Bot自身发送回执，失败只记日志；独立加载时由入口安装，停机取消待撤回任务。纯状态字符串可用error_text标记；已有success布尔或结果status应直接用于result_call。
+
 ## 项目概览
 
 这是一个基于 NoneBot2 和 OneBot v11 的 CHUNITHM（中二节奏）查分、曲库、剧情与图片生成插件。插件包位于 `nonebot_plugin_unibot/`，主入口是 `nonebot_plugin_unibot/__init__.py`，导入各功能模块后由 NoneBot 自动注册命令与正则匹配器。
@@ -92,3 +96,12 @@ git log --oneline -5
 git add AGENTS.MD
 git commit -m "Add agent project notes"
 ```
+
+
+## 2026-11-15 统一群策略
+
+- 三插件共享综合插件 feature_config.json 的 _policy_version=2，按群保存 _plugins 总开关及单项选择；新群和新功能默认关闭。
+- 原 _whitelist、绘图白名单及环境默认白名单不再强制开启任何功能。关闭总开关保留单项、LLM预设和概率。
+- 现有运行环境必须先以已加入群和旧实际状态迁移，再加载新版本；不得在导入期猜测UniBot/LLM启用状态并覆写旧文件。
+- 原命令、工具目录与执行、后台任务、延迟通知及Bot出站API均遵守当前群策略；管理设置及本人任务查询/取消保持原权限可用。关闭期间不新增群聊上下文。
+- 群设置不改变私聊、SUPERUSER/群角色、绘图审核、额度、预算、账本与幂等规则。
