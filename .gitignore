@@ -16,3 +16,38 @@ session_test.json
 test_jacket.jpg
 tools/jackets/
 [0-9]*.json
+
+# Local credentials (public configuration templates may be committed)
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Runtime databases, logs and local backups
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.log
+logs/
+backups/
+*.bak
+
+# Local environments, tooling and generated previews
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pycache*/
+.tools/
+font_preview.png
