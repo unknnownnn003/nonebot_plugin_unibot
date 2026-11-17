@@ -72,16 +72,20 @@ for bad in ({'songs':[]},{'songs':[{'id':10,'title':'bad','difficulties':[{'diff
 meta=b.build_chart_meta(saved['songs'])
 assert meta[('10',3)]['level_value']==14.2
 assert meta[('10',4)]['version']==24000 and ('8001',5) not in meta
-# Preserve style/layout; prove both WE rows and their own IDs reach drawing.
+# Preserve metadata identities internally while presenting WE attributes/names.
 labels=[]; original_draw=s.draw_text
+display=copy.deepcopy(base)
+next(d for d in display['difficulties'] if d['song_id']==8001).update(kanji='半',star=3)
 def record(draw,pos,text,*args,**kwargs):
     labels.append(str(text));return original_draw(draw,pos,text,*args,**kwargs)
-with patch.object(s,'draw_text',side_effect=record):
-    image=s.render_song_image(base,base,None)
+with patch.object(s,'draw_text',side_effect=record),patch.object(s,'get_version_name',side_effect=lambda v:{10000:'CHUNITHM OLD',21000:'CHUNITHM AIR',23000:'CHUNITHM SUN',24000:'CHUNITHM NEW'}[int(v)]):
+    image=s.render_song_image(display,display,None)
 assert image.startswith(b'\xff\xd8')
 assert sum(text.startswith("WORLD'S END") for text in labels)==2
-assert any('8001' in text and '21000' in text for text in labels)
-assert any('8002' in text and '23000' in text for text in labels)
+assert "WORLD'S END 半 ★★★" in labels and "WORLD'S END 狂 ★★★★★" in labels
+assert any('CHUNITHM AIR' in text for text in labels) and any('CHUNITHM SUN' in text for text in labels)
+assert not any('ID:' in text or 'Origin:' in text or '21000' in text for text in labels)
+assert {d['song_id'] for d in base['difficulties']}=={10,8001,8002}
 assert llm_api.CAPABILITY_VERSION=='4.1.0'
 specs=llm_api.describe_capabilities()
 assert 'maintenance.import_chunirec' not in {spec['id'] for spec in specs}

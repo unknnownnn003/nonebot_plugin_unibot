@@ -216,7 +216,7 @@ async def submit_operation(bot, event, capability_id, operation_id, payload, *, 
             if created:
                 _contexts[job.job_id] = (bot, event)
                 from .media_jobs import CAPABILITIES
-                image_query = capability_id in CAPABILITIES - {"player.song_scores"} or capability_id in {"story.search", "story.random"}
+                image_query = capability_id in CAPABILITIES - {"player.song_scores", "song.search", "song.detail"} or capability_id in {"story.search", "story.random"}
                 if origin == "command" and image_query and group_policy.enabled(event, capability_id) and await private_job_allowed(job):
                     # The worker takes this gate too: acknowledge before it can
                     # render/send, and only once for a newly accepted request.

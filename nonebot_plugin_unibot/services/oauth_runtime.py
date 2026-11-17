@@ -121,6 +121,40 @@ HINTS = {
 }
 
 
+async def retract_authorization_link(bot, notice):
+    if not notice:
+        return
+    import asyncio
+    try:
+        await asyncio.wait_for(bot.delete_msg(message_id=notice["message_id"]), timeout=10)
+    except Exception:
+        from nonebot.log import logger
+        logger.warning("OAuth 授权链接消息撤回未完成；未重试，绑定状态不受影响。")
+
+
+async def remember_authorization_message(bot, event, message, receipt):
+    from nonebot.adapters.onebot.v11 import GroupMessageEvent
+    from .oauth import AuthorizationLink, owner_key
+    from .job_store import async_call
+    if not isinstance(event, GroupMessageEvent) or str(event.self_id) != str(bot.self_id) or not isinstance(message, AuthorizationLink):
+        return
+    if not isinstance(receipt, dict) or isinstance(receipt.get("message_id"), bool):
+        return
+    raw_id = receipt.get("message_id")
+    if not isinstance(raw_id, (int, str)):
+        return
+    try:
+        message_id = int(raw_id)
+        if not message_id:
+            return
+        notice = await async_call(get_service().store.remember_link, owner_key(bot.self_id, event.user_id),
+                                  message.generation, event.group_id, message_id)
+        await retract_authorization_link(bot, notice)
+    except Exception:
+        from nonebot.log import logger
+        logger.warning("OAuth 授权链接回执保存未完成；未输出敏感详情。")
+
+
 async def command(bot, event, action, argument=""):
     """Identity comes only from the real OneBot event, never from arguments."""
     from nonebot.adapters.onebot.v11 import GroupMessageEvent, PrivateMessageEvent
@@ -131,7 +165,10 @@ async def command(bot, event, action, argument=""):
 
     def reply(text):
         if group is not None and action in {"begin", "confirm"}:
-            message = str(text) + "\n请及时撤回含授权链接或确认串的消息；本人发送的确认指令请立即撤回，机器人消息请由群管理员撤回。"
+            from .oauth import AuthorizationLink
+            message = str(text) + "\n绑定成功后机器人会尝试自动撤回授权链接消息；请立即撤回本人发送的确认指令。"
+            if isinstance(text, AuthorizationLink):
+                return AuthorizationLink(message, text.generation)
             return error_text(message) if getattr(text, "_error_notice", False) else message
         return text
 
@@ -142,9 +179,11 @@ async def command(bot, event, action, argument=""):
     try:
         if action == "begin":
             url = await _service.begin(bot.self_id, event.user_id, origin_group=group)
-            message = "请登录本人落雪账号，仅申请 read_player 与 openid。网页完成后在当前聊天发送 /落雪确认 <网页确认串>；链接10分钟有效，请勿转发。\n" + url
+            from .oauth import AuthorizationLink
+            message = AuthorizationLink("请登录本人落雪账号，仅申请 read_player 与 openid。网页完成后在当前聊天发送 /落雪确认 <网页确认串>；链接10分钟有效，请勿转发。\n" + url, url.generation)
         elif action == "confirm":
-            await _service.confirm(bot.self_id, event.user_id, argument.strip())
+            notice = await _service.confirm(bot.self_id, event.user_id, argument.strip())
+            await retract_authorization_link(bot, notice)
             message = "OAuth 绑定成功，可直接使用 /b30、/b50、/chuinfo、/chulist、/chu成绩 查询。"
         elif action == "status":
             state = await _service.status(bot.self_id, event.user_id)

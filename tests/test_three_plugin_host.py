@@ -99,6 +99,12 @@ async def run():
         assert '正在生成，请稍候' in str(transport.await_args_list[1])
         duplicate=await media_jobs.submit(bot,native_event,'player.b50',{},origin='command')
         assert duplicate['code']=='JOB_EXISTS' and transport.await_count==3
+        from nonebot_plugin_unibot import song as native_song
+        search_event=g.model_copy(update={'message_id':906})
+        with patch.object(native_song,'fetch_song_detail',AsyncMock(return_value=None)),patch.object(native_song,'download_jacket',AsyncMock(return_value=None)):
+            search=await media_jobs.submit(bot,search_event,'song.search',{'query':'10'},origin='command')
+            await terminal(search['data']['job_id'])
+        assert transport.await_count==4 # Song lookup sends its image, no generation receipt.
         before=transport.await_count
         fm.config_data['123']['_unibot']['player']=False
         view=await registry.context_catalog(context)

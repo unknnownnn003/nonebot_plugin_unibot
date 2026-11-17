@@ -1,7 +1,7 @@
-"""Explicitly marked group error notices expire ten seconds after sending.
+"""UniBot errors remain visible; sibling plugins retain their shared recall hook.
 
-Mirrored in the two native providers so each remains independently loadable.
-All copies share one runtime on the OneBot Bot class, including the ContextVar.
+All providers share one runtime on the OneBot Bot class. UniBot clears its
+error-call marker without changing the siblings' hook or their marked calls.
 """
 from __future__ import annotations
 
@@ -135,7 +135,7 @@ async def error_call(call, *args, **kwargs):
         # Find the already installed runtime without initializing a driver here.
         from nonebot.adapters.onebot.v11 import Bot
         runtime = getattr(Bot, _ATTRIBUTE, runtime)
-    token = runtime.marked.set(True)
+    token = runtime.marked.set(False)
     try:
         return await call(*args, **kwargs)
     finally:

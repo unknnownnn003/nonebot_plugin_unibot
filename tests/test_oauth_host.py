@@ -75,6 +75,12 @@ async def run():
         result=await runtime.command(bot,group,'begin')
         assert 'https://maimai.lxns.net/oauth/authorize?' in result and '撤回' in result
         assert 'fixture-secret' not in result and not calls
+        link_message=result
+        with patch.object(user_bind,'_oauth_command',AsyncMock(return_value=result)), patch.object(user_bind.oauth_authorize,'send',AsyncMock(return_value={'message_id':321})), patch.object(user_bind.oauth_authorize,'finish',AsyncMock()):
+            await user_bind.authorize(bot,group)
+        # The receipt survives a process/store reopen without keeping the URL.
+        from nonebot_plugin_unibot.services.oauth_store import OAuthStore
+        runtime._service.store=OAuthStore(paths.OAUTH_DIR,runtime._service.settings.encryption_key)
         # Real encrypted pending credentials: only the originating QQ/Bot can
         # finish in the group; no private Bot API is used at any point.
         url=next(line for line in result.splitlines() if line.startswith('https://'))
@@ -89,11 +95,25 @@ async def run():
         denied=await runtime.command(bot,other,'confirm','browser-proof')
         assert getattr(denied,'_error_notice',False) and '撤回' in denied
         assert await service.status('1','7')=='awaiting_confirmation'
+        assert not calls
         assert '绑定成功' in await runtime.command(bot,group,'confirm','browser-proof')
+        assert calls==[('delete_msg',{'message_id':321})]
+        calls.clear()
         assert await service.status('1','7')=='active'
         assert 'OAuth 已绑定' in await runtime.command(bot,group,'status')
         repeated=await runtime.command(bot,group,'confirm','browser-proof')
         assert getattr(repeated,'_error_notice',False) and '撤回' in repeated
+        assert not calls
+        # A receipt arriving after successful confirmation is also retracted.
+        await runtime.remember_authorization_message(bot,group,link_message,{'message_id':322})
+        assert calls==[('delete_msg',{'message_id':322})]
+        calls.clear()
+        # Failed deletion never turns successful authorization into failure.
+        fail_delivery=True
+        await runtime.remember_authorization_message(bot,group,link_message,{'message_id':323})
+        assert await service.status('1','7')=='active'
+        assert calls==[('delete_msg',{'message_id':323})]
+        calls.clear();fail_delivery=False
         allowed=False
         for action in ['begin','unlink','status','confirm']:
             denied=await runtime.command(bot,group,action,'确认')

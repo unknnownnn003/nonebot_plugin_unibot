@@ -262,7 +262,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "添加别名",
-        "line": 628,
+        "line": 630,
         "matcher": "add_alias_cmd",
         "module": "song",
         "registration": "on_command"
@@ -274,7 +274,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "删除别名",
-        "line": 629,
+        "line": 631,
         "matcher": "del_alias_cmd",
         "module": "song",
         "permission_source": "SUPERUSER",
@@ -287,7 +287,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "查看别名",
-        "line": 630,
+        "line": 632,
         "matcher": "view_alias_cmd",
         "module": "song",
         "registration": "on_command"
@@ -367,28 +367,28 @@ NATIVE_CATALOG = json.loads(r'''{
 NATIVE_ONLY_COMMANDS = json.loads(r'''[
   {
     "command": "落雪授权",
-    "line": 11,
+    "line": 12,
     "matcher": "oauth_authorize",
     "module": "user_bind",
     "registration": "on_command"
   },
   {
     "command": "落雪确认",
-    "line": 12,
+    "line": 13,
     "matcher": "oauth_confirm",
     "module": "user_bind",
     "registration": "on_command"
   },
   {
     "command": "落雪授权状态",
-    "line": 13,
+    "line": 14,
     "matcher": "oauth_status",
     "module": "user_bind",
     "registration": "on_command"
   },
   {
     "command": "落雪解绑",
-    "line": 14,
+    "line": 15,
     "matcher": "oauth_unlink",
     "module": "user_bind",
     "registration": "on_command"

@@ -106,6 +106,26 @@ class OAuthTests(unittest.IsolatedAsyncioTestCase):
         await self.service.confirm(bot, qq, proof)
         return state, code, proof
 
+    async def test_link_receipt_follows_only_its_authorization_generation(self):
+        state,code=await self.begin(group=8)
+        old=self.store.get('1:7')['generation']
+        self.store.remember_link('1:7',old,8,101)
+        state,code=await self.begin(group=8)
+        current=self.store.get('1:7')['generation']
+        self.assertIsNone(self.store.remember_link('1:7',old,8,102))
+        self.assertIsNone(self.store.remember_link('2:7',current,8,103))
+        self.assertIsNone(self.store.remember_link('1:8',current,8,104))
+        self.store.remember_link('1:7',current,8,105)
+        proof=await self.service.callback(state,code)
+        with self.assertRaises(o.OAuthError):
+            await self.service.confirm('1','8',proof)
+        notice=await self.service.confirm('1','7',proof)
+        self.assertEqual(notice,dict(generation=current,group_id=8,message_id=105))
+        with self.assertRaises(o.OAuthError):
+            await self.service.confirm('1','7',proof)
+        await self.service.unlink('1','7')
+        self.assertIsNone(self.store.remember_link('1:7',current,8,106))
+
     async def test_pkce_binding_confirmation_no_legacy_writes_and_encrypted_disk(self):
         state, code = await self.begin()
         proof = await self.service.callback(state, code)

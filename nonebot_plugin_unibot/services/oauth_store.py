@@ -142,6 +142,7 @@ class OAuthStore:
             if row and row["status"] == "refreshing" and row["updated"] + 120 > now:
                 raise OAuthError("BUSY")
             db.execute("DELETE FROM requests WHERE expires<=? OR owner=?", (now, owner))
+            db.execute("DELETE FROM meta WHERE key=?", ("link_notice:" + owner,))
             db.execute("INSERT OR REPLACE INTO accounts VALUES (?,?,?, ?,NULL,?)",
                        (owner, generation, "authorizing", now, self.pack({})))
             db.execute("INSERT INTO requests VALUES (?,?,?,?,?,?)",
@@ -190,6 +191,23 @@ class OAuthStore:
             value["binding_id"] = secrets.token_hex(16)
             db.execute("UPDATE accounts SET status='active',payload=?,updated=? WHERE owner=?",
                        (self.pack(value), now, owner))
+            notice = db.execute("SELECT value FROM meta WHERE key=?", ("link_notice:" + owner,)).fetchone()
+            db.execute("DELETE FROM meta WHERE key=?", ("link_notice:" + owner,))
+            if notice:
+                notice = self.unpack(notice["value"])
+                if notice["generation"] == row["generation"]:
+                    return notice
+
+    def remember_link(self, owner, generation, group_id, message_id):
+        """Only called with the Bot's successful native authorization receipt."""
+        with self.connection() as db:
+            row = db.execute("SELECT generation,status FROM accounts WHERE owner=?", (owner,)).fetchone()
+            if not row or row["generation"] != generation or row["status"] not in {"authorizing", "awaiting_confirmation", "active"}:
+                return
+            notice = dict(generation=generation, group_id=group_id, message_id=message_id)
+            if row["status"] == "active":
+                return notice  # Confirmation raced ahead of the send receipt.
+            db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", ("link_notice:" + owner, self.pack(notice)))
 
     def reserve_refresh(self, owner, generation, snapshot, now, reservation):
         with self.connection() as db:
@@ -207,6 +225,7 @@ class OAuthStore:
 
     def unlink(self, owner):
         with self.connection() as db:
+            db.execute("DELETE FROM meta WHERE key=?", ("link_notice:" + owner,))
             db.execute("DELETE FROM requests WHERE owner=?", (owner,))
             db.execute("DELETE FROM accounts WHERE owner=?", (owner,))
 

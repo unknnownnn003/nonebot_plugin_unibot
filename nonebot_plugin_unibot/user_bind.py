@@ -6,6 +6,7 @@ from nonebot.params import CommandArg
 # Keep this module: the shared policy owner already maps user_bind -> scores.
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 from .services.oauth_runtime import command as _oauth_command
+from .services.oauth_runtime import remember_authorization_message
 from .services.error_notices import notice_call as _notice_call
 
 oauth_authorize = on_command("落雪授权", priority=5, block=True)
@@ -15,8 +16,11 @@ oauth_unlink = on_command("落雪解绑", priority=5, block=True)
 
 
 @oauth_authorize.handle()
-async def _(bot: Bot, event: MessageEvent):
-    await _notice_call(oauth_authorize.finish, await _oauth_command(bot, event, "begin"))
+async def authorize(bot: Bot, event: MessageEvent):
+    message = await _oauth_command(bot, event, "begin")
+    receipt = await _notice_call(oauth_authorize.send, message)
+    await remember_authorization_message(bot, event, message, receipt)
+    await oauth_authorize.finish()
 
 
 @oauth_confirm.handle()

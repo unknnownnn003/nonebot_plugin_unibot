@@ -25,6 +25,13 @@ CALLBACK_PATH = "/oauth/lxns/callback"
 SCOPES = frozenset({"read_player", "openid"})
 
 
+class AuthorizationLink(str):
+    def __new__(cls, text, generation):
+        result = super().__new__(cls, text)
+        result.generation = generation
+        return result
+
+
 @dataclass(frozen=True, repr=False)
 class Settings:
     client_id: str
@@ -167,9 +174,9 @@ class OAuthService:
         await async_call(self.store.begin, owner, generation, hashlib.sha256(state.encode()).hexdigest(),
                          dict(nonce=nonce, verifier=verifier, config=self.settings.fingerprint, origin_group=origin_group), self.clock())
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
-        return AUTHORIZE + "?" + urlencode(dict(response_type="code", client_id=self.settings.client_id,
+        return AuthorizationLink(AUTHORIZE + "?" + urlencode(dict(response_type="code", client_id=self.settings.client_id,
             redirect_uri=self.settings.redirect_uri, scope="read_player openid", state=state,
-            nonce=nonce, code_challenge=challenge, code_challenge_method="S256"))
+            nonce=nonce, code_challenge=challenge, code_challenge_method="S256")), generation)
 
     async def callback(self, state, code=None, error=None):
         if not isinstance(state, str) or not 32 <= len(state) <= 128:
@@ -205,7 +212,7 @@ class OAuthService:
         row = await async_call(self.store.get, owner)
         if row and row["status"] == "awaiting_confirmation":
             self._policy(self.store.unpack(row["payload"]).get("origin_group"))
-        await async_call(self.store.confirm, owner, proof, self.clock())
+        return await async_call(self.store.confirm, owner, proof, self.clock())
 
     async def status(self, bot, qq):
         row = await async_call(self.store.get, owner_key(bot, qq))

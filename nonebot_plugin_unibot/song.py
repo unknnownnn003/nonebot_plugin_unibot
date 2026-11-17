@@ -445,7 +445,7 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
     draw_text(draw, (info_x, current_y), artist_wrapped, font_head, TEXT_SUB)
     current_y += a_h + 20
 
-    draw_text(draw, (info_x, current_y), f"ID: {song_id}   BPM: {bpm}", font_body, TEXT_SUB)
+    draw_text(draw, (info_x, current_y), f"BPM: {bpm}", font_body, TEXT_SUB)
     current_y += 30
     
     locked_val = api_detail.get("locked")
@@ -474,9 +474,7 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
         if str(designer) == "0": designer = "-"
         designer_str = f"Designer: {designer}"
         if diff_idx in (4, 5):
-            designer_str += f" | ID: {ld.get('song_id', song_id)} | Version: {ld.get('version', version_raw)}"
-        if diff_idx == 5:
-            designer_str += f" | {ld.get('kanji', '')} ★{ld.get('star', '?')} | Origin: {ld.get('origin_id', '?')}"
+            designer_str += f" | Version: {get_version_name(ld.get('version', version_raw))}"
         
         des_w, _, d_h = wrap_text_with_height(designer_str, font_small, card_width - 120, draw)
         
@@ -517,7 +515,11 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
 
         level_val = ld.get("level_value", ld.get("level", "?"))
         # 未提供标准定数时保留标级；WORLD'S END 属性另行展示
-        if level_val is None or (isinstance(level_val, (int, float)) and float(level_val) == 0):
+        if diff_idx == 5:
+            stars = ld.get("star")
+            star_label = "★" * stars if type(stars) is int and 1 <= stars <= 5 else "星级未知"
+            level_str = f"{ld.get('kanji', '')} {star_label}".strip()
+        elif level_val is None or (isinstance(level_val, (int, float)) and float(level_val) == 0):
             level_str = str(ld.get("level") or "?")
         else:
             try:
