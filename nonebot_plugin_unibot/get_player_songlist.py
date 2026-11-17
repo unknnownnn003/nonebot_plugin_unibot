@@ -181,8 +181,8 @@ async def get_user_friend_code(user_qq: str) -> str:
 
 async def query_player_profile(user_qq, progress=None):
     import os, json
-    PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-    SCORE_DIR = os.path.join(PLUGIN_DIR, 'data', 'score')
+    from .services.paths import DATA_DIR
+    SCORE_DIR = os.path.join(DATA_DIR, 'score')
     rin_info_path = os.path.join(SCORE_DIR, f'{user_qq}_info.json')
     rin_info = {}
     if os.path.exists(rin_info_path):
@@ -239,7 +239,7 @@ async def query_player_profile(user_qq, progress=None):
     char_img_bytes = None
     char_id = data.get('character', {}).get('id')
     if char_id is not None and (not lxns_failed):
-        char_path = os.path.join(PLUGIN_DIR, 'data', 'character', f'{char_id}.png')
+        char_path = os.path.join(DATA_DIR, 'character', f'{char_id}.png')
         if os.path.exists(char_path):
             try:
                 async with aiofiles.open(char_path, 'rb') as f:

@@ -13,8 +13,8 @@ from nonebot.permission import SUPERUSER
 API_BASE_URL = "https://maimai.lxns.net/api/v0/chunithm"
 ASSETS_BASE_URL = "https://assets.lxns.net/chunithm"
 
-PLUGIN_DIR = Path(__file__).parent
-DATA_DIR = PLUGIN_DIR / "data"
+from .services.paths import DATA_DIR
+# LocalStore owns the runtime root; preserve the existing file layout.
 SONGLIST_FILE = DATA_DIR / "songlist.json"
 
 COLLECTIONS = {

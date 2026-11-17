@@ -109,4 +109,4 @@ B/B30、个人信息、OP进度、推荐、歌曲详情/候选图和帮助图也
 
 ## 开发与目录维护
 
-开发约定见 [AGENTS.MD](AGENTS.MD)，本地工具见 [tools/README.md](tools/README.md)，历史资料归档与跨插件依赖审计见 [第一阶段整理记录](docs/phase1-housekeeping.md)。运行数据继续保留在插件的 `data/`，不随源码提交。仅保留落雪国服与 OAuth 直接查分属于后续改造方向，当前指令和数据源行为保持现状。
+开发约定见 [AGENTS.MD](AGENTS.MD)，本地工具见 [tools/README.md](tools/README.md)，历史资料归档与跨插件依赖审计见 [第一阶段整理记录](docs/phase1-housekeeping.md)。运行数据已统一使用 NoneBot LocalStore；升级前按 [存储迁移说明](docs/localstore-migration.md) 离线复制并校验旧 `data/`，原件保留用于回滚，运行数据不随源码提交。上文资源路径如 `data/jacket/` 表示原相对布局，新版对应 LocalStore 数据根下的 `jacket/`。仅保留落雪国服与 OAuth 直接查分属于后续改造方向，当前指令和数据源行为保持现状。

@@ -20,8 +20,8 @@ from .config import Config
 from .song import find_song_matches, pick_song_match
 from .user_bind import get_bind_info
 
-PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(PLUGIN_DIR, "data")
+from .services.paths import DATA_DIR as _DATA_DIR
+DATA_DIR = str(_DATA_DIR)
 SCORE_DIR = os.path.join(DATA_DIR, "score")
 SONGLIST_PATH = os.path.join(DATA_DIR, "songlist.json")
 LXNS_BASE_URL = "https://maimai.lxns.net/api/v0/chunithm"

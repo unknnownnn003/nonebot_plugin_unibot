@@ -51,3 +51,7 @@ venv/
 .pycache*/
 .tools/
 font_preview.png
+
+# LocalStore when this repository is used as the host working directory
+/cache/
+/config/

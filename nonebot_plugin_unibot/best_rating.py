@@ -22,8 +22,8 @@ from .services.storage import locked_player, atomic_json
 
 config = get_plugin_config(Config)
 
-PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(PLUGIN_DIR, "data")
+from .services.paths import DATA_DIR as _DATA_DIR
+DATA_DIR = str(_DATA_DIR)
 SCORE_DIR = os.path.join(DATA_DIR, "score")
 SONGLIST_PATH = os.path.join(DATA_DIR, "songlist.json")
 LXNS_BASE_URL = "https://maimai.lxns.net/api/v0/chunithm"

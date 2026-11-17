@@ -21,8 +21,8 @@ from .songlist_update import SONGLIST_LOCK
 
 config = get_plugin_config(Config)
 
-PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(PLUGIN_DIR, "data")
+from .services.paths import DATA_DIR as _DATA_DIR
+DATA_DIR = str(_DATA_DIR)
 SONGLIST_PATH = os.path.join(DATA_DIR, "songlist.json")
 JACKET_DIR = os.path.join(DATA_DIR, "jacket")
 LXNS_JACKET_URL = "https://assets.lxns.net/chunithm/jacket/{song_id}.png"

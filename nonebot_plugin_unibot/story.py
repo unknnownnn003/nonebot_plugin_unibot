@@ -27,7 +27,7 @@ except ImportError:
     HTMLRENDER_AVAILABLE = False
 
 
-DATA_DIR = Path(__file__).parent / "data" / "story"
+from .services.paths import STORY_DIR as DATA_DIR
 # index.json 的路径也需要修改
 INDEX_FILE = DATA_DIR / "index.json"
 BASE_URL = "https://copel-popn.github.io"

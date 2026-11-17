@@ -22,7 +22,8 @@ def _segment_data(segment):
 
 async def import_file(bot, event, user_id: str):
     from .. import get_player_score as s
-    root = Path(s.SCORE_DIR).resolve()
+    from .paths import UPLOAD_DIR
+    root = UPLOAD_DIR
     await asyncio.to_thread(root.mkdir, parents=True, exist_ok=True)
     temp = root / f"{user_id}_{uuid4().hex}.upload"
     try:

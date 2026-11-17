@@ -54,9 +54,9 @@ CHUNIREC_GENRE_MAP = {
 }
 
 # 定义插件的根目录
-PLUGIN_DIR = Path(__file__).parent
+from .services.paths import DATA_DIR
 # 定义数据所在目录
-DATA_DIR = PLUGIN_DIR / "data"
+# LocalStore owns the runtime root; preserve the existing file layout.
 # 定义 songlist.json 保存路径
 SONGLIST_FILE = DATA_DIR / "songlist.json"
 SONGLIST_LOCK = RLock()

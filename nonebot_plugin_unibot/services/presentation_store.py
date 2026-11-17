@@ -69,6 +69,25 @@ class PresentationStore:
         self._ready = False
         self._lock = asyncio.Lock()
 
+    def _owned_path(self, value):
+        """Relocate only paths owned by this verified legacy presentation store."""
+        from .data_migration import MARKER
+        path = Path(value).resolve()
+        root = self.files.resolve()
+        if path.is_relative_to(root):
+            return path
+        marker = self.path.parent / MARKER
+        if marker.is_file():
+            report = json.loads(marker.read_text(encoding="utf-8"))
+            if (report.get("version") == 1 and report.get("state") == "complete"
+                    and report.get("target") == str(self.path.parent.resolve())):
+                legacy = Path(report["source"]) / self.files.name
+                relative = path.relative_to(legacy.resolve())
+                relocated = (root / relative).resolve()
+                relocated.relative_to(root)
+                return relocated
+        raise ValueError("presentation outside its directory")
+
     @contextmanager
     def connection(self):
         db = sqlite3.connect(self.path, timeout=10)
@@ -173,8 +192,7 @@ class PresentationStore:
                         parsed = urlsplit(source)
                         if parsed.netloc not in {"", "localhost"}:
                             return
-                        file = Path(url2pathname(unquote(parsed.path))).resolve()
-                        file.relative_to(self.files.resolve())
+                        file = self._owned_path(url2pathname(unquote(parsed.path)))
                         if file.stat().st_size <= 12 * 1024 * 1024:
                             data = file.read_bytes()
                     if data and len(data) <= 12 * 1024 * 1024:
@@ -195,8 +213,7 @@ class PresentationStore:
                 rows = db.execute("SELECT path FROM presentations WHERE operation_id=? AND scope=? ORDER BY rowid",
                     (operation_id, identity)).fetchall()
                 for row in rows:
-                    file = Path(row["path"]).resolve()
-                    file.relative_to(self.files.resolve())
+                    file = self._owned_path(row["path"])
                     if file.stat().st_size <= 20 * 1024 * 1024:
                         walk(decode(json.loads(file.read_text(encoding="utf-8"))))
                     if len(images) >= limit:
@@ -244,13 +261,38 @@ class PresentationStore:
         await _db_thread(op)
 
     def _read(self, row):
-        path = Path(row["path"]).resolve()
+        path = self._owned_path(row["path"])
         if path.parent != self.files.resolve():
             raise ValueError("presentation outside its directory")
         raw = path.read_bytes()
         if hashlib.sha256(raw).hexdigest() != row["digest"]:
             raise ValueError("presentation changed")
-        return decode(json.loads(raw))
+        return self._relocate_media(decode(json.loads(raw)))
+
+    def _relocate_media(self, content):
+        """Remap owned local image references in decoded plans, never raw files."""
+        from nonebot.adapters.onebot.v11 import MessageSegment
+        from urllib.parse import urlsplit, unquote
+        from urllib.request import url2pathname
+        if isinstance(content, MessageSegment):
+            source = content.data.get("file") if content.type == "image" else None
+            if isinstance(source, str) and source.startswith("file://"):
+                parsed = urlsplit(source)
+                if parsed.netloc in {"", "localhost"}:
+                    try:
+                        path = self._owned_path(url2pathname(unquote(parsed.path)))
+                    except ValueError:
+                        pass  # Preserve pre-existing external references as-is.
+                    else:
+                        content.data["file"] = path.as_uri()
+            self._relocate_media(content.data)
+        elif isinstance(content, dict):
+            for value in content.values():
+                self._relocate_media(value)
+        elif isinstance(content, (list, tuple)):
+            for value in content:
+                self._relocate_media(value)
+        return content
 
     async def send(self, row, bot, event, *, allow_unknown=False, before_send=None):
         identity, token = scope(bot, event), uuid4().hex

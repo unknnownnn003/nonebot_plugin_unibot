@@ -16,8 +16,8 @@ from nonebot.log import logger
 from .song import get_font, get_version_name, wrap_text_with_height, draw_text, download_jacket, make_empty_jacket
 from .overpower_list_local import calculate_op
 
-PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(PLUGIN_DIR, "data")
+from .services.paths import DATA_DIR as _DATA_DIR
+DATA_DIR = str(_DATA_DIR)
 SONGLIST_PATH = os.path.join(DATA_DIR, "songlist.json")
 SCORE_DIR = os.path.join(DATA_DIR, "score")
 

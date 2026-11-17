@@ -49,13 +49,13 @@ pip install -r nonebot_plugin_unibot\requirements.txt
 
 ## 数据与资源
 
-代码会在插件目录下读写运行期资源，例如：
+第二阶段 A 起，运行路径统一由 `nonebot_plugin_unibot/services/paths.py` 从 NoneBot LocalStore 获取，新增路径不得再从 `__file__` 或当前工作目录拼接：
 
-- `nonebot_plugin_unibot/data/songlist.json`
-- `nonebot_plugin_unibot/data/score/*.json`
-- `nonebot_plugin_unibot/data/jacket/`
-- `nonebot_plugin_unibot/data/story/`
-- 绑定信息和其他用户数据
+- LocalStore 插件数据目录：`songlist.json`、`score/`、`jacket/`、`story/`、收藏品、绑定、别名和其他既有运行文件，保留相对布局。
+- 同一数据目录：`native_jobs.sqlite3`、`native_commands.sqlite3`、`native_presentations.sqlite3` 及其 `_files/`；持久媒体待补发数据不可当临时缓存清理。
+- LocalStore 插件缓存目录：`uploads/` 等可丢弃的上传临时文件；曲绘、剧情等唯一资源继续保存在数据目录，不因清理缓存而丢失。
+- 旧源码 `data/` 仅作为迁移原件保留，不再由业务读写。首次升级须停止所有写入者，显式执行离线工具 `tools/migrate_localstore.py` 的预检和应用；检测到旧数据却无完成标记时插件拒绝加载，不在导入期自动复制或静默切换到空库。
+- 完整流程、LocalStore 配置、校验和回滚见 [存储迁移说明](docs/localstore-migration.md)。迁移标记和校验清单属于私密运行数据，不提交；不得删除完成标记后重跑以覆盖新目标。回滚旧代码后若旧数据发生变化，重复迁移必须停止并审查两边新增记录。
 
 这些数据不应默认纳入版本控制。根目录 `.gitignore` 已忽略 `data/`、`info/`、`__pycache__/`、`*.pyc`、`.vscode/` 和 workspace 文件。新增资源缓存或用户隐私数据时，优先确认是否需要补充 `.gitignore`。
 
@@ -133,7 +133,7 @@ git push origin main
 
 - 运行包保持在 `nonebot_plugin_unibot/`：顶层模块承接原生命令和现有渲染，`services/` 放共享业务、存储、队列和权限适配，`llm_api.py` 为可选能力接口。不要仅为目录美观移动注册模块；模块名参与群策略映射、原命令回执及能力目录。
 - `tools/` 只放需显式执行的开发脚本与说明，不由插件入口导入；`docs/` 存当前开发说明和评审记录。当前不建立第二套插件包、成绩仓库或无实际用途的细分目录。
-- `data/` 为运行资源和用户状态，既有路径暂不迁移。绑定、成绩、手动成绩、玩家资料、别名、任务与媒体库均先按用户数据保护；曲绘、收藏品、剧情等资源也不能以“Git 已忽略”为由删除。
+- 运行资源和用户状态存于 LocalStore，路径只经 `services/paths.py` 管理。源码 `data/` 的迁移原件及绑定、成绩、手动成绩、玩家资料、别名、任务与媒体库均按用户数据保护；曲绘、收藏品、剧情等资源也不能以“Git 已忽略”为由删除。
 - 清理前同时检查跟踪文件、未跟踪文件、忽略文件和代码/文档引用。无引用仅是证据之一；用途不明的脚本、本地配置和编辑器文件优先原位保留。只对已核验的可再生缓存直接删除。
 - 有价值的旧代码、旧说明、抓取快照、调试样本、压缩备份归档到仓库外的私密目录，保留原相对路径、大小、SHA-256 和恢复说明，校验完成再移除原件。归档可能含用户数据或历史凭据，禁止提交、发布或随部署打包。
 - 本轮审计和归档位置见 [第一阶段整理记录](docs/phase1-housekeeping.md)。`.agents/`、`.codex/` 等工具配置不纳入普通清理；新增本地产物放 `.tools/` 并确认被忽略。不要用 `git clean -fdx` 清场。
@@ -168,7 +168,7 @@ git push origin main
 ## 跨仓库变更与针对性验证
 
 - 默认仅改本仓库。涉及 LLMChat、综合插件或 Server Companion 契约时，先只读核对其规则、Git 状态、调用方和测试；列明需配套的版本与迁移顺序。只有获得相应范围授权才写其他仓库，不以共享代码为由顺手同步。
-- 本仓库暂无正式测试配置；现有跨插件隔离测试位于 LLMChat 的 `tests/`，包括 `test_provider_services.py`、`test_context_catalog.py`、`test_sync_runtime.py`、`test_story_jobs.py`、`test_isolated_host.py`、`test_error_notices.py`。使用前核对测试的宿主、依赖与临时数据路径，不能把邻仓旧通过记录算成本轮验证。
+- 本仓库 `tests/` 提供迁移、旧媒体路径和隔离 NoneBot/LocalStore 加载测试，使用已有依赖执行 `python -m unittest discover -s tests -v`。跨插件隔离测试位于 LLMChat 的 `tests/`，包括 `test_provider_services.py`、`test_context_catalog.py`、`test_sync_runtime.py`、`test_story_jobs.py`、`test_isolated_host.py`、`test_error_notices.py`。使用前核对测试的宿主、依赖与临时数据路径；旧上传 fixture 需注入临时缓存路径，剧情 fixture 需显式策略，不把邻仓旧通过记录算成本轮验证。
 - 文档和本地整理：检查差异、链接、忽略规则、归档清单及校验值，证明运行数据和跟踪业务代码未变，再做语法检查；无需安装宿主或触发真实查分、生图与发消息。
 - 接口/策略变更：隔离加载、缺少 LLM/综合提供者、schema 与目录一致性、真实用户权限、群/私聊隔离、预览后关停、排队后关停、延迟通知、旧工具拒绝与本人任务管理；用真实 Bot + fake adapter 断言被拒绝时底层 API 未调用。
 - 存储/数据源变更：脱敏 fixtures 覆盖旧数据、重复导入、并发提交、部分写入失败和迁移重跑/回滚；`storage.commit_scores` 只保证单文件原子替换，成绩与资料两个文件不是事务。OAuth 另覆盖 state 重放/串号、过期/撤销、刷新并发、密钥脱敏、失败不覆写本地成绩。
