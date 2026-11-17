@@ -21,7 +21,7 @@
 
 - `README.md`：用户侧指令说明。
 - `nonebot_plugin_unibot/__init__.py`：插件元数据与模块导入入口。
-- `nonebot_plugin_unibot/config.py`：插件配置模型，目前只声明 `lxns_token: Optional[str]`。
+- `nonebot_plugin_unibot/config.py`：插件配置模型，当前声明 `lxns_token`、`chunirec_token`、`naominet_token`、`naominet_session` 四个可选字段。后续退役数据源前仍保留现有配置兼容。
 - `nonebot_plugin_unibot/requirements.txt`：运行依赖清单。
 - `nonebot_plugin_unibot/user_bind.py`：QQ 到落雪好友码的本地绑定。
 - `nonebot_plugin_unibot/get_player_score.py`：成绩上传、解析、合并和同步逻辑。
@@ -70,10 +70,12 @@ pip install -r nonebot_plugin_unibot\requirements.txt
 
 ## 建议验证
 
-没有完整测试套件时，至少执行语法检查：
+没有完整测试套件时，至少执行语法检查。使用单独缓存目录，避免把编译产物散落到源码和历史资料中：
 
 ```powershell
-python -m compileall nonebot_plugin_unibot
+$env:PYTHONPYCACHEPREFIX = Join-Path $PWD '.tools/pycache'
+python -m compileall -q nonebot_plugin_unibot tools/fetch_chunirec_data.py
+# 完成后恢复本次命令前的 PYTHONPYCACHEPREFIX 设置
 ```
 
 如改动涉及 git 工作流，可用以下命令检查：
@@ -116,3 +118,48 @@ git commit -m "Add agent project notes"
 - 先本地修改和验证，再按会话授权同步 `/root/robinbot/plugins/` 下的对应插件；检查线上基线、任务状态与配置，备份后再更新，保留可回滚版本。已明确授权的同一同步范围继续执行，不重复确认。
 - 服务使用 `robinbot.service`，必要时同时更新管理网关 `server-companion.service`；不无故重启 `napcat.service` 或退出 QQ。`qqbot` 必须显式指定组件。只修改协作文档无需部署运行代码或重启服务。
 - 统一策略检查不能仅依赖预处理器的 ContextVar 或普通 Bot API hook 异常：前者在子任务中不能回传，后者可能被 NoneBot 吞掉。原生命令、工具、排队任务与延迟通知均须遵守实际执行时的策略，拒绝不能伪装成功，相关测试须确认底层 API 未执行。
+
+## 目录组织与本地整理
+
+- 运行包保持在 `nonebot_plugin_unibot/`：顶层模块承接原生命令和现有渲染，`services/` 放共享业务、存储、队列和权限适配，`llm_api.py` 为可选能力接口。不要仅为目录美观移动注册模块；模块名参与群策略映射、原命令回执及能力目录。
+- `tools/` 只放需显式执行的开发脚本与说明，不由插件入口导入；`docs/` 存当前开发说明和评审记录。当前不建立第二套插件包、成绩仓库或无实际用途的细分目录。
+- `data/` 为运行资源和用户状态，既有路径暂不迁移。绑定、成绩、手动成绩、玩家资料、别名、任务与媒体库均先按用户数据保护；曲绘、收藏品、剧情等资源也不能以“Git 已忽略”为由删除。
+- 清理前同时检查跟踪文件、未跟踪文件、忽略文件和代码/文档引用。无引用仅是证据之一；用途不明的脚本、本地配置和编辑器文件优先原位保留。只对已核验的可再生缓存直接删除。
+- 有价值的旧代码、旧说明、抓取快照、调试样本、压缩备份归档到仓库外的私密目录，保留原相对路径、大小、SHA-256 和恢复说明，校验完成再移除原件。归档可能含用户数据或历史凭据，禁止提交、发布或随部署打包。
+- 本轮审计和归档位置见 [第一阶段整理记录](docs/phase1-housekeeping.md)。`.agents/`、`.codex/` 等工具配置不纳入普通清理；新增本地产物放 `.tools/` 并确认被忽略。不要用 `git clean -fdx` 清场。
+
+## LLM 能力接口与三插件依赖
+
+- UniBot 拥有查歌、查分、资源维护及其任务和结果。LLMChat 的 `agent_tools.py` 只发现已加载插件的 `llm_api`，负责工具编排与确认，不另写成绩文件、不复制查询算法、不通过构造群消息绕回命令。UniBot 不反向依赖 LLMChat 才能完成原生命令或任务。
+- 当前 `llm_api.API_VERSION=1`、`CAPABILITY_VERSION="3.2.0"`；接口包括 `describe_capabilities`、`describe_context`、`prepare_capability`、`invoke_capability`、`set_job_notifier` 及任务材料/表达接口。版本号是本次核对的基线，接手时核对实际代码。LLMChat 当前要求 API v1，旧于 3.1.2 的提供者写能力会被限制。
+- 参数 schema、能力 ID、`nb_unibot_*` 名称、effect、long_task、状态和制品结构是跨插件契约。结果使用 `services/results.outcome` 的 `status/code/data/public_hint/fallback_text/artifacts/effect/retryable`，拒绝、缺配置、结果未知不能伪装成功。改契约须评估兼容并按需调整版本，不悄悄复用旧 ID 表示不同操作。
+- Bot、用户、群、权限和附件来自可信调用上下文；模型参数不能指定身份、SUPERUSER 或任意本地路径。写入沿用准备预览、真实用户确认、执行时重查权限和约束；预览后目标、附件、群策略变化须拒绝或重新预览。
+- `services/native_catalog.py` 由 LLMChat 的 `tools/export_native_catalog.py` 生成，不手改；命令增删改名时核对生成器及其写入范围，再更新原命令目录、schema、帮助与 README。未获跨仓库授权时只记录依赖，不运行会改其他仓库的生成器。
+- 原生与 LLM 入口共用 `command_receipts`、`services/sync.py`、`job_store.py`、`storage.py` 和 `presentation_store.py`。保持真实作用域、幂等、取消、停机中断、未知副作用不自动重试及补发只读缓存；LLM 通知器缺席时不能阻断原生结果。
+- 综合插件拥有 `feature_manager.py`、`services/group_policy.py`、`services/policy_guard.py` 和统一设置/维护入口。UniBot 的 `services/group_policy.py` 动态适配该策略，不能另建同名配置作为第二策略源。
+
+## 统一群策略的实现边界
+
+- 唯一持久化策略源为宿主 `config/nonebot_plugin_unknnownnn/feature_config.json`：`_policy_version=2`，每群 `_plugins.unibot` 总开关与 `_unibot` 单项。单项为 `songs/scores/player/recommend/story/guess/maintenance/help`，以综合插件实际目录为准。
+- 原生命令模块映射由综合插件 `MODULE_FEATURES` 维护，能力由 `capability_feature` 映射。增加功能要同时检查两者、动态目录、设置入口和实际执行点；旧工具缓存不能替代重新判定。
+- 当前没有综合策略提供者时，群业务默认拒绝；私聊不受群开关影响，仍受各自身份权限约束。独立加载成功不代表群功能默认启用。`job.list/get/cancel` 保持本人任务管理权限，`job.replay` 是发送行为，不能套用查询例外。
+- 提交、执行、网络/写入副作用、延迟通知及 Bot 出站均核对当前策略。管理设置和任务管理例外不扩大到业务执行；LLMChat 关闭时不得新增群上下文。
+- 迁移须以已加入群及旧有效状态为输入，备份原策略，离线试算、逐项对比、原子保存并支持回滚。未知群/新增项关闭；总开关关闭保留单项、预设和概率。禁止导入时推断旧群启用情况或覆盖文件。
+
+## 后续落雪国服与 OAuth 改造约束
+
+- 已确认的后续方向是仅保留落雪国服数据源并支持 OAuth 直接查分。本阶段只整理目录和规则，不删除 Rin/CSV 导入、chunirec/naominet 路径，不改国服 B 图、本地日服 B30、推荐、OP 或渲染行为。
+- 开始实施前列清影响面：曲库合并与 ID/定数映射、`get_player_score` 的解析和本地提交、个人资料 Rin 回退、`best_rating` 与 `services/player` 的 b/b30 分支，以及维护任务、历史队列、LLM schema/目录、综合设置面板、帮助和配置模板。数据源退役不能只删 HTTP 请求。
+- 对旧 `songlist.json` 的 `data_source/chunirec_id/rinnet_id/lx_*/chunirec_*`、用户成绩、手动记录、资料与别名建立明确迁移规则。先备份和只读试算，报告映射冲突、无法匹配、覆盖与保留数量；迁移可重复执行、有版本与回滚路径。不得以空数据覆盖错误响应，不将日服定数直接解释为国服，不静默抛弃用户成绩。
+- OAuth 实施前查阅落雪当时的官方协议，确认国服支持、端点、scope、授权模式、回调部署方式与刷新/撤销语义，不从现有开发者 `lxns_token` 推断用户授权能力；不提前写死未核验的协议细节。
+- 用户授权绑定真实 Bot/用户身份；授权在私密通道完成，群内不出现凭据。校验一次性、限时且绑定请求人的 state，防重放与串号；PKCE 等按实际协议支持实施。access/refresh token、授权码和客户端密钥不进入模型上下文、普通日志、仓库或公开回执，令牌存储与备份需明确保护方式。
+- 处理过期、撤销、刷新并发、拒绝授权、限流和网络失败；最小 scope，仅访问本人授权数据。OAuth 凭据与开发者密钥的用途和迁移分别说明，不改写或删除既有好友码绑定。解除授权对凭据、本地成绩保留和历史任务的影响须事先定义。
+
+## 跨仓库变更与针对性验证
+
+- 默认仅改本仓库。涉及 LLMChat、综合插件或 Server Companion 契约时，先只读核对其规则、Git 状态、调用方和测试；列明需配套的版本与迁移顺序。只有获得相应范围授权才写其他仓库，不以共享代码为由顺手同步。
+- 本仓库暂无正式测试配置；现有跨插件隔离测试位于 LLMChat 的 `tests/`，包括 `test_provider_services.py`、`test_context_catalog.py`、`test_sync_runtime.py`、`test_story_jobs.py`、`test_isolated_host.py`、`test_error_notices.py`。使用前核对测试的宿主、依赖与临时数据路径，不能把邻仓旧通过记录算成本轮验证。
+- 文档和本地整理：检查差异、链接、忽略规则、归档清单及校验值，证明运行数据和跟踪业务代码未变，再做语法检查；无需安装宿主或触发真实查分、生图与发消息。
+- 接口/策略变更：隔离加载、缺少 LLM/综合提供者、schema 与目录一致性、真实用户权限、群/私聊隔离、预览后关停、排队后关停、延迟通知、旧工具拒绝与本人任务管理；用真实 Bot + fake adapter 断言被拒绝时底层 API 未调用。
+- 存储/数据源变更：脱敏 fixtures 覆盖旧数据、重复导入、并发提交、部分写入失败和迁移重跑/回滚；`storage.commit_scores` 只保证单文件原子替换，成绩与资料两个文件不是事务。OAuth 另覆盖 state 重放/串号、过期/撤销、刷新并发、密钥脱敏、失败不覆写本地成绩。
+- 测试只使用临时目录与 mock 网络/适配器；没有本轮真实验收授权时，不连接真实账号、不发送群消息、不写线上配置。报告实际命令和结果，区分语法、mock、宿主与线上验证。本阶段不部署、不重启服务、不修改 App 交接文件。
