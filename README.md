@@ -55,6 +55,7 @@ pip install -r nonebot_plugin_unibot/requirements.txt
 ## 开发与升级
 
 - [AGENTS.MD](AGENTS.MD)：当前开发规则与精简原则。
+- [第三阶段 D 生产部署记录](docs/production-oauth-deployment.md)：实际版本、迁移、HTTPS、真实 OAuth、验收及回滚边界。
 - [第三阶段 C 集成与统计语义](docs/oauth-integration.md)：B30/B50、群策略、能力目录和跨插件验证。
 - [第三阶段 B 玩家查询说明](docs/oauth-player-api.md)：统一模型、缓存/授权边界、退役范围、邻仓配套项与测试。
 - [曲库模型说明](docs/lxns-cn-catalog.md)：ULTIMA、WORLD'S END 与原始ID规则。
