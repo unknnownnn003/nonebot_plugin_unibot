@@ -91,7 +91,10 @@ def validate(player, scores):
         _number(row.get("level_index"), integer=True, maximum=5)
         _number(row.get("score"), integer=True, maximum=1010000)
         for key in ("rating", "over_power"):
-            _number(row.get(key))
+            # WORLD'S END has no standard metrics; the personal API may omit
+            # them. Retain supplied upstream values without inventing zeros.
+            if row["level_index"] < 5 or key in row:
+                _number(row.get(key))
         if not isinstance(row.get("song_name"), str) or not isinstance(row.get("level"), str):
             raise PlayerError("INVALID_DATA")
         for key in ("clear", "full_combo", "full_chain", "rank", "play_time", "upload_time", "last_played_time"):

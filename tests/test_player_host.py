@@ -50,7 +50,7 @@ api_calls=[];sent=[];allowed=True;mode='ok';started=asyncio.Event();release=asyn
 async def provider(request):
     api_calls.append(request)
     assert request.url.path in ['/api/v0/user/chunithm/player','/api/v0/user/chunithm/player/scores']
-    p,rows=personal();rows[1]['full_combo']=None;rows[1]['full_chain']='fullchain';who=request.headers['Authorization'].removeprefix('Bearer access-')
+    p,rows=personal();rows[2].pop('over_power');rows[1]['full_combo']=None;rows[1]['full_chain']='fullchain';who=request.headers['Authorization'].removeprefix('Bearer access-')
     assert who in {'7','8'}
     p['name']='USER-'+who
     if request.url.path.endswith('/scores') and mode=='pause':
@@ -104,6 +104,7 @@ async def run():
         assert result['data']['song_id']==10
         assert '不计普通 Rating / OP' in result['public_hint']
         assert 'rating' not in result['data']['scores'][0] and result['data']['scores'][0]['standard_op_applicable'] is False
+        assert 'over_power' not in result['data']['scores'][0]['upstream_metrics']
         # Same-ID WE metadata remains a list, never last-write-wins by difficulty.
         saved_catalog=paths.SONGLIST_PATH.read_bytes()
         multiple=json.loads(saved_catalog)
@@ -136,6 +137,19 @@ async def run():
         job=await wait(output['data']['job_id'])
         assert job.status=='succeeded',job.result
         assert sent and 'WORLD' in str(sent[-1][1])
+        # A failed query is never staged as successful text media. Its original
+        # failure is sent exactly once by the native task notifier.
+        from dataclasses import replace
+        failure=pd.failure(pd.PlayerError('INVALID_DATA'))
+        staged=AsyncMock();before=len(sent)
+        with patch.object(media_jobs,'render',AsyncMock(return_value=failure)):
+            failed=await media_jobs.execute(bot,e,job,sync._store,NS(stage=staged))
+        assert failed['code']=='INVALID_DATA' and 'artifact_delivery' not in failed['data']
+        staged.assert_not_awaited()
+        assert len(sent)==before
+        with patch('nonebot.get_bot',return_value=bot):
+            await sync._notify(replace(job,result=failed,status='failed'))
+        assert len(sent)==before+1 and '查询结果已发送' not in str(sent[-1][1])
         assert await sync.private_job_allowed(job)
         # Notifiers may wait in another plugin; they must not retain raw player data.
         from dataclasses import replace

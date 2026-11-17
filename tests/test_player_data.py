@@ -228,6 +228,15 @@ class PersonalDataTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SnapshotValidationTests(unittest.TestCase):
+    def test_worldsend_can_omit_inapplicable_metrics_without_inventing_values(self):
+        p,s=personal()
+        for key in ("rating", "over_power"):
+            s[2].pop(key)
+        self.assertEqual(pd.validate(p,s),(p,s))
+        s[0].pop("over_power")
+        with self.assertRaisesRegex(pd.PlayerError,"INVALID_DATA"):
+            pd.validate(p,s)
+
     def test_validation_retains_unknown_fields_and_rejects_invalid_or_duplicate_rows(self):
         p,s=personal();p["trophy"]["id"]=-1;self.assertEqual(pd.validate(p,s),(p,s))
         for change in [{"id":"foreign-hash"},{"level_index":True},{"level_index":6},{"score":1010001},{"rating":float("nan")},{"rating":10**400},{"over_power":-1}]:

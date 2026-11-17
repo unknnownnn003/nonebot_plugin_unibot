@@ -124,6 +124,10 @@ async def execute(bot, event, job, store, presentations):
         if output is None:
             raise PlayerError("JOB_CANCELLED")
         await checkpoint()
+        # Failed queries are presented once by the task notifier, never cached
+        # as successful media or followed by a misleading delivery receipt.
+        if output.get("status") != "ok" and output.get("code") != "AMBIGUOUS_TARGET":
+            return output
         artifacts = output.pop("artifacts", [])
         contents = [MessageSegment.image(a["content"]) for a in artifacts if a["kind"] == "image"]
         if len(contents) != len(artifacts):

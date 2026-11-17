@@ -118,7 +118,7 @@ async def song_scores(snapshot, catalog, query, level_index=None):
         row["standard_op_applicable"] = row["level_index"] < 5
         label = LEVELS[row["level_index"]]
         if row["level_index"] == 5:
-            row["upstream_metrics"] = {"rating": row.pop("rating"), "over_power": row.pop("over_power")}
+            row["upstream_metrics"] = {key: row.pop(key) for key in ("rating", "over_power") if key in row}
             label += " [" + " / ".join(f"{c.get('kanji', '')} ★{c.get('star', '')}" for c in metadata) + "]"
             if len(metadata) > 1:
                 label += "（同ID多谱面，API未区分，保留全部元数据）"
