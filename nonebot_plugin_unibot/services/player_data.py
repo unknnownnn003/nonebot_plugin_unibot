@@ -22,6 +22,10 @@ class PlayerError(Exception):
     pass
 
 
+def player_level(player):
+    return player.get("reborn_count", 0) * 100 + player["level"]
+
+
 HINTS = {
     "REFRESH_BUSY": "授权正在刷新，请稍后重试。",
     "NOT_AUTHORIZED": "请先使用 /落雪授权 完成本人 OAuth 绑定。",

@@ -13,13 +13,16 @@ get_score = on_command("个人信息", aliases={"分数", "chuinfo"}, priority=5
 song_scores_cmd = on_command("chu成绩", priority=5, block=True)
 
 def get_font(size, weight="Normal"):
+    weight = "Regular" if weight == "Normal" else weight
     try:
         if platform.system() == "Windows":
             return ImageFont.truetype("msyh.ttc", size)
         else:
             font_paths = [
                 f"/usr/share/fonts/opentype/SourceHanSans/SourceHanSansSC-{weight}.otf",
+                f"/usr/share/fonts/truetype/custom/SourceHanSansSC-{weight}.otf",
                 f"/usr/share/fonts/opentype/noto/NotoSansCJK-{weight}.ttc",
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
                 "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc"
             ]
             import os
@@ -46,9 +49,8 @@ def draw_player_info(data: dict, char_bytes: bytes = None) -> bytes:
     color_subtext = (191, 191, 191)
     
     name = data.get('name', 'Unknown')
-    level = data.get('level', 0)
-    reborn = data.get('reborn_count', 0)
-    total_level = reborn * 100 + level
+    from .services.player_data import player_level
+    total_level = player_level(data)
     rating = data.get('rating', 0.0)
     rating_color = data.get('rating_possession', 'Unknown')
     over_power = data.get('over_power', 0.0)

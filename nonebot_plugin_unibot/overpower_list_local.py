@@ -142,13 +142,16 @@ def get_target_charts(query_text: str, catalog):
 
 
 def get_font(size, weight="Normal"):
+    weight = "Regular" if weight == "Normal" else weight
     try:
         if platform.system() == "Windows":
             return ImageFont.truetype("msyh.ttc", size)
         else:
             font_paths = [
                 f"/usr/share/fonts/opentype/SourceHanSans/SourceHanSansSC-{weight}.otf",
+                f"/usr/share/fonts/truetype/custom/SourceHanSansSC-{weight}.otf",
                 f"/usr/share/fonts/opentype/noto/NotoSansCJK-{weight}.ttc",
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
                 "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc"
             ]
             for p in font_paths:
@@ -223,7 +226,8 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
             
     name = player_info.get("name", "Unknown")
     rating = player_info.get("rating", 0.0)
-    level = player_info.get("level", 0)
+    from .services.player_data import player_level
+    level = player_level(player_info)
     title = player_info.get("title", "")
     
     text_x = margin_side + 120

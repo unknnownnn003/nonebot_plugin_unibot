@@ -228,6 +228,9 @@ class PersonalDataTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SnapshotValidationTests(unittest.TestCase):
+    def test_player_level_includes_reborn_levels(self):
+        self.assertEqual(pd.player_level({'level':30,'reborn_count':4}),430)
+        self.assertEqual(pd.player_level({'level':30}),30)
     def test_worldsend_can_omit_inapplicable_metrics_without_inventing_values(self):
         p,s=personal()
         for key in ("rating", "over_power"):

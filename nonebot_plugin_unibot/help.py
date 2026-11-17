@@ -14,13 +14,16 @@ from nonebot.params import CommandArg
 chuhelp_cmd = on_command("chuhelp", aliases={"中二帮助"}, priority=5, block=True)
 
 def get_font(size, weight="Normal"):
+    weight = "Regular" if weight == "Normal" else weight
     try:
         if platform.system() == "Windows":
             return ImageFont.truetype("msyh.ttc", size)
         else:
             font_paths = [
                 f"/usr/share/fonts/opentype/SourceHanSans/SourceHanSansSC-{weight}.otf",
+                f"/usr/share/fonts/truetype/custom/SourceHanSansSC-{weight}.otf",
                 f"/usr/share/fonts/opentype/noto/NotoSansCJK-{weight}.ttc",
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
                 "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc"
             ]
             for p in font_paths:

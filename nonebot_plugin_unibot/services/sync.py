@@ -215,6 +215,15 @@ async def submit_operation(bot, event, capability_id, operation_id, payload, *, 
                 return outcome("PLUGIN_CLOSING", "插件关闭中，本次未继续执行。", status="unavailable")
             if created:
                 _contexts[job.job_id] = (bot, event)
+                from .media_jobs import CAPABILITIES
+                image_query = capability_id in CAPABILITIES - {"player.song_scores"} or capability_id in {"story.search", "story.random"}
+                if origin == "command" and image_query and group_policy.enabled(event, capability_id) and await private_job_allowed(job):
+                    # The worker takes this gate too: acknowledge before it can
+                    # render/send, and only once for a newly accepted request.
+                    try:
+                        await asyncio.wait_for(bot.send(event, "正在生成，请稍候"), timeout=10)
+                    except Exception:
+                        pass  # Unknown receipt delivery is never retried.
     except QueueFull:
         return outcome("QUEUE_FULL", "任务队列已满，本次没有接单。", status="unavailable")
     _wake.set()

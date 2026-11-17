@@ -133,9 +133,9 @@ async def execute(bot, event, job, store, presentations):
         if len(contents) != len(artifacts):
             return outcome("UNSUPPORTED_MEDIA_PLAN", "媒体类型尚不支持。", status="failed")
         text = output.get("public_hint") or output.get("fallback_text")
-        if job.capability_id in {"player.song_scores", "player.best", "player.b50", "player.progress"} and text:
-            contents.append(MessageSegment.text(text))
-        elif contents and output.get("data", {}).get("unmatched_scores"):
+        # An image is the complete native presentation. Text-only single-song
+        # results remain content; explanatory metadata stays in the job result.
+        if not contents and job.capability_id in {"player.song_scores", "player.progress"} and text:
             contents.append(MessageSegment.text(text))
         if not contents:
             return output

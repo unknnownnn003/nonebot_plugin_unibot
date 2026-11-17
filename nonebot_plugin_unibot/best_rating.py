@@ -29,12 +29,15 @@ YELLOW = (241, 250, 140)
 ORANGE = (255, 184, 108)
 
 def get_font(size: int, weight: str = "Normal") -> ImageFont.FreeTypeFont:
+    weight = "Regular" if weight == "Normal" else weight
     try:
         if platform.system() == "Windows":
             return ImageFont.truetype("msyh.ttc", size)
         for path in [
             f"/usr/share/fonts/opentype/SourceHanSans/SourceHanSansSC-{weight}.otf",
+            f"/usr/share/fonts/truetype/custom/SourceHanSansSC-{weight}.otf",
             f"/usr/share/fonts/opentype/noto/NotoSansCJK-{weight}.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
             "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
         ]:
@@ -274,7 +277,8 @@ def draw_b30_header(img: Image.Image, player: Dict[str, Any], b30_avg: float) ->
 
     draw_shadowed_panel(draw, (40, 38, 640, 206), 8, PANEL, LINE)
     name = player.get("UserName") or player.get("name") or "Unknown"
-    level = safe_int(player.get("Level", player.get("level", 0)), 0)
+    from .services.player_data import player_level
+    level = player_level(player)
     draw.text((70, 58), clamp_text(draw, name, font_title, 520), font=font_title, fill=TEXT)
     draw.text((70, 112), f"Lv.{level}", font=font_body, fill=TEXT_SUB)
     draw.text((70, 154), f"B30 Mean {b30_avg:.4f}", font=font_head, fill=GREEN)
@@ -338,6 +342,8 @@ def draw_b50_image(player, best_items, new_items, jacket_images, version):
     from .services.rating import average
     font = get_font(27, "Bold")
     draw.text((40, 42), clamp_text(draw, player.get("name", "Unknown"), font, 700), font=font, fill=TEXT)
+    from .services.player_data import player_level
+    draw.text((1050, 42), f"Lv.{player_level(player)}", font=font, fill=TEXT_SUB)
     draw.text((40, 94), f"B50 Rating estimate: {average(best_items + new_items, 50):.4f}", font=font, fill=GREEN)
     draw.text((40, 146), f"Lxns CN version {version} | Missing slots = 0 | / 50", font=get_font(23), fill=TEXT_SUB)
     y = 244

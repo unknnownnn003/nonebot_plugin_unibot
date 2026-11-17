@@ -91,7 +91,14 @@ async def run():
         assert result['code']=='JOB_ACCEPTED',result
         job=await terminal(result['data']['job_id']);assert job.status=='succeeded',job.result
         assert (job.result['data']['best30_count'],job.result['data']['new20_count'])==(2,1)
-        assert len(calls)==2 and transport.await_count==2 # image + explicit statistics text
+        assert len(calls)==2 and transport.await_count==1 # Agent result: image only.
+        native_event=g.model_copy(update={'message_id':905})
+        native=await media_jobs.submit(bot,native_event,'player.b50',{},origin='command')
+        await terminal(native['data']['job_id'])
+        assert transport.await_count==3 # Native receipt, then image only.
+        assert '正在生成，请稍候' in str(transport.await_args_list[1])
+        duplicate=await media_jobs.submit(bot,native_event,'player.b50',{},origin='command')
+        assert duplicate['code']=='JOB_EXISTS' and transport.await_count==3
         before=transport.await_count
         fm.config_data['123']['_unibot']['player']=False
         view=await registry.context_catalog(context)
