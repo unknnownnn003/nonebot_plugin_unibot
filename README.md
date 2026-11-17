@@ -10,6 +10,10 @@
 | 指令 | 权限 | 描述 |
 | --- | --- | --- |
 | `/bind <好友码>` | USER | 绑定你的国服查分器好友码，以便拉取云端数据。若 QQ 已在国服侧绑定，通常可跳过该步骤。 |
+| `/落雪授权` | USER | 发起 OAuth 网页授权；群内发起时私发链接，网页验证后本人私聊确认。本阶段不替换查分。 |
+| `/落雪确认 <网页确认串>` | USER（私聊） | 完成网页提示的本地确认；不是发送落雪授权码。 |
+| `/落雪授权状态` | USER | 查看本地 OAuth 状态，群内调用时私发结果。 |
+| `/落雪解绑 确认` | USER | 清除本地 OAuth、取消未完成授权，保留旧好友码与成绩；还需在落雪应用管理撤销。 |
 | `/chuupdate` | USER | 上传国服导出的分数 CSV 或 rin 导出的 JSON，并更新本地成绩归档。 |
 | `/lxupdate` | USER | 从国服接口同步已绑定账号的国服成绩到本地。 |
 | `/cf <歌名或ID> [难度] <分数> [fc/aj]` | USER | 手动传分，别名：`/传分`、`/手动传分`、`/addscore`、`/mscore`。难度为空时默认 `MAS`，重复传分不会阻止低分写入，生成 `/b30` 时会和国服成绩取最高分。 |
@@ -81,4 +85,4 @@ B/B30、个人信息、OP进度、推荐、歌曲详情/候选图和帮助图也
 
 ## 开发与目录维护
 
-开发约定见 [AGENTS.MD](AGENTS.MD)，本地工具见 [tools/README.md](tools/README.md)，历史资料归档与跨插件依赖审计见 [第一阶段整理记录](docs/phase1-housekeeping.md)。运行数据已统一使用 NoneBot LocalStore；升级前按 [存储迁移说明](docs/localstore-migration.md) 离线复制并校验旧 `data/`，原件保留用于回滚，运行数据不随源码提交。上文资源路径如 `data/jacket/` 表示原相对布局，新版对应 LocalStore 数据根下的 `jacket/`。国服单一曲库已在第二阶段 B 实施，详见 [曲库模型说明](docs/lxns-cn-catalog.md)；OAuth、成绩获取替换和图片 UI 重做仍留待第三阶段。
+开发约定见 [AGENTS.MD](AGENTS.MD)，本地工具见 [tools/README.md](tools/README.md)，历史资料归档与跨插件依赖审计见 [第一阶段整理记录](docs/phase1-housekeeping.md)。运行数据已统一使用 NoneBot LocalStore；升级前按 [存储迁移说明](docs/localstore-migration.md) 离线复制并校验旧 `data/`，原件保留用于回滚，运行数据不随源码提交。上文资源路径如 `data/jacket/` 表示原相对布局，新版对应 LocalStore 数据根下的 `jacket/`。国服单一曲库已在第二阶段 B 实施，详见 [曲库模型说明](docs/lxns-cn-catalog.md)；第三阶段 A 已提供可选 OAuth 授权及凭据管理，配置、HTTPS/Caddy 路由与第三阶段 B 接口见 [OAuth 说明](docs/lxns-oauth.md)。现有查分方式与图片 UI 保留。

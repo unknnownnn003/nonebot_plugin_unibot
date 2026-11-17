@@ -21,7 +21,7 @@
 
 - `README.md`：用户侧指令说明。
 - `nonebot_plugin_unibot/__init__.py`：插件元数据与模块导入入口。
-- `nonebot_plugin_unibot/config.py`：插件配置模型，当前仅声明 `lxns_token`；旧日服凭据配置已不读取，宿主旧配置键不自动删除。
+- `nonebot_plugin_unibot/config.py`：插件配置模型，包含旧 `lxns_token` 和默认关闭的 `lxns_oauth_*`；OAuth 密钥用 SecretStr，配置见 [OAuth 说明](docs/lxns-oauth.md)。旧日服凭据配置已不读取，宿主旧配置键不自动删除。
 - `nonebot_plugin_unibot/requirements.txt`：运行依赖清单。
 - `nonebot_plugin_unibot/user_bind.py`：QQ 到落雪好友码的本地绑定。
 - `nonebot_plugin_unibot/get_player_score.py`：成绩上传、解析、合并和同步逻辑。
@@ -158,11 +158,11 @@ git push origin main
 
 ## 后续落雪国服与 OAuth 改造约束
 
-- 第二阶段 B 已统一落雪国服曲库与定数，撤下 chunirec/naominet 曲库更新、上传、凭据和抓取工具；Rin/CSV 仅保留成绩导入及本地资料兼容。第三阶段再替换 OAuth 和成绩获取，不在本阶段引入授权流程或重做图片 UI。
+- 第二阶段 B 已统一落雪国服曲库与定数，撤下 chunirec/naominet 曲库更新、上传、凭据和抓取工具；Rin/CSV 仅保留成绩导入及本地资料兼容。第三阶段 A 已实现独立 OAuth 授权与凭据管理；第三阶段 B 再替换成绩获取，保持旧成绩入口和图片 UI。
 - 开始实施前列清影响面：曲库合并与 ID/定数映射、`get_player_score` 的解析和本地提交、个人资料 Rin 回退、`best_rating` 与 `services/player` 的 b/b30 分支，以及维护任务、历史队列、LLM schema/目录、综合设置面板、帮助和配置模板。数据源退役不能只删 HTTP 请求。
 - 对旧 `songlist.json` 的 `data_source/chunirec_id/rinnet_id/lx_*/chunirec_*`、用户成绩、手动记录、资料与别名建立明确迁移规则。先备份和只读试算，报告映射冲突、无法匹配、覆盖与保留数量；迁移可重复执行、有版本与回滚路径。不得以空数据覆盖错误响应，不将日服定数直接解释为国服，不静默抛弃用户成绩。
 - OAuth 实施前查阅落雪当时的官方协议，确认国服支持、端点、scope、授权模式、回调部署方式与刷新/撤销语义，不从现有开发者 `lxns_token` 推断用户授权能力；不提前写死未核验的协议细节。
-- 用户授权绑定真实 Bot/用户身份；授权在私密通道完成，群内不出现凭据。校验一次性、限时且绑定请求人的 state，防重放与串号；PKCE 等按实际协议支持实施。access/refresh token、授权码和客户端密钥不进入模型上下文、普通日志、仓库或公开回执，令牌存储与备份需明确保护方式。
+- 用户授权绑定真实 Bot/用户身份；可在已启用 scores 的群中发起，链接私发，最终网页确认在私聊完成，群内不出现凭据。校验一次性、限时且绑定请求人的 state，防重放与串号；PKCE 等按实际协议支持实施。access/refresh token、授权码和客户端密钥不进入模型上下文、普通日志、仓库或公开回执，令牌存储与备份需明确保护方式。
 - 处理过期、撤销、刷新并发、拒绝授权、限流和网络失败；最小 scope，仅访问本人授权数据。OAuth 凭据与开发者密钥的用途和迁移分别说明，不改写或删除既有好友码绑定。解除授权对凭据、本地成绩保留和历史任务的影响须事先定义。
 
 ## 跨仓库变更与针对性验证
@@ -183,3 +183,12 @@ git push origin main
 - `/b30` 继续可用，但仅按国服谱面元数据计算；未知旧 ID 的成绩只标记未匹配，不按标题自动映射、不删除、不回退日服定数。原成绩同步和导入仍走原队列及存储，相关历史兼容和第三阶段缺口见 [曲库模型说明](docs/lxns-cn-catalog.md)。
 - 已退役的公开命令和工具不得留在帮助/schema/能力目录中；旧缓存调用及旧队列参数明确返回 `SOURCE_RETIRED`，不得暗中重定向成另一次写入或假报成功。综合插件群策略的功能键/模块映射不变；其旧设置选项及邻仓旧测试快照只记录依赖，修改须单独授权。
 - 执行 `python -m unittest discover -s tests -v`、`python tests/run_neighbor_regressions.py`、目录生成检查和语法检查。邻仓6条已退役断言在本地适配器显式列出并由本仓新契约测试替代；`--legacy-contracts` 可复现原有不兼容断言，不能将它们算作通过。真实账号和服务器均不参与本阶段验证。
+
+## 第三阶段 A 起的 OAuth 约定
+
+- `services/oauth.py` 负责官方协议，`oauth_store.py` 负责受保护加密SQLite，`oauth_runtime.py` 负责可选FastAPI回调及真实OneBot命令；`user_bind.py` 注册授权命令，沿用综合策略 scores 映射，不创建新群开关或改写好友码。
+- 仅申请 `read_player openid`，授权码+机密客户端+PKCE S256；state一次性/限时绑定Bot与QQ，OIDC校验RS256、固定issuer/audience、时间和nonce。浏览器验证后由同一QQ私聊确认，成功前禁止取Token。群来源需在回调和确认阶段重查原群策略。
+- Token、PKCE、OIDC身份存于LocalStore `oauth/credentials.sqlite3` 的加密字段，密钥独立从配置读取；不得改成明文JSON、写入任务payload、模型上下文、QQ消息或日志。坏密钥/权限失败时禁用OAuth，不能清库重建。备份、密钥轮换、回调日志与路由边界见 [OAuth说明](docs/lxns-oauth.md)。
+- OAuth 原生命令保持原回执去重；不作为 LLM capability。公开27项能力/API v1及版本3.3.0不变，`player.bind`仍是旧好友码。目录生成器单独生成 `NATIVE_ONLY_COMMANDS`，不把其包装为LLM工具；OAuth不能让模型代理授权、确认或解绑。
+- 跨实例刷新必须用凭据快照CAS，成功后持久化新令牌再返回；未知轮换结果不自动重试。解绑取消请求且阻止迟到写回，不删旧成绩和好友码。官方发现文档未公布撤销端点时只明确本地解绑，提示到落雪管理页撤销，不能假报远端撤销。
+- 第三阶段 B 用内部凭据接口时必须先重查身份/群策略/授权代次，明确401仅失效其对应Token，写入前防止解绑后迟到结果；本轮不自动查分。新增模拟回调、OIDC、并发刷新/解绑、私发失败、坏密钥与底层API拒绝测试；真人、TLS/Caddy和服务器部署须另外授权。

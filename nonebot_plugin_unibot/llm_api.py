@@ -158,6 +158,8 @@ async def prepare_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(event.self_id) != str(bot.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
+    if name.startswith("oauth."):
+        return outcome("NATIVE_ONLY", "OAuth 授权与解绑请由本人使用原生命令，模型不能代理。", status="denied")
     if name == "maintenance.import_chunirec" or (name == "maintenance.refresh" and arguments.get("resource") in {"chunirec", "chunirec_file"}):
         from .services.maintenance import retired_source
         return retired_source()
@@ -237,6 +239,8 @@ async def invoke_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
+    if name.startswith("oauth."):
+        return outcome("NATIVE_ONLY", "OAuth 授权与解绑请由本人使用原生命令，模型不能代理。", status="denied")
     if name == "maintenance.import_chunirec" or (name == "maintenance.refresh" and arguments.get("resource") in {"chunirec", "chunirec_file"}):
         from .services.maintenance import retired_source
         return retired_source()

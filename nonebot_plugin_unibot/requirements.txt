@@ -9,3 +9,5 @@ jaconv
 zhconv
 pypinyin
 nonebot-plugin-localstore>=0.7.0
+PyJWT[crypto]>=2.8,<3
+cryptography>=42

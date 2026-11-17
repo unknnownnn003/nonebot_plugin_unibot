@@ -30,3 +30,6 @@ _native_command_guards = install_command_receipts([globals()[name] for name in _
 
 from .services.group_policy import install as _install_group_policy
 _install_group_policy()
+
+from .services.oauth_runtime import configure as _configure_oauth
+_configure_oauth()

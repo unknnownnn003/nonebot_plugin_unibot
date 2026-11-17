@@ -399,3 +399,35 @@ NATIVE_CATALOG = json.loads(r'''{
     ]
   }
 }''' )
+
+# OAuth stays native-only and never enters the model tool catalog.
+NATIVE_ONLY_COMMANDS = json.loads(r'''[
+  {
+    "command": "落雪授权",
+    "line": 85,
+    "matcher": "oauth_authorize",
+    "module": "user_bind",
+    "registration": "on_command"
+  },
+  {
+    "command": "落雪确认",
+    "line": 86,
+    "matcher": "oauth_confirm",
+    "module": "user_bind",
+    "registration": "on_command"
+  },
+  {
+    "command": "落雪授权状态",
+    "line": 87,
+    "matcher": "oauth_status",
+    "module": "user_bind",
+    "registration": "on_command"
+  },
+  {
+    "command": "落雪解绑",
+    "line": 88,
+    "matcher": "oauth_unlink",
+    "module": "user_bind",
+    "registration": "on_command"
+  }
+]''' )
