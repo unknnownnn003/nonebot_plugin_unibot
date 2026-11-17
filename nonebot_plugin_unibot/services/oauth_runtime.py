@@ -70,7 +70,7 @@ def callback_endpoint(service):
                 raise OAuthError("CALLBACK_INVALID")
             proof = await service.callback(args["state"][0], args.get("code", [None])[0], args.get("error", [None])[0])
             # proof is local random confirmation, not a provider authorization code.
-            text = "网页验证成功。请回到机器人私聊，在5分钟内发送：<br><code>/落雪确认 " + proof + "</code><br>只确认本人刚刚登录的账号，请勿转发此页面。"
+            text = "网页验证成功。请回到发起授权的聊天，在5分钟内发送：<br><code>/落雪确认 " + proof + "</code><br>只确认本人刚刚登录的账号，请勿转发此页面。群内发送后请立即撤回确认指令。"
             status = 200
         except Exception:
             # No exception interpolation / traceback: libraries can embed secrets.
@@ -114,7 +114,7 @@ def configure():
 
 HINTS = {
     "ALREADY_BOUND": "已绑定 OAuth；如需换号，请先 /落雪解绑 确认。解绑后才能绑定其他账号。",
-    "CONFIRM_PENDING": "已有网页验证等待确认，请完成私聊确认或等待5分钟后重新授权。",
+    "CONFIRM_PENDING": "已有网页验证等待确认，请按网页提示完成确认或等待5分钟后重新授权。",
     "CONFIRM_INVALID": "确认无效或已过期，请核对网页提示，或重新 /落雪授权。",
     "FEATURE_DISABLED": "本群对应功能已关闭，未执行授权操作。",
     "BUSY": "授权操作正在进行，请稍后再试。",
@@ -128,23 +128,28 @@ async def command(bot, event, action, argument=""):
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(event.self_id) != str(bot.self_id):
         return error_text("无法核验当前请求者。")
     group = getattr(event, "group_id", None)
+
+    def reply(text):
+        if group is not None and action in {"begin", "confirm"}:
+            message = str(text) + "\n请及时撤回含授权链接或确认串的消息；本人发送的确认指令请立即撤回，机器人消息请由群管理员撤回。"
+            return error_text(message) if getattr(text, "_error_notice", False) else message
+        return text
+
     if group is not None and not group_policy.enabled(event, "oauth.manage"):
-        return error_text(HINTS["FEATURE_DISABLED"])
-    if action == "confirm" and group is not None:
-        return "请在机器人私聊中完成网页确认。"
+        return reply(error_text(HINTS["FEATURE_DISABLED"]))
     if _service is None:
-        return error_text("OAuth 尚未配置或回调不可用，请联系管理员。")
+        return reply(error_text("OAuth 尚未配置或回调不可用，请联系管理员。"))
     try:
         if action == "begin":
             url = await _service.begin(bot.self_id, event.user_id, origin_group=group)
-            message = "请登录本人落雪账号，仅申请 read_player 与 openid。网页完成后按提示私聊确认；链接10分钟有效，请勿转发。\n" + url
+            message = "请登录本人落雪账号，仅申请 read_player 与 openid。网页完成后在当前聊天发送 /落雪确认 <网页确认串>；链接10分钟有效，请勿转发。\n" + url
         elif action == "confirm":
             await _service.confirm(bot.self_id, event.user_id, argument.strip())
-            return "OAuth 绑定成功，可直接使用 /b30、/chuinfo、/chulist、/chu成绩 查询。"
+            message = "OAuth 绑定成功，可直接使用 /b30、/b50、/chuinfo、/chulist、/chu成绩 查询。"
         elif action == "status":
             state = await _service.status(bot.self_id, event.user_id)
             message = {"unbound": "尚未绑定 OAuth。", "active": "OAuth 已绑定，可直接查询本人资料与成绩。",
-                       "authorizing": "等待网页授权。", "awaiting_confirmation": "等待网页提示的私聊确认。"}.get(state, "OAuth 暂不可用，请重新授权；若正在刷新，请稍后重试。")
+                       "authorizing": "等待网页授权。", "awaiting_confirmation": "等待按网页提示发送 /落雪确认。"}.get(state, "OAuth 暂不可用，请重新授权；若正在刷新，请稍后重试。")
         elif action == "unlink":
             if argument.strip() != "确认":
                 return "解除本地 OAuth 并使个人查询缓存失效：请发送 /落雪解绑 确认。"
@@ -152,17 +157,10 @@ async def command(bot, event, action, argument=""):
             message = "本地 OAuth 已解除，凭据已清除，待完成授权已取消。查询缓存已失效。落雪未公布撤销端点，请同时到落雪应用管理页撤销授权；本地解绑不代表远端已撤销。"
         else:
             return error_text("未知授权操作。")
-        if group is None:
-            return message
-        # Do not fall back to publishing a link or account status into the group.
-        if not group_policy.enabled(event, "oauth.manage"):
-            return error_text(HINTS["FEATURE_DISABLED"])
-        try:
-            await bot.send_private_msg(user_id=event.user_id, message=message)
-            return "已私发操作说明，请查看机器人私聊。"
-        except Exception:
-            return error_text("私信送达未确认。请添加机器人好友后私聊执行；已生成的授权链接会自动过期。")
+        if group is not None and not group_policy.enabled(event, "oauth.manage"):
+            return reply(error_text(HINTS["FEATURE_DISABLED"]))
+        return reply(message)
     except OAuthError as error:
-        return error_text(HINTS.get(str(error), "授权操作未完成，请稍后重试；原好友码和成绩不受影响。"))
+        return reply(error_text(HINTS.get(str(error), "授权操作未完成，请稍后重试。")))
     except Exception:
-        return error_text("授权操作未完成，请检查 OAuth 配置与受保护存储。")
+        return reply(error_text("授权操作未完成，请检查 OAuth 配置与受保护存储。"))

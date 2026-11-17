@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class OAuthHostTests(unittest.TestCase):
     def test_native_group_private_identity_policy_and_llm_boundaries(self):
         script = r'''
-import asyncio, json, shutil
+import asyncio, json, shutil, hashlib, time
+from urllib.parse import urlsplit,parse_qs
 from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import patch, AsyncMock
@@ -72,16 +73,33 @@ async def run():
     global allowed,fail_delivery
     with patch.object(group_policy,'manager',return_value=fm):
         result=await runtime.command(bot,group,'begin')
-        assert result=='已私发操作说明，请查看机器人私聊。'
-        assert len(calls)==1 and calls[0][0]=='send_private_msg' and calls[0][1]['user_id']==7
-        assert 'https://maimai.lxns.net/oauth/authorize?' in calls[0][1]['message']
-        assert 'fixture-secret' not in calls[0][1]['message']
-        assert '请在机器人私聊' in await runtime.command(bot,group,'confirm','browser-proof')
+        assert 'https://maimai.lxns.net/oauth/authorize?' in result and '撤回' in result
+        assert 'fixture-secret' not in result and not calls
+        # Real encrypted pending credentials: only the originating QQ/Bot can
+        # finish in the group; no private Bot API is used at any point.
+        url=next(line for line in result.splitlines() if line.startswith('https://'))
+        state=parse_qs(urlsplit(url).query)['state'][0]
+        service=runtime._service;store=service.store;now=time.time()
+        request,_=store.claim(hashlib.sha256(state.encode()).hexdigest(),now)
+        value=dict(access_token='fixture-access',refresh_token='fixture-refresh',expires_at=now+900,
+                   subject='fixture-subject',issuer='https://maimai.lxns.net',config=service.settings.fingerprint,
+                   confirm_hash=hashlib.sha256(b'browser-proof').hexdigest(),confirm_expires=now+300,origin_group=8)
+        store.finish(request,value,store.subject_key('1','https://maimai.lxns.net','fixture-subject'),now)
+        other=group.model_copy(update={'user_id':9})
+        denied=await runtime.command(bot,other,'confirm','browser-proof')
+        assert getattr(denied,'_error_notice',False) and '撤回' in denied
+        assert await service.status('1','7')=='awaiting_confirmation'
+        assert '绑定成功' in await runtime.command(bot,group,'confirm','browser-proof')
+        assert await service.status('1','7')=='active'
+        assert 'OAuth 已绑定' in await runtime.command(bot,group,'status')
+        repeated=await runtime.command(bot,group,'confirm','browser-proof')
+        assert getattr(repeated,'_error_notice',False) and '撤回' in repeated
         allowed=False
         for action in ['begin','unlink','status','confirm']:
             denied=await runtime.command(bot,group,action,'确认')
             assert '关闭' in denied and getattr(denied,'_error_notice',False)
-        assert len(calls)==1  # No underlying Bot API on denied operations.
+        assert not calls  # No private sends, including denied operations.
+        assert '本地 OAuth 已解除' in await runtime.command(bot,private,'unlink','确认')
         assert 'https://' in await runtime.command(bot,private,'begin') # Private not tied to group switch.
         mismatch=private.model_copy(update={'self_id':2})
         assert '无法核验' in await runtime.command(bot,mismatch,'begin')
@@ -92,15 +110,20 @@ async def run():
             assert result['code']=='NATIVE_ONLY'
         allowed=True;fail_delivery=True
         result=await runtime.command(bot,group,'begin')
-        assert '私信送达未确认' in result and 'https://' not in result and 'private details' not in result
+        assert 'https://' in result and '撤回' in result and not calls # No DM dependency.
         fail_delivery=False
-        assert '请发送 /落雪解绑 确认' in await runtime.command(bot,private,'unlink')
-        assert '本地 OAuth 已解除' in await runtime.command(bot,private,'unlink','确认')
+        assert '请发送 /落雪解绑 确认' in await runtime.command(bot,group,'unlink')
+        assert '本地 OAuth 已解除' in await runtime.command(bot,group,'unlink','确认')
         assert await runtime._service.status('1','7')=='unbound'
+        assert '尚未绑定' in await runtime.command(bot,group,'status') and not calls
     # Check real driver route, with bad state: no network and no provider echo.
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=nonebot.get_driver().server_app),base_url='https://example.test') as client:
         result=await client.get(CALLBACK_PATH,params={'state':'x'*43,'code':'PRIVATE-UPSTREAM-CODE'})
         assert result.status_code==400 and 'PRIVATE-UPSTREAM-CODE' not in result.text
+        with patch.object(runtime._service,'callback',AsyncMock(return_value='fixture-local-proof')):
+            result=await client.get(CALLBACK_PATH,params={'state':'x'*43,'code':'fixture-code'})
+            assert result.status_code==200 and '/落雪确认 fixture-local-proof' in result.text
+            assert '撤回确认指令' in result.text and '机器人私聊' not in result.text
     assert (legacy.read_bytes(),(score/'7.json').read_bytes())==before
 asyncio.run(run())
 print('OAUTH_HOST_OK')
