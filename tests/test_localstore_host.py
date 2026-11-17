@@ -24,7 +24,7 @@ legacy = package / 'data'
 (legacy / 'score').mkdir(parents=True)
 (legacy / 'songlist.json').write_text('{"songs":[],"versions":[]}', encoding='utf-8')
 (legacy / 'user_bind_info.json').write_text('{}')
-nonebot.init(driver='~none', lxns_token='', localstore_data_dir=str(root/'persistent'),
+nonebot.init(driver='~none',  localstore_data_dir=str(root/'persistent'),
              localstore_cache_dir=str(root/'cache'), localstore_config_dir=str(root/'config'),
              localstore_plugin_data_dir={'nonebot_plugin_unibot':str(root/'overridden-data')},
              localstore_plugin_cache_dir={'nonebot_plugin_unibot':str(root/'overridden-cache')})
@@ -43,7 +43,7 @@ for name in plugin.module.__all__:
     module=getattr(plugin.module,name)
     if hasattr(module,'DATA_DIR'):
         assert Path(module.DATA_DIR)==(target/'story' if name=='story' else target),name
-assert llm_api.API_VERSION==1 and llm_api.CAPABILITY_VERSION=='3.3.0'
+assert llm_api.API_VERSION==1 and llm_api.CAPABILITY_VERSION=='4.0.0'
 assert len(llm_api.describe_capabilities()) > 20
 assert not group_policy.enabled(NS(group_id=7),'score.sync')
 assert group_policy.enabled(NS(),'score.sync')
@@ -55,12 +55,6 @@ async def run():
     assert Path(store.path)==target/'native_jobs.sqlite3'
     assert Path(sync._presentations.path)==target/'native_presentations.sqlite3'
     await sync.stop_workers()
-    # Local Rin fallback remains the same service, now resolving LocalStore.
-    from nonebot_plugin_unibot import get_player_songlist as profiles
-    (target/'score'/'123_info.json').write_text(json.dumps({'UserName':'fixture','PlayerRating':15,'Level':1}))
-    with patch.object(profiles,'draw_player_info',return_value=b'original-style'):
-        result=await profiles.query_player_profile('123')
-    assert result['status']=='ok' and result['artifacts'][0]['content']==b'original-style'
 asyncio.run(run())
 assert (target/'native_commands.sqlite3').is_file()
 assert m.inventory(legacy)==before

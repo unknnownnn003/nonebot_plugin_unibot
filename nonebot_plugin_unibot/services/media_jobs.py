@@ -11,11 +11,12 @@ from weakref import WeakValueDictionary
 _submission_locks = WeakValueDictionary()
 
 CAPABILITIES = {"player.best", "player.profile", "player.progress", "player.recommend",
-                "song.search", "song.detail", "help.read"}
+                "player.song_scores", "song.search", "song.detail", "help.read"}
 
 
 async def submit(bot, event, capability, arguments, *, origin="agent"):
-    if capability not in CAPABILITIES or str(bot.self_id) != str(event.self_id):
+    from nonebot.adapters.onebot.v11 import PrivateMessageEvent, GroupMessageEvent
+    if not isinstance(event, (PrivateMessageEvent, GroupMessageEvent)) or capability not in CAPABILITIES or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "任务身份或能力不匹配。", status="denied")
     key = f"{capability}:{event.message_id}:" + hashlib.sha256(
         json.dumps(arguments, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -38,6 +39,16 @@ async def _submit(bot, event, capability, arguments, key, *, origin):
             return attach_candidates(old, (await _store.get(old["data"]["job_id"])).payload.get("prepared"))
         return old
     payload = {"arguments": arguments}
+    from .player_data import PLAYER_CAPABILITIES, get_reader, failure
+    from .oauth import OAuthError
+    from . import group_policy
+    if not group_policy.enabled(event, capability):
+        return outcome("FEATURE_DISABLED", "本群对应功能已关闭。", status="denied")
+    if capability in PLAYER_CAPABILITIES:
+        try:
+            _, payload["oauth_binding"] = await get_reader().oauth.credential_lease(bot.self_id, event.user_id)
+        except OAuthError as error:
+            return failure(error)
     if capability == "song.search":
         from .song import prepare
         prepared = await prepare(arguments["query"])
@@ -60,18 +71,14 @@ def attach_candidates(output, prepared):
     return output
 
 
-async def render(bot, event, job):
+async def render(bot, event, job, checkpoint=None):
     args, capability = job.payload["arguments"], job.capability_id
     from . import player, song
-    if capability == "player.best":
-        return await player.best(str(event.user_id), **args,
-            migrate_legacy=job.response_owner == "command" and args.get("mode") == "b30")
-    if capability == "player.profile":
-        return await player.profile(str(event.user_id))
-    if capability == "player.progress":
-        return await player.progress(str(event.user_id), args["query"])
-    if capability == "player.recommend":
-        return await player.recommend(str(event.user_id), args.get("filter", ""))
+    from .player_data import PLAYER_CAPABILITIES
+    if capability in PLAYER_CAPABILITIES:
+        if not job.payload.get("oauth_binding"):
+            return outcome("AUTHORIZATION_CHANGED", "历史任务没有本次 OAuth 授权，请重新查询。", status="denied")
+        return await player.query(bot, event, capability, args, expected=job.payload["oauth_binding"], checkpoint=checkpoint)
     if capability == "song.search":
         return await song.search(args["query"], prepared=job.payload["prepared"])
     if capability == "song.detail":
@@ -83,63 +90,81 @@ async def render(bot, event, job):
 async def execute(bot, event, job, store, presentations):
     from nonebot.adapters.onebot.v11 import MessageSegment
     from .presentation_store import scope
+    from .player_data import job_authorized, PLAYER_CAPABILITIES, PlayerError, failure
+    from . import group_policy
     started, sent, cached = False, 0, False
-    migration = job.capability_id == "player.best" and job.response_owner == "command" and job.payload["arguments"].get("mode") == "b30"
+    async def checkpoint():
+        current = await store.get(job.job_id)
+        if current is None or current.status in {"cancel_requested", "cancelled"}:
+            raise PlayerError("JOB_CANCELLED")
+        if not group_policy.enabled(event, job.capability_id):
+            raise PlayerError("FEATURE_DISABLED")
+        if not await job_authorized(job):
+            raise PlayerError("AUTHORIZATION_CHANGED")
     async def admit():
         nonlocal started
-        if str(bot.self_id) != str(event.self_id) or not await store.start_effect(job.job_id, "sending_query_media"):
+        try:
+            await checkpoint()
+        except PlayerError:
+            return False
+        if not await store.start_effect(job.job_id, "sending_query_media"):
+            return False
+        # start_effect awaits a thread: check live authorization once more.
+        try:
+            await checkpoint()
+        except PlayerError:
             return False
         started = True
         return True
     try:
-        if (await store.get(job.job_id)).status == "cancel_requested":
-            return outcome("JOB_CANCELLED", "任务已取消，未继续生成。", status="cancelled")
-        await store.update(job.job_id, current_step="generating_query_media",
-                           side_effect_state="preparing" if migration else "none")
-        output = await render(bot, event, job)
-        if migration:
-            output.update(effect="local_write", side_effect_state="committed")
+        await checkpoint()
+        await store.update(job.job_id, current_step="generating_query_media", side_effect_state="none")
+        from .sync import _fetch_with_cancel
+        output = await _fetch_with_cancel(render(bot, event, job, checkpoint), job, store)
+        if output is None:
+            raise PlayerError("JOB_CANCELLED")
+        await checkpoint()
         artifacts = output.pop("artifacts", [])
-        if not artifacts:
-            return output
-        if (await store.get(job.job_id)).status == "cancel_requested":
-            output.update(status="partial" if migration else "cancelled", code="JOB_CANCELLED",
-                          public_hint="已停止后续图片发送。")
+        contents = [MessageSegment.image(a["content"]) for a in artifacts if a["kind"] == "image"]
+        if len(contents) != len(artifacts):
+            return outcome("UNSUPPORTED_MEDIA_PLAN", "媒体类型尚不支持。", status="failed")
+        text = output.get("public_hint") or output.get("fallback_text")
+        if job.capability_id == "player.song_scores" and text:
+            contents.append(MessageSegment.text(text))
+        elif contents and output.get("data", {}).get("unmatched_scores"):
+            contents.append(MessageSegment.text(text))
+        if not contents:
             return output
         rows = []
         identity = scope(bot, event)
-        for index, artifact in enumerate(artifacts):
-            if artifact["kind"] != "image":
-                return outcome("UNSUPPORTED_MEDIA_PLAN", "图片尚不能建立缓存计划。", status="failed")
-            rows.append(await presentations.stage(job.job_id, identity, f"{index:06}:main",
-                                                  MessageSegment.image(artifact["content"])))
+        for index, content in enumerate(contents):
+            await checkpoint()
+            rows.append(await presentations.stage(job.job_id, identity, f"{index:06}:main", content))
         cached = True
         for row in rows:
             attempt = await presentations.send(row, bot, event, before_send=admit)
             if attempt.get("denied"):
-                output.update(status="partial" if migration or sent else "cancelled", code="JOB_CANCELLED",
-                              public_hint="已停止后续图片发送。")
-                break
+                return outcome("DELIVERY_STOPPED", "已停止后续发送，请核对授权、任务及群设置。", status="partial" if sent else "cancelled")
             sent += attempt["delivery"] == "sent"
             if attempt["delivery"] != "sent":
-                output.update(status="partial" if sent or migration else "unknown", code="MEDIA_DELIVERY_INCOMPLETE",
-                              public_hint="图片未确认送达，可补发原任务缓存，无需重新查询或生成。")
+                output.update(status="partial" if sent else "unknown", code="MEDIA_DELIVERY_INCOMPLETE",
+                              public_hint="投递未确认送达，可在本次授权有效时补发原任务。")
                 break
         else:
             if output["code"] == "AMBIGUOUS_TARGET":
-                output.update(status="ok", current_step="awaiting_choice", public_hint="候选图已发送，请按原候选ID选择。")
+                output.update(status="ok", current_step="awaiting_choice")
                 output.setdefault("data", {})["selection_status"] = "needs_input"
-            else:
-                output["public_hint"] = "查询图片已发送。"
-        output.setdefault("data", {}).update(media_cached=True,
-            artifact_delivery="sent" if sent == len(rows) else "partial" if sent else "unknown" if started else "not_sent")
-        output["side_effect_state"] = "committed" if sent == len(rows) else "unknown" if started else "committed" if migration else "none"
+            output["public_hint"] = "查询结果已发送。"
+        output.setdefault("data", {}).update(media_cached=True, artifact_delivery="sent" if sent == len(rows) else "partial" if sent else "unknown" if started else "not_sent")
+        output["side_effect_state"] = "committed" if sent == len(rows) else "unknown" if started else "none"
         return output
+    except PlayerError as error:
+        return failure(error)
     except asyncio.CancelledError:
         raise
     except Exception:
         result = outcome("MEDIA_DELIVERY_UNKNOWN" if started else "QUERY_FAILED",
-            "媒体投递结果需要核对，可补发已有缓存。" if started else "查询或图片生成失败。",
-            status="unknown" if started or migration else "failed", data={"media_cached": cached})
-        result["side_effect_state"] = "unknown" if started or migration else "none"
+            "媒体投递结果需要核对。" if started else "查询或图片生成失败。",
+            status="unknown" if started else "failed", data={"media_cached": cached})
+        result["side_effect_state"] = "unknown" if started else "none"
         return result

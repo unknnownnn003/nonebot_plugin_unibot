@@ -1,80 +1,116 @@
-"""Original authoritative rating algorithms/renderers; no model-side arithmetic."""
+"""All player queries consume the same authorized personal-API snapshot."""
 from .job_store import async_call
-import asyncio
-import httpx
 from .results import outcome, image
+from .player_data import get_reader, failure, PlayerError
+from .oauth import OAuthError
+
+DIFFICULTIES = {"bas": 0, "basic": 0, "adv": 1, "advanced": 1, "exp": 2, "expert": 2,
+                "mas": 3, "master": 3, "ult": 4, "ultima": 4, "we": 5, "worldsend": 5}
+LEVELS = ["BASIC", "ADVANCED", "EXPERT", "MASTER", "ULTIMA", "WORLD'S END"]
 
 
-async def best(qq, mode="b", version="2026", *, migrate_legacy=False):
+async def query(bot, event, capability, arguments, *, expected=None, checkpoint=None):
+    try:
+        snapshot = await get_reader().get(bot, event, capability, expected=expected, checkpoint=checkpoint)
+        from .song_model import read_catalog, Catalog
+        from .paths import SONGLIST_PATH
+        catalog = Catalog(await async_call(read_catalog, SONGLIST_PATH)) if capability != "player.profile" else Catalog({"songs": []})
+        known = {(str(song.id), chart.difficulty) for song in catalog.songs.values() for chart in song.charts}
+        unmatched = sum((str(row["id"]), row["level_index"]) not in known for row in snapshot.scores) if capability != "player.profile" else 0
+        if capability == "player.best":
+            output = await best(snapshot, catalog)
+        elif capability == "player.profile":
+            from ..get_player_songlist import query_player_profile
+            output = await query_player_profile(snapshot)
+        elif capability == "player.progress":
+            from ..overpower_list_local import query_progress
+            output = await query_progress(snapshot, arguments["query"], catalog)
+        elif capability == "player.recommend":
+            from ..recommendation import recommend_chart
+            output = await recommend_chart(snapshot, "推什么 " + arguments.get("filter", ""), catalog)
+        elif capability == "player.song_scores":
+            output = await song_scores(snapshot, catalog, **arguments)
+        else:
+            raise PlayerError("INVALID_DATA")
+        if checkpoint is not None:
+            await checkpoint()
+        from . import group_policy
+        if not group_policy.enabled(event, capability):
+            raise PlayerError("FEATURE_DISABLED")
+        if not await get_reader().oauth.binding_matches(bot.self_id, event.user_id, snapshot.binding):
+            raise PlayerError("AUTHORIZATION_CHANGED")
+        if not group_policy.enabled(event, capability):
+            raise PlayerError("FEATURE_DISABLED")
+        output.setdefault("data", {}).update(source="lxns_oauth", cache_hit=snapshot.cache_hit,
+            cache_ttl_seconds=60, unmatched_scores=unmatched)
+        if unmatched:
+            hint = f"另有 {unmatched} 条成绩未匹配当前国服谱面，未按标题映射或纳入计算；请更新曲库后重查。"
+            output["public_hint"] = output.get("public_hint", "") + "\n" + hint
+            output["fallback_text"] = output.get("fallback_text", "") + "\n" + hint
+        return output
+    except (PlayerError, OAuthError) as error:
+        return failure(error)
+    except (ValueError, OSError):
+        return outcome("CATALOG_UNAVAILABLE", "当前国服曲库不可用，请管理员更新曲库后重试。", status="unavailable")
+
+
+async def best(snapshot, catalog):
     from .. import best_rating as b
-    if mode == "b":
-        if version != b.SUPPORTED_VERSION:
-            hint = f"当前 B30/N20 版本参数只支持 {b.SUPPORTED_VERSION}；其他版本的成绩接口适配留待后续改造。"
-            return outcome("INVALID_ARGUMENT", hint, status="needs_input")
-        if not b.config.lxns_token:
-            return outcome("NOT_CONFIGURED", "未配置落雪开发者密钥，无法从落雪获取 B30/N20。", status="unavailable")
-        async with httpx.AsyncClient() as client:
-            friend_code, player = await b.resolve_player(client, qq)
-        if not friend_code:
-            return outcome("NOT_BOUND", "未找到落雪玩家信息，请先使用 /bind 绑定好友码，或确认落雪已绑定当前账号。", status="needs_input")
-        raw_b30, raw_n20, err = await b.fetch_lxns_bests(friend_code)
-        if err:
-            return outcome("UPSTREAM_UNAVAILABLE", "获取落雪 B30/N20 失败，请稍后再试。", status="unavailable")
-        songs, new_versions = await async_call(b.load_song_data)
-        meta = b.build_chart_meta(songs, const_source="lx")
-        b30 = [item for item in (b.normalize_lxns_item(r, meta) for r in raw_b30 if isinstance(r, dict)) if item]
-        n20 = [item for item in (b.normalize_lxns_item(r, meta) for r in raw_n20 if isinstance(r, dict)) if item]
-        b30.sort(key=lambda x: (x["rating"], x["score"]), reverse=True)
-        n20.sort(key=lambda x: (x["rating"], x["score"]), reverse=True)
-        if not b30 and not n20:
-            return outcome("NO_SCORES", "落雪没有返回可展示的 B30/N20 数据。", status="needs_input")
-        scores = await async_call(b.load_local_scores, qq)
-        suggestions = b.build_recommendations(scores, meta, b30[:30], n20[:20], new_versions)
-        player = dict(player)
-        player["rating"] = b.total_rating_raw(b30, n20)
-        try:
-            jackets = await b.prepare_jackets(b30[:30] + n20[:20] + suggestions)
-            content = await async_call(b.draw_best_image, player, b30[:30], n20[:20], suggestions, jackets, version)
-        except Exception:
-            return outcome("RENDER_FAILED", "生成 B30/N20 图片失败。", status="unavailable")
-        return outcome(data={"mode": "b", "constant_source": "lx", "rating": player["rating"]}, artifacts=[image(content)])
-    if migrate_legacy:
-        await async_call(b.migrate_legacy_manual_scores, qq)
-    songs, _ = await async_call(b.load_song_data)
-    meta = b.build_chart_meta(songs, const_source="lx")
-    scores = await async_call(b.load_b30_scores, qq, include_legacy=not migrate_legacy)
-    if not scores:
-        return outcome("NO_SCORES", "本地没有可用成绩。请先使用 /lxupdate、/chuupdate 或 /传分。", status="needs_input")
-    unmatched = sum((str(row.get("id")), b.safe_int(row.get("level_index"), -1)) not in meta for row in scores.values())
-    items = [item for item in (b.normalize_local_item(r, meta, const_source="lx") for r in scores.values())
-             if item and b.safe_float(item.get("level_value"), 0) > 0 and b.safe_int(item.get("score"), 0) > 0]
-    items.sort(key=lambda x: (x["rating"], x["score"]), reverse=True)
+    meta = b.build_chart_meta([song.as_dict() for song in catalog.songs.values()])
+    items = [b.build_item(meta[(str(r["id"]), r["level_index"])], r) for r in snapshot.scores
+             if (str(r["id"]), r["level_index"]) in meta]
+    items.sort(key=lambda row: (row["rating"], row["score"], row["id"], row["level_index"]), reverse=True)
     items = items[:30]
     if not items:
-        return outcome("NO_SCORES", f"本地成绩中没有可用于计算国服 B30 的谱面；{unmatched} 条记录未匹配国服谱面，原始记录已保留。",
-                       status="needs_input", data={"unmatched_scores": unmatched, "constant_source": "lx"})
-    player = {"UserName": "Local Player", "Level": 0}
-    player.update(await async_call(b.load_player_info, qq))
-    try:
-        jackets = await b.prepare_jackets(items)
-        content = await async_call(b.draw_b30_image, player, items, jackets)
-    except Exception:
-        return outcome("RENDER_FAILED", "生成 B30 图片失败。", status="unavailable")
-    return outcome(data={"mode": "b30", "constant_source": "lx",
-                         "unmatched_scores": unmatched,
-                         "b30_average": b.section_average(items, 30)}, artifacts=[image(content)])
+        return outcome("NO_MATCHED_SCORES", "没有匹配当前国服普通谱面的成绩；WORLD'S END 不参与标准 B30。", status="needs_input")
+    jackets = await b.prepare_jackets(items)
+    content = await async_call(b.draw_b30_image, snapshot.player, items, jackets)
+    return outcome(data={"b30_average": b.section_average(items, 30), "chart_count": len(items)}, artifacts=[image(content)])
 
 
-async def profile(qq):
-    from ..get_player_songlist import query_player_profile
-    return await query_player_profile(qq)
+def split_query(query, level_index=None):
+    query = query.strip()
+    if level_index is None:
+        head, separator, tail = query.rpartition(" ")
+        code = tail.lower().replace("'", "").replace("_", "")
+        if separator and (code in DIFFICULTIES or code in {str(i) for i in range(6)}):
+            level_index = DIFFICULTIES.get(code, int(code) if code.isdigit() else None)
+            query = head.strip()
+    return query, level_index
 
 
-async def progress(qq, query):
-    from ..overpower_list_local import query_progress
-    return await query_progress(qq, query)
-
-
-async def recommend(qq, query=""):
-    from ..recommendation import recommend_chart
-    return await recommend_chart(qq, "推什么 " + query)
+async def song_scores(snapshot, catalog, query, level_index=None):
+    from .song import prepare
+    query, level_index = split_query(query, level_index)
+    prepared = await prepare(query)
+    if not prepared["song"]:
+        choices = [{"id": row["song"]["id"], "title": row["song"].get("title")} for row in prepared["ambiguous"][:8]]
+        text = "同名曲目有多个候选，请指定原始歌曲ID：" + "、".join(f"{r['id']} {r['title']}" for r in choices) if choices else "未找到歌曲，请使用歌名、别名或原始ID。"
+        return outcome("AMBIGUOUS_TARGET" if choices else "NOT_FOUND", text, status="needs_input", data={"candidates": choices})
+    song_id = prepared["song"]["id"]
+    if song_id not in catalog.songs:
+        raise PlayerError("INVALID_DATA")
+    family = catalog.query_song(catalog.parent_id(song_id))
+    charts = {}
+    for difficulty in family["difficulties"]:
+        charts.setdefault((str(difficulty["song_id"]), difficulty["difficulty"]), []).append(difficulty)
+    rows = [dict(r, charts=charts[(str(r["id"]), r["level_index"])]) for r in snapshot.scores
+            if (str(r["id"]), r["level_index"]) in charts and (level_index is None or r["level_index"] == level_index)]
+    rows.sort(key=lambda row: (row["level_index"], row["id"]))
+    lines = [f"{family.get('title', '')}（原曲ID {family['id']}）"]
+    for row in rows:
+        metadata = row["charts"]
+        chart = metadata[0]
+        row["metadata_ambiguous"] = len(metadata) > 1
+        label = LEVELS[row["level_index"]]
+        if row["level_index"] == 5:
+            label += " [" + " / ".join(f"{c.get('kanji', '')} ★{c.get('star', '')}" for c in metadata) + "]"
+            if len(metadata) > 1:
+                label += "（同ID多谱面，API未区分，保留全部元数据）"
+        lines.append(f"{label} · ID {row['id']} · 谱面版本 {'/'.join(str(c.get('version', '')) for c in metadata)}\n"
+                     f"{row['score']:,} | Rating {row['rating']:.4f} | OP {row['over_power']:.2f}\n"
+                     f"{row.get('clear') or '-'} / {row.get('full_combo') or '-'} / {row.get('full_chain') or '-'}")
+    if not rows:
+        lines.append("落雪没有返回该曲所选难度的个人成绩；未将缺失记录当作零分。")
+    return outcome("OK" if rows else "NO_SONG_SCORES", "\n".join(lines), status="ok" if rows else "needs_input",
+                   data={"song_id": family["id"], "scores": rows})

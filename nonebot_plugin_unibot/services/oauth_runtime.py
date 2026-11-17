@@ -91,7 +91,7 @@ def configure():
 
 
 HINTS = {
-    "ALREADY_BOUND": "已绑定 OAuth；如需换号，请先 /落雪解绑 确认。旧好友码不会被改写。",
+    "ALREADY_BOUND": "已绑定 OAuth；如需换号，请先 /落雪解绑 确认。解绑后才能绑定其他账号。",
     "CONFIRM_PENDING": "已有网页验证等待确认，请完成私聊确认或等待5分钟后重新授权。",
     "CONFIRM_INVALID": "确认无效或已过期，请核对网页提示，或重新 /落雪授权。",
     "FEATURE_DISABLED": "本群对应功能已关闭，未执行授权操作。",
@@ -111,23 +111,23 @@ async def command(bot, event, action, argument=""):
     if action == "confirm" and group is not None:
         return "请在机器人私聊中完成网页确认。"
     if _service is None:
-        return error_text("OAuth 尚未配置或回调不可用；原 /bind 和旧查分仍可使用。")
+        return error_text("OAuth 尚未配置或回调不可用，请联系管理员。")
     try:
         if action == "begin":
             url = await _service.begin(bot.self_id, event.user_id, origin_group=group)
             message = "请登录本人落雪账号，仅申请 read_player 与 openid。网页完成后按提示私聊确认；链接10分钟有效，请勿转发。\n" + url
         elif action == "confirm":
             await _service.confirm(bot.self_id, event.user_id, argument.strip())
-            return "OAuth 绑定成功。旧好友码、成绩和现有查分方式均保留。"
+            return "OAuth 绑定成功，可直接使用 /b30、/chuinfo、/chulist、/chu成绩 查询。"
         elif action == "status":
             state = await _service.status(bot.self_id, event.user_id)
-            message = {"unbound": "尚未绑定 OAuth。", "active": "OAuth 已绑定；本阶段尚不用于查分。",
+            message = {"unbound": "尚未绑定 OAuth。", "active": "OAuth 已绑定，可直接查询本人资料与成绩。",
                        "authorizing": "等待网页授权。", "awaiting_confirmation": "等待网页提示的私聊确认。"}.get(state, "OAuth 暂不可用，请重新授权；若正在刷新，请稍后重试。")
         elif action == "unlink":
             if argument.strip() != "确认":
-                return "解除本地 OAuth 并保留旧好友码、成绩：请发送 /落雪解绑 确认。"
+                return "解除本地 OAuth 并使个人查询缓存失效：请发送 /落雪解绑 确认。"
             await _service.unlink(bot.self_id, event.user_id)
-            message = "本地 OAuth 已解除，凭据已清除，待完成授权已取消。旧好友码和成绩保留。落雪未公布撤销端点，请同时到落雪应用管理页撤销授权；本地解绑不代表远端已撤销。"
+            message = "本地 OAuth 已解除，凭据已清除，待完成授权已取消。查询缓存已失效。落雪未公布撤销端点，请同时到落雪应用管理页撤销授权；本地解绑不代表远端已撤销。"
         else:
             return error_text("未知授权操作。")
         if group is None:

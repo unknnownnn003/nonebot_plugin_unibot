@@ -8,15 +8,13 @@ ROOT = Path(__file__).resolve().parents[1] / "nonebot_plugin_unibot"
 UNI = {
     "maintenance.refresh": "songlist_update.update_songlist get_resource.update_jacket collection_update.update_collection story.cmd_update",
     "song.search": "song.song_query", "song.detail": "song.song_query",
-    "player.best": "best_rating.best_rating_cmd best_rating.best_rating_30_cmd",
-    "player.profile": "get_player_songlist.get_score", "player.progress": "overpower_list_local.chulist_cmd",
+    "player.best": "best_rating.best_rating_cmd",
+    "player.profile": "get_player_songlist.get_score", "player.song_scores": "get_player_songlist.song_scores_cmd", "player.progress": "overpower_list_local.chulist_cmd",
     "player.recommend": "recommendation.recommend_cmd", "song.aliases": "song.view_alias_cmd",
     "song.alias_add": "song.add_alias_cmd", "song.alias_delete": "song.del_alias_cmd",
     "story.search": "story.cmd_story", "story.list": "story.cmd_list", "story.random": "story.cmd_random",
     "game.status": "chuguess.chuguess_cmd", "game.hint": "chuguess.hint_cmd", "game.give_up": "chuguess.giveup_cmd",
     "game.start": "chuguess.chuguess_cmd", "game.guess": "chuguess.guess_cmd chuguess.chuguess_cmd", "help.read": "help.chuhelp_cmd",
-    "player.bind": "user_bind.bind_command", "score.submit": "get_player_score.manual_score",
-    "score.sync": "get_player_score.lxupdate_score", "score.import_file": "get_player_score.update_score",
     "job.list": "job_control.jobs", "job.get": "job_control.jobs", "job.cancel": "job_control.cancel",
     "job.replay": "job_control.replay",
 }

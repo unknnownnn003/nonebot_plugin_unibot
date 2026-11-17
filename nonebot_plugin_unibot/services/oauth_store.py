@@ -10,6 +10,7 @@ from pathlib import Path
 import sqlite3
 import stat
 import subprocess
+import secrets
 
 from cryptography.fernet import Fernet
 
@@ -186,6 +187,7 @@ class OAuthStore:
             if value["confirm_expires"] <= now or not hmac.compare_digest(value["confirm_hash"], hashlib.sha256(proof.encode()).hexdigest()):
                 raise OAuthError("CONFIRM_INVALID")
             value.pop("confirm_hash"); value.pop("confirm_expires")
+            value["binding_id"] = secrets.token_hex(16)
             db.execute("UPDATE accounts SET status='active',payload=?,updated=? WHERE owner=?",
                        (self.pack(value), now, owner))
 
@@ -214,3 +216,33 @@ class OAuthStore:
             if row and row["status"] == "active" and hmac.compare_digest(self.unpack(row["payload"])["access_token"], token):
                 db.execute("UPDATE accounts SET status='reauthorize',payload=?,subject_key=NULL,updated=? WHERE owner=?",
                            (self.pack({}), now, owner))
+                return True
+            return False
+
+    def credential_lease(self, owner, fingerprint):
+        with self.connection() as db:
+            row = db.execute("SELECT * FROM accounts WHERE owner=?", (owner,)).fetchone()
+            if not row or row["status"] != "active":
+                raise OAuthError("NOT_AUTHORIZED")
+            value = self.unpack(row["payload"])
+            if value["config"] != fingerprint:
+                raise OAuthError("NOT_CONFIGURED")
+            # Upgrade existing phase 3A grants in place, without reading legacy scores.
+            if not value.get("binding_id"):
+                value["binding_id"] = secrets.token_hex(16)
+                db.execute("UPDATE accounts SET payload=? WHERE owner=?", (self.pack(value), owner))
+            return value["access_token"], value["binding_id"]
+
+    def binding_matches(self, owner, binding, fingerprint):
+        row = self.get(owner)
+        if not row or row["status"] not in {"active", "refreshing"}:
+            return False
+        value = self.unpack(row["payload"])
+        return bool(binding and value.get("binding_id") == binding and value.get("config") == fingerprint)
+
+    def current_binding(self, owner, fingerprint):
+        row = self.get(owner)
+        if not row or row["status"] not in {"active", "refreshing"}:
+            return None
+        value = self.unpack(row["payload"])
+        return value.get("binding_id") if value.get("config") == fingerprint else None

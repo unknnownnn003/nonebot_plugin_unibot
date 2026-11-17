@@ -21,7 +21,7 @@ import httpx
 import nonebot
 root=Path.cwd()
 shutil.copytree(SOURCE/'nonebot_plugin_unibot',root/'nonebot_plugin_unibot',ignore=shutil.ignore_patterns('data','__pycache__'))
-nonebot.init(driver='~fastapi',lxns_token='',localstore_data_dir=str(root/'data'),localstore_cache_dir=str(root/'cache'),
+nonebot.init(driver='~fastapi',localstore_data_dir=str(root/'data'),localstore_cache_dir=str(root/'cache'),
     localstore_config_dir=str(root/'config'),lxns_oauth_enabled=True,lxns_oauth_client_id='fixture-client',
     lxns_oauth_client_secret='fixture-secret',lxns_oauth_redirect_uri='https://example.test/oauth/lxns/callback',
     lxns_oauth_encryption_key=Fernet.generate_key().decode())
@@ -33,7 +33,7 @@ assert runtime._service is not None
 assert runtime.get_service() is runtime._service
 assert runtime._service.store.path==paths.OAUTH_DIR/'credentials.sqlite3'
 assert len([r for r in nonebot.get_driver().server_app.routes if getattr(r,'path',None)==CALLBACK_PATH])==1
-assert len(llm_api.describe_capabilities())==27
+assert len(llm_api.describe_capabilities())==24
 assert all(not s['id'].startswith('oauth.') for s in llm_api.describe_capabilities())
 assert 'fixture-secret' not in repr(nonebot.get_plugin_config(plugin.module.Config))
 assert 'fixture-secret' not in repr(runtime._service.settings)
@@ -53,7 +53,7 @@ allowed=True;calls=[];fail_delivery=False
 fm=NS(policy=NS(capability_feature=lambda name:'scores',MODULE_FEATURES={'user_bind':'scores'}),
       is_plugin_feature_enabled=lambda g,p,f:allowed)
 legacy=paths.DATA_DIR/'user_bind_info.json';legacy.write_text('{"7":"123456789"}',encoding='utf-8')
-score=paths.SCORE_DIR;score.mkdir(exist_ok=True);(score/'7.json').write_text('[{"id":10,"score":1000000}]')
+score=paths.DATA_DIR/'score';score.mkdir(exist_ok=True);(score/'7.json').write_text('[{"id":10,"score":1000000}]')
 before=legacy.read_bytes(),(score/'7.json').read_bytes()
 async def run():
     global allowed,fail_delivery

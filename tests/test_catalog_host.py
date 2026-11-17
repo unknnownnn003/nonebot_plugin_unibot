@@ -28,7 +28,7 @@ old['songs'][0]['difficulties'][0].update(level_value=15.4,lx_level_value=14.2,c
 old['songs'][0]['aliases']=['local alias']
 old['songs'].append(dict(id='foreign-hash',title='foreign-only',data_source='chunirec',difficulties=[]))
 (legacy/'songlist.json').write_text(json.dumps(old),encoding='utf-8')
-nonebot.init(driver='~none',lxns_token='',localstore_data_dir=str(root/'data'),
+nonebot.init(driver='~none',localstore_data_dir=str(root/'data'),
              localstore_cache_dir=str(root/'cache'),localstore_config_dir=str(root/'config'))
 spec=importlib.util.spec_from_file_location('offline',package/'services/data_migration.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
@@ -37,13 +37,13 @@ original=m.inventory(legacy)
 plugin=nonebot.load_plugin('nonebot_plugin_unibot');assert plugin is not None
 from nonebot_plugin_unibot import song as s, songlist_update as update, best_rating as b, chuguess, overpower_list_local as op
 from nonebot_plugin_unibot.services import player, song as query, maintenance
-from nonebot_plugin_unibot import get_player_score as scores, llm_api
+from nonebot_plugin_unibot import llm_api
 assert len(chuguess.load_songlist())==5
-assert len(op.load_songlist_full()[0])==5
-assert {(c['song_id'],c['level_index']) for c in op.get_target_charts('new')}=={('10',4)}
-assert {(c['song_id'],c['level_index']) for c in op.get_target_charts('old')}=={('10',3)}
-assert 'foreign-hash' not in scores._load_song_meta()
-assert '8001' in scores._load_song_meta()
+from nonebot_plugin_unibot.services.song_model import Catalog,read_catalog
+catalog=Catalog(read_catalog(target/'songlist.json'))
+assert len(catalog.songs)==5
+assert {(c['song_id'],c['level_index']) for c in op.get_target_charts('new',catalog)}=={('10',4)}
+assert {(c['song_id'],c['level_index']) for c in op.get_target_charts('old',catalog)}=={('10',3)}
 assert s.find_song_matches('foreign-only')==[]
 matches=s.find_song_matches('Same title')
 assert len([row for row in matches if row['score']>=1])==3
@@ -69,11 +69,9 @@ for bad in ({'songs':[]},{'songs':[{'id':10,'title':'bad','difficulties':[{'diff
     except ValueError:pass
     else:raise AssertionError('invalid refresh accepted')
     assert update.SONGLIST_FILE.read_bytes()==snapshot
-meta=b.build_chart_meta(saved['songs'],const_source='chunirec')
+meta=b.build_chart_meta(saved['songs'])
 assert meta[('10',3)]['level_value']==14.2
 assert meta[('10',4)]['version']==24000 and ('8001',5) not in meta
-assert b.normalize_local_item({'id':'foreign-hash','level_index':3,'score':1009000,'chunirec_level_value':16},meta) is None
-assert b.normalize_local_item({'id':'10','level_index':3,'score':1009000,'chunirec_level_value':16},meta)['level_value']==14.2
 # Preserve style/layout; prove both WE rows and their own IDs reach drawing.
 labels=[]; original_draw=s.draw_text
 def record(draw,pos,text,*args,**kwargs):
@@ -84,7 +82,7 @@ assert image.startswith(b'\xff\xd8')
 assert sum(text.startswith("WORLD'S END") for text in labels)==2
 assert any('8001' in text and '21000' in text for text in labels)
 assert any('8002' in text and '23000' in text for text in labels)
-assert llm_api.CAPABILITY_VERSION=='3.3.0'
+assert llm_api.CAPABILITY_VERSION=='4.0.0'
 specs=llm_api.describe_capabilities()
 assert 'maintenance.import_chunirec' not in {spec['id'] for spec in specs}
 assert 'chunirec' not in llm_api.MaintenanceArgs.model_json_schema()['properties']['resource']['enum']
@@ -95,26 +93,11 @@ async def run():
     with patch.object(s,'fetch_song_detail',AsyncMock(return_value=None)), patch.object(s,'download_jacket',AsyncMock(return_value=None)),patch.object(s,'render_song_image',return_value=b'same-renderer'):
         output=await query.search('10')
     assert output['status']=='ok' and len(output['data']['charts'])==4
-    with patch.object(b,'load_b30_scores',return_value={('10',3):{'id':'10','level_index':3,'score':1009000},('foreign',3):{'id':'foreign','level_index':3,'score':1009000}}),patch.object(b,'prepare_jackets',AsyncMock(return_value={})),patch.object(b,'draw_b30_image',return_value=b'same-b30'):
-        output=await player.best('7',mode='b30')
-    assert output['status']=='ok' and output['data']['constant_source']=='lx' and output['data']['unmatched_scores']==1
-    with patch.object(b,'load_b30_scores',return_value={('foreign',3):{'id':'foreign','level_index':3,'score':1009000}}):
-        output=await player.best('7',mode='b30')
-    assert output['code']=='NO_SCORES' and output['data']['unmatched_scores']==1 and '保留' in output['public_hint']
-    from nonebot_plugin_unibot.services.scores import submit_manual
-    assert (await submit_manual('7','10',5,1000000))['code']=='AMBIGUOUS_TARGET'
-    output=await submit_manual('7','8001',5,1000000)
-    assert output['status']=='ok' and output['data']['song_id']=='8001'
-    assert json.loads((target/'score/7_manual.json').read_text(encoding='utf-8'))[0]['id']=='8001'
-    for name,args in [('maintenance.import_chunirec',{}),('maintenance.refresh',{'resource':'chunirec'})]:
-        context={'bot':NS(self_id='1'),'event':event,'confirmed':True}
-        assert (await llm_api.prepare_capability(name,args,context))['code']=='SOURCE_RETIRED'
-        assert (await llm_api.invoke_capability(name,args,context))['code']=='SOURCE_RETIRED'
-    job=NS(job_id='old',payload={'arguments':{'resource':'chunirec_file'}})
-    store=NS(get=AsyncMock(return_value=NS(status='queued')),update=AsyncMock())
-    with patch.object(maintenance,'native_superuser',return_value=True):
-        output=await maintenance.run(NS(),event,job,store)
-    assert output['code']=='SOURCE_RETIRED' and output.get('effect')=='none'
+    # Cached retired invocations cannot write or resubmit old imports.
+    for method in [llm_api.prepare_capability,llm_api.invoke_capability]:
+        for name in ['player.bind','score.submit','score.sync','score.import_file']:
+            result=await method(name,{},dict(bot=NS(self_id='1'),event=event,confirmed=True))
+            assert result['code']=='CAPABILITY_RETIRED'
 asyncio.run(run())
 assert m.inventory(legacy)==original
 print('CATALOG_HOST_OK')

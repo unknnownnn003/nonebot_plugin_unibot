@@ -185,29 +185,13 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
-        "command": "b",
-        "line": 34,
+        "aliases": [
+          "b"
+        ],
+        "command": "b30",
+        "line": 13,
         "matcher": "best_rating_cmd",
         "module": "best_rating",
-        "registration": "on_command"
-      },
-      {
-        "command": "b30",
-        "line": 35,
-        "matcher": "best_rating_30_cmd",
-        "module": "best_rating",
-        "registration": "on_command"
-      }
-    ]
-  },
-  "player.bind": {
-    "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
-    "native_commands": [
-      {
-        "command": "bind",
-        "line": 58,
-        "matcher": "bind_command",
-        "module": "user_bind",
         "registration": "on_command"
       }
     ]
@@ -221,7 +205,7 @@ NATIVE_CATALOG = json.loads(r'''{
           "分数"
         ],
         "command": "个人信息",
-        "line": 24,
+        "line": 12,
         "matcher": "get_score",
         "module": "get_player_songlist",
         "registration": "on_command"
@@ -233,7 +217,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "chulist",
-        "line": 33,
+        "line": 21,
         "matcher": "chulist_cmd",
         "module": "overpower_list_local",
         "registration": "on_command"
@@ -244,7 +228,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
-        "line": 24,
+        "line": 14,
         "matcher": "recommend_cmd",
         "module": "recommendation",
         "pattern": "^推什么\\s*(.+)?$",
@@ -252,44 +236,14 @@ NATIVE_CATALOG = json.loads(r'''{
       }
     ]
   },
-  "score.import_file": {
+  "player.song_scores": {
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
-        "command": "chuupdate",
-        "line": 35,
-        "matcher": "update_score",
-        "module": "get_player_score",
-        "registration": "on_command"
-      }
-    ]
-  },
-  "score.submit": {
-    "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
-    "native_commands": [
-      {
-        "aliases": [
-          "addscore",
-          "cf",
-          "mscore",
-          "手动传分"
-        ],
-        "command": "传分",
-        "line": 37,
-        "matcher": "manual_score",
-        "module": "get_player_score",
-        "registration": "on_command"
-      }
-    ]
-  },
-  "score.sync": {
-    "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
-    "native_commands": [
-      {
-        "command": "lxupdate",
-        "line": 36,
-        "matcher": "lxupdate_score",
-        "module": "get_player_score",
+        "command": "chu成绩",
+        "line": 13,
+        "matcher": "song_scores_cmd",
+        "module": "get_player_songlist",
         "registration": "on_command"
       }
     ]
@@ -404,28 +358,28 @@ NATIVE_CATALOG = json.loads(r'''{
 NATIVE_ONLY_COMMANDS = json.loads(r'''[
   {
     "command": "落雪授权",
-    "line": 85,
+    "line": 11,
     "matcher": "oauth_authorize",
     "module": "user_bind",
     "registration": "on_command"
   },
   {
     "command": "落雪确认",
-    "line": 86,
+    "line": 12,
     "matcher": "oauth_confirm",
     "module": "user_bind",
     "registration": "on_command"
   },
   {
     "command": "落雪授权状态",
-    "line": 87,
+    "line": 13,
     "matcher": "oauth_status",
     "module": "user_bind",
     "registration": "on_command"
   },
   {
     "command": "落雪解绑",
-    "line": 88,
+    "line": 14,
     "matcher": "oauth_unlink",
     "module": "user_bind",
     "registration": "on_command"

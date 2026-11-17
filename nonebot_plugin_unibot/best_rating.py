@@ -1,38 +1,17 @@
-from nonebot.adapters.onebot.v11 import Bot
+"""Single OAuth B30 presentation; no developer-key or local-score model."""
+from nonebot.adapters.onebot.v11 import Bot, MessageEvent
+from nonebot import on_command
+from PIL import Image, ImageDraw, ImageFont
 import asyncio
 import io
-import json
 import math
-import os
 import platform
-import random
-from typing import Any, Dict, List, Optional, Set, Tuple
-
-import httpx
-from nonebot import get_plugin_config, on_command
-from nonebot.adapters.onebot.v11 import Message, MessageEvent, MessageSegment
-from nonebot.log import logger
-from nonebot.params import CommandArg
-from PIL import Image, ImageDraw, ImageFont
-
-from .config import Config
+import os
+from typing import Any, Dict, List, Optional, Tuple
 from .song import download_jacket
-from .user_bind import get_bind_info
-from .services.storage import locked_player, atomic_json
 
-config = get_plugin_config(Config)
+best_rating_cmd = on_command("b30", aliases={"b"}, priority=5, block=True)
 
-from .services.paths import DATA_DIR as _DATA_DIR
-DATA_DIR = str(_DATA_DIR)
-SCORE_DIR = os.path.join(DATA_DIR, "score")
-SONGLIST_PATH = os.path.join(DATA_DIR, "songlist.json")
-LXNS_BASE_URL = "https://maimai.lxns.net/api/v0/chunithm"
-
-SUPPORTED_VERSION = "2026"
-MAX_RATING_SCORE = 1009000
-
-best_rating_cmd = on_command("b", priority=5, block=True)
-best_rating_30_cmd = on_command("b30", priority=5, block=True)
 
 BG_TOP = (26, 28, 40)
 BG_BOTTOM = (38, 31, 58)
@@ -47,7 +26,6 @@ PINK = (255, 121, 198)
 PURPLE = (189, 147, 249)
 YELLOW = (241, 250, 140)
 ORANGE = (255, 184, 108)
-
 
 def get_font(size: int, weight: str = "Normal") -> ImageFont.FreeTypeFont:
     try:
@@ -95,39 +73,7 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def floor_2(value: float) -> float:
-    return math.floor((value + 1e-9) * 100) / 100
-
-
-def extract_lxns_data(payload: Any) -> Any:
-    if isinstance(payload, dict) and "data" in payload:
-        return payload.get("data")
-    return payload
-
-
-def load_song_data() -> Tuple[List[Dict[str, Any]], Set[int]]:
-    if not os.path.exists(SONGLIST_PATH):
-        return [], set()
-    try:
-        with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
-            from .services.song_model import active_catalog
-            raw = active_catalog(json.load(f))
-    except Exception as e:
-        logger.error(f"读取 songlist.json 失败: {e}")
-        return [], set()
-
-    songs = raw.get("songs", []) if isinstance(raw, dict) else raw
-    versions = raw.get("versions", []) if isinstance(raw, dict) else []
-    new_versions: Set[int] = set()
-    for version in versions if isinstance(versions, list) else []:
-        title = str(version.get("title", "")).upper()
-        number = safe_int(version.get("version"), 0)
-        if "VERSE" in title or "LUMINOUS PLUS" in title:
-            new_versions.add(number)
-    return songs if isinstance(songs, list) else [], new_versions
-
-
-def build_chart_meta(songs: List[Dict[str, Any]], const_source: str = "default") -> Dict[Tuple[str, int], Dict[str, Any]]:
+def build_chart_meta(songs: List[Dict[str, Any]]) -> Dict[Tuple[str, int], Dict[str, Any]]:
     from .services.song_model import Catalog
     catalog = Catalog({"songs": songs}, legacy=True)
     meta = {}
@@ -145,118 +91,6 @@ def build_chart_meta(songs: List[Dict[str, Any]], const_source: str = "default")
                 version=diff.get("version", song.attributes.get("version", 0)),
                 song_version=song.attributes.get("version", 0))
     return meta
-
-
-def load_score_file(path: str) -> List[Dict[str, Any]]:
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            rows = json.load(f)
-    except Exception as e:
-        logger.error(f"读取本地成绩失败: {e}")
-        return []
-    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
-
-
-def merge_score_rows(rows: List[Dict[str, Any]]) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]]:
-    best: Dict[Tuple[str, int], Dict[str, Any]] = {}
-    for row in rows:
-        song_id = str(row.get("id", ""))
-        level_index = safe_int(row.get("level_index"), -1)
-        score = safe_int(row.get("score"), 0)
-        if not song_id or level_index < 0:
-            continue
-        key = (song_id, level_index)
-        if key not in best or score > safe_int(best[key].get("score"), 0):
-            best[key] = row
-    return best or None
-
-
-@locked_player
-def load_b30_scores(qq: str, include_legacy: bool = False) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]]:
-    raw = load_score_file(os.path.join(SCORE_DIR, f"{qq}.json"))
-    rows = [row for row in raw if row.get("source") != "manual"]
-    rows.extend(load_score_file(os.path.join(SCORE_DIR, f"{qq}_manual.json")))
-    if include_legacy:
-        rows.extend(row for row in raw if row.get("source") == "manual")
-    return merge_score_rows(rows)
-
-
-@locked_player
-def load_player_info(qq: str) -> Dict[str, Any]:
-    info_path = os.path.join(SCORE_DIR, f"{qq}_info.json")
-    if not os.path.exists(info_path):
-        return {}
-    try:
-        with open(info_path, "r", encoding="utf-8") as f:
-            info = json.load(f)
-        return info if isinstance(info, dict) else {}
-    except Exception as e:
-        logger.warning(f"读取本地玩家信息失败: {e}")
-        return {}
-
-
-@locked_player
-def load_legacy_manual_scores(qq: str) -> List[Dict[str, Any]]:
-    rows = load_score_file(os.path.join(SCORE_DIR, f"{qq}.json"))
-    return [row for row in rows if row.get("source") == "manual"]
-
-
-@locked_player
-def strip_legacy_manual_scores(qq: str) -> None:
-    path = os.path.join(SCORE_DIR, f"{qq}.json")
-    rows = load_score_file(path)
-    if not rows or not any(row.get("source") == "manual" for row in rows):
-        return
-    cleaned = [row for row in rows if row.get("source") != "manual"]
-    atomic_json(path, cleaned)
-
-
-@locked_player
-def migrate_legacy_manual_scores(qq: str) -> None:
-    manual_path = os.path.join(SCORE_DIR, f"{qq}_manual.json")
-    legacy = load_legacy_manual_scores(qq)
-    if not legacy:
-        return
-    merged = merge_score_rows(load_score_file(manual_path) + legacy)
-    if merged:
-        atomic_json(manual_path, list(merged.values()))
-    strip_legacy_manual_scores(qq)
-
-
-@locked_player
-def load_local_scores_excluding_manual(qq: str) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]]:
-    rows = [row for row in load_score_file(os.path.join(SCORE_DIR, f"{qq}.json")) if row.get("source") != "manual"]
-    return merge_score_rows(rows)
-
-
-@locked_player
-def load_local_scores(qq: str) -> Optional[Dict[Tuple[str, int], Dict[str, Any]]]:
-    rows = [row for row in load_score_file(os.path.join(SCORE_DIR, f"{qq}.json")) if row.get("source") != "manual"]
-    return merge_score_rows(rows)
-
-
-def rating_from_score(level_value: float, score: int) -> float:
-    if level_value <= 0 or score < 900000:
-        return 0.0
-    if score >= MAX_RATING_SCORE:
-        return level_value + 2.15
-    if score >= 1007500:
-        return level_value + 2.0 + (score - 1007500) / 10000
-    if score >= 1005000:
-        return level_value + 1.5 + (score - 1005000) / 5000
-    if score >= 1000000:
-        return level_value + 1.0 + (score - 1000000) / 10000
-    if score >= 990000:
-        return level_value + 0.6 + (score - 990000) / 25000
-    if score >= 975000:
-        return level_value + (score - 975000) / 25000
-    if score >= 950000:
-        return level_value - 1.5 + (score - 950000) * 1.5 / 25000
-    if score >= 925000:
-        return level_value - 3.0 + (score - 925000) * 1.5 / 25000
-    return level_value - 5.0 + (score - 900000) * 2.0 / 25000
 
 
 def normalize_fc(value: Any) -> str:
@@ -316,200 +150,22 @@ def format_score_plain(score: int) -> str:
     return f"{max(score, 0):07d}"
 
 
-def build_item(meta: Dict[str, Any], score_row: Dict[str, Any], use_stored_rating: bool = True) -> Dict[str, Any]:
+def build_item(meta: Dict[str, Any], score_row: Dict[str, Any]) -> Dict[str, Any]:
     score = safe_int(score_row.get("score"), 0)
-    rating = safe_float(score_row.get("rating"), 0.0) if use_stored_rating else 0.0
-    if rating <= 0:
-        rating = rating_from_score(safe_float(meta.get("level_value"), 0.0), score)
+    rating = safe_float(score_row.get("rating"), 0.0)
     return {
         **meta,
         "score": score,
         "rating": rating,
         "rank": rank_to_display(score_row.get("rank")) or score_to_rank(score),
         "clear": score_row.get("clear") or "",
-        "full_combo": normalize_fc(score_row.get("full_combo") or score_row.get("full_chain")),
+        "full_combo": normalize_fc(score_row.get("full_combo")),
+        "full_chain": score_row.get("full_chain"),
     }
-
-
-def normalize_lxns_item(item: Dict[str, Any], chart_meta: Dict[Tuple[str, int], Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    song_id = str(item.get("id", ""))
-    level_index = safe_int(item.get("level_index"), -1)
-    if not song_id or level_index < 0:
-        return None
-    meta = dict(chart_meta.get((song_id, level_index), {}))
-    if not meta:
-        meta = {
-            "id": song_id,
-            "jacket_id": song_id,
-            "song_name": item.get("song_name") or f"ID {song_id}",
-            "level": item.get("level") or "",
-            "level_value": safe_float(item.get("level_value"), 0.0),
-            "level_index": level_index,
-            "version": 0,
-        }
-    return build_item(meta, item)
-
-
-def normalize_local_item(
-    item: Dict[str, Any],
-    chart_meta: Dict[Tuple[str, int], Dict[str, Any]],
-    const_source: str = "lx",
-) -> Optional[Dict[str, Any]]:
-    song_id = str(item.get("id", ""))
-    level_index = safe_int(item.get("level_index"), -1)
-    if not song_id or level_index < 0:
-        return None
-    meta = dict(chart_meta.get((song_id, level_index), {}))
-    if not meta:
-        return None  # Preserve unmatched legacy rows on disk, never invent CN constants.
-    return build_item(meta, item, use_stored_rating=False)
 
 
 def section_average(items: List[Dict[str, Any]], divisor: int) -> float:
     return sum(item["rating"] for item in items[:divisor]) / divisor if divisor else 0.0
-
-
-def total_rating_raw(b30_items: List[Dict[str, Any]], n20_items: List[Dict[str, Any]]) -> float:
-    return (sum(item["rating"] for item in b30_items[:30]) + sum(item["rating"] for item in n20_items[:20])) / 50
-
-
-def find_min_score_for_rating(level_value: float, target_rating: float, current_score: int) -> Optional[int]:
-    if rating_from_score(level_value, MAX_RATING_SCORE) + 1e-9 < target_rating:
-        return None
-    low = max(0, current_score + 1)
-    high = MAX_RATING_SCORE
-    result = None
-    while low <= high:
-        mid = (low + high) // 2
-        if rating_from_score(level_value, mid) + 1e-9 >= target_rating:
-            result = mid
-            high = mid - 1
-        else:
-            low = mid + 1
-    return result
-
-
-def build_recommendations(
-    local_scores: Optional[Dict[Tuple[str, int], Dict[str, Any]]],
-    chart_meta: Dict[Tuple[str, int], Dict[str, Any]],
-    b30_items: List[Dict[str, Any]],
-    n20_items: List[Dict[str, Any]],
-    new_versions: Set[int],
-) -> List[Dict[str, Any]]:
-    current_sum = sum(item["rating"] for item in b30_items) + sum(item["rating"] for item in n20_items)
-    current_display = floor_2(current_sum / 50)
-    target_sum = (current_display + 0.01) * 50
-    needed = max(0.0, target_sum - current_sum)
-    reference_levels = [item["level_value"] for item in b30_items + n20_items if item.get("level_value")]
-    median_level = sorted(reference_levels)[len(reference_levels) // 2] if reference_levels else 0.0
-    b30_keys = {(str(item["id"]), safe_int(item["level_index"])) for item in b30_items}
-    n20_keys = {(str(item["id"]), safe_int(item["level_index"])) for item in n20_items}
-    b30_floor = b30_items[-1]["rating"] if len(b30_items) >= 30 else 0.0
-    n20_floor = n20_items[-1]["rating"] if len(n20_items) >= 20 else 0.0
-
-    if local_scores:
-        candidate_entries = list(chart_meta.items())
-    else:
-        seen_keys = set()
-        candidate_entries = []
-        for item in b30_items + n20_items:
-            key = (str(item["id"]), safe_int(item["level_index"]))
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
-            candidate_entries.append((key, item))
-
-    exact: List[Dict[str, Any]] = []
-    fallback: List[Dict[str, Any]] = []
-    for key, meta in candidate_entries:
-        if not str(meta.get("id", "")).isdigit():
-            continue
-        level_value = safe_float(meta.get("level_value"), 0.0)
-        if level_value <= 0:
-            continue
-        if median_level and not (median_level - 0.7 <= level_value <= median_level + 0.35):
-            continue
-
-        row = local_scores.get(key, {"score": 0}) if local_scores else meta
-        current_score = safe_int(row.get("score"), 0)
-        if current_score >= MAX_RATING_SCORE:
-            continue
-
-        is_new = safe_int(meta.get("version"), 0) in new_versions
-        selected = key in (n20_keys if is_new else b30_keys)
-        floor_rating = n20_floor if is_new else b30_floor
-        current_chart_rating = safe_float(row.get("rating"), 0.0) if not local_scores else rating_from_score(level_value, current_score)
-        if current_chart_rating <= 0:
-            current_chart_rating = rating_from_score(level_value, current_score)
-        max_chart_rating = rating_from_score(level_value, MAX_RATING_SCORE)
-        base_rating = current_chart_rating if selected else floor_rating
-        max_gain = max_chart_rating - base_rating
-        if max_gain <= 1e-9:
-            continue
-
-        target_gain = needed if needed > 0 else min(max_gain, 0.01)
-        target_chart_rating = base_rating + target_gain
-        target_score = find_min_score_for_rating(level_value, target_chart_rating, current_score)
-        rec = {
-            **meta,
-            "score": current_score,
-            "target_score": target_score or MAX_RATING_SCORE,
-            "current_rating": current_chart_rating,
-            "target_rating": rating_from_score(level_value, target_score or MAX_RATING_SCORE),
-            "weighted_gain": min(max_gain, target_gain) / 50,
-            "chart_gain": min(max_gain, target_gain),
-            "is_plus_001": target_score is not None and needed > 0,
-        }
-        if target_score is not None and needed > 0:
-            exact.append(rec)
-        else:
-            fallback.append(rec)
-
-    pool = exact or fallback
-    if not pool:
-        return []
-    pool.sort(key=lambda x: (abs(x["level_value"] - median_level), x["target_score"], -x["chart_gain"]))
-    shortlist = pool[:60]
-    return random.sample(shortlist, k=min(8, len(shortlist)))
-
-
-async def lxns_get(client: httpx.AsyncClient, path: str) -> Tuple[int, Any]:
-    response = await client.get(
-        f"{LXNS_BASE_URL}{path}",
-        headers={"Authorization": config.lxns_token},
-        timeout=20.0,
-    )
-    try:
-        return response.status_code, response.json()
-    except Exception:
-        return response.status_code, response.text
-
-
-async def resolve_player(client: httpx.AsyncClient, qq: str) -> Tuple[str, Dict[str, Any]]:
-    status, payload = await lxns_get(client, f"/player/qq/{qq}")
-    data = extract_lxns_data(payload)
-    if status == 200 and isinstance(data, dict) and data.get("friend_code"):
-        return str(data["friend_code"]), data
-
-    bind_data = get_bind_info()
-    friend_code = str(bind_data.get(qq, ""))
-    if friend_code:
-        status, payload = await lxns_get(client, f"/player/{friend_code}")
-        data = extract_lxns_data(payload)
-        if status == 200 and isinstance(data, dict):
-            return friend_code, data
-    return "", {}
-
-
-async def fetch_lxns_bests(friend_code: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
-    async with httpx.AsyncClient() as client:
-        status, payload = await lxns_get(client, f"/player/{friend_code}/bests")
-    data = extract_lxns_data(payload)
-    if status != 200 or not isinstance(data, dict):
-        return [], [], {"status": status, "payload": payload}
-    bests = data.get("bests") if isinstance(data.get("bests"), list) else []
-    new_bests = data.get("new_bests") if isinstance(data.get("new_bests"), list) else []
-    return bests, new_bests, {}
 
 
 async def prepare_jackets(items: List[Dict[str, Any]]) -> Dict[str, Image.Image]:
@@ -540,33 +196,6 @@ def draw_shadowed_panel(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int
     x1, y1, x2, y2 = box
     draw.rounded_rectangle((x1 + 8, y1 + 8, x2 + 8, y2 + 8), radius=radius, fill=(0, 0, 0, 80))
     draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=2 if outline else 1)
-
-
-def draw_header(img: Image.Image, player: Dict[str, Any], b30_avg: float, n20_avg: float, version: str) -> None:
-    draw = ImageDraw.Draw(img)
-    font_title = get_font(34, "Bold")
-    font_head = get_font(32, "Bold")
-    font_body = get_font(23, "Normal")
-    font_small = get_font(19, "Normal")
-    draw_shadowed_panel(draw, (40, 38, 640, 206), 8, PANEL, LINE)
-    name = player.get("name") or "Unknown"
-    title_obj = player.get("trophy") or player.get("title") or {}
-    title = title_obj.get("name", "") if isinstance(title_obj, dict) else str(title_obj or "")
-    level = safe_int(player.get("level"), 0) + 100 * safe_int(player.get("reborn_count"), 0)
-    rating = safe_float(player.get("rating"), 0.0)
-    draw.text((70, 58), clamp_text(draw, name, font_title, 520), font=font_title, fill=TEXT)
-    draw.text((70, 110), clamp_text(draw, f"Lv.{level}  {title}", font_body, 520), font=font_body, fill=TEXT_SUB)
-    draw.text((70, 154), f"Rating {floor_2(rating):.2f}", font=font_head, fill=GREEN)
-
-    draw_shadowed_panel(draw, (680, 38, 1040, 206), 8, PANEL, LINE)
-    draw.text((732, 74), f"CHUNITHM {version}", font=font_head, fill=CYAN)
-    draw.text((738, 124), "Best Rating", font=font_body, fill=TEXT_SUB)
-
-    draw_shadowed_panel(draw, (1080, 38, 1560, 206), 8, PANEL, LINE)
-    total = (b30_avg * 30 + n20_avg * 20) / 50
-    draw.text((1112, 62), f"B30 {b30_avg:.3f}  +  N20 {n20_avg:.3f}", font=font_body, fill=TEXT)
-    draw.text((1112, 108), f"TOTAL {total:.4f}", font=font_head, fill=GREEN)
-    draw.text((1112, 160), "Data from Lxns | generated by Robinbot", font=font_small, fill=TEXT_SUB)
 
 
 def draw_section_title(draw: ImageDraw.ImageDraw, x: int, y: int, width: int, text: str, color: Tuple[int, int, int]) -> None:
@@ -634,108 +263,6 @@ def draw_score_card(base: Image.Image, item: Dict[str, Any], rank_no: int, x: in
     base.alpha_composite(overlay)
 
 
-def draw_suggestion_card(base: Image.Image, item: Dict[str, Any], x: int, y: int, jacket: Optional[Image.Image], card_w: int, card_h: int) -> None:
-    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    font_name = get_font(22, "Bold")
-    font_score = get_font(24, "Normal")
-    font_body = get_font(18, "Normal")
-    font_small = get_font(14, "Bold")
-    draw.rounded_rectangle((x + 4, y + 4, x + card_w + 4, y + card_h + 4), radius=8, fill=(0, 0, 0, 90))
-    draw.rounded_rectangle((x, y, x + card_w, y + card_h), radius=8, fill=PANEL_2, outline=LINE, width=1)
-    base.alpha_composite(overlay)
-
-    jacket_size = card_h - 16
-    if jacket:
-        base.alpha_composite(jacket.resize((jacket_size, jacket_size), Image.Resampling.LANCZOS), (x + 8, y + 8))
-    else:
-        base.alpha_composite(Image.new("RGBA", (jacket_size, jacket_size), (68, 71, 90, 255)), (x + 8, y + 8))
-
-    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    tx = x + jacket_size + 22
-    right = x + card_w - 18
-    draw.text((tx, y + 12), clamp_text(draw, item["song_name"], font_name, right - tx), font=font_name, fill=TEXT)
-    draw_badge(draw, (tx, y + 48, tx + 60, y + 68), f"{item['level_value']:.1f}", font_small, PURPLE, radius=6)
-    gain_text = "总Rating +0.01" if item.get("is_plus_001") else f"可提升 +{item['weighted_gain']:.4f}"
-    draw_badge(draw, (tx + 72, y + 48, tx + 198, y + 68), gain_text, font_small, GREEN, radius=6)
-    score_line = f"{format_score_plain(item['score'])}  ->  {format_score_plain(item['target_score'])}"
-    draw.text((tx, y + 82), score_line, font=font_score, fill=CYAN)
-    detail = f"单曲 {item['current_rating']:.2f} -> {item['target_rating']:.2f}    替换增量 {item['chart_gain']:.3f}"
-    draw.text((tx, y + 118), detail, font=font_body, fill=TEXT_SUB)
-    base.alpha_composite(overlay)
-
-
-def draw_best_image(
-    player: Dict[str, Any],
-    b30_items: List[Dict[str, Any]],
-    n20_items: List[Dict[str, Any]],
-    suggestions: List[Dict[str, Any]],
-    jacket_images: Dict[str, Image.Image],
-    version: str,
-) -> bytes:
-    width = 1600
-    card_w = 284
-    card_h = 124
-    gap_x = 22
-    gap_y = 18
-    cols = 5
-    margin_x = 40
-    section_w = width - margin_x * 2
-    b30_rows = math.ceil(max(len(b30_items), 1) / cols)
-    n20_rows = math.ceil(max(len(n20_items), 1) / cols)
-    sug_cols = 2
-    sug_w = (section_w - gap_x) // 2
-    sug_h = 150
-    sug_rows = math.ceil(len(suggestions[:8]) / sug_cols)
-    suggestion_h = 0 if not suggestions else 84 + sug_rows * (sug_h + gap_y) + 20
-    top = 244
-    section_title_h = 84
-    b30_h = section_title_h + b30_rows * (card_h + gap_y)
-    n20_h = section_title_h + n20_rows * (card_h + gap_y)
-    height = top + b30_h + 62 + n20_h + suggestion_h + 70
-
-    img = make_background(width, height)
-    draw = ImageDraw.Draw(img)
-    b30_avg = section_average(b30_items, 30)
-    n20_avg = section_average(n20_items, 20)
-    draw_header(img, player, b30_avg, n20_avg, version)
-
-    y = top
-    draw_section_title(draw, margin_x + 120, y, section_w - 240, "非当前版本最好成绩 / BEST 30", PURPLE)
-    y += section_title_h
-    for index, item in enumerate(b30_items[:30], start=1):
-        x = margin_x + ((index - 1) % cols) * (card_w + gap_x)
-        card_y = y + ((index - 1) // cols) * (card_h + gap_y)
-        draw_score_card(img, item, index, x, card_y, jacket_images.get(str(item["jacket_id"])), card_w, card_h)
-
-    y += b30_rows * (card_h + gap_y) + 38
-    draw_section_title(draw, margin_x + 120, y, section_w - 240, "当前版本最好成绩 / NEW 20", PINK)
-    y += section_title_h
-    for index, item in enumerate(n20_items[:20], start=1):
-        x = margin_x + ((index - 1) % cols) * (card_w + gap_x)
-        card_y = y + ((index - 1) // cols) * (card_h + gap_y)
-        draw_score_card(img, item, index, x, card_y, jacket_images.get(str(item["jacket_id"])), card_w, card_h)
-
-    y += n20_rows * (card_h + gap_y) + 38
-    if suggestions:
-        label = "推分建议"
-        draw_section_title(draw, margin_x + 120, y, section_w - 240, label, GREEN)
-        y += section_title_h
-        for index, item in enumerate(suggestions[:8]):
-            x = margin_x + (index % sug_cols) * (sug_w + gap_x)
-            card_y = y + (index // sug_cols) * (sug_h + gap_y)
-            draw_suggestion_card(img, item, x, card_y, jacket_images.get(str(item["jacket_id"])), sug_w, sug_h)
-
-    footer_font = get_font(19, "Normal")
-    footer = "Data from Lxns Network | suggestions from local score records | generated by Robinbot"
-    fw = text_width(draw, footer, footer_font)
-    draw.text(((width - fw) / 2, height - 44), footer, font=footer_font, fill=TEXT_SUB)
-    buf = io.BytesIO()
-    img.convert("RGB").save(buf, format="PNG")
-    return buf.getvalue()
-
-
 def draw_b30_header(img: Image.Image, player: Dict[str, Any], b30_avg: float) -> None:
     draw = ImageDraw.Draw(img)
     font_title = get_font(34, "Bold")
@@ -752,11 +279,11 @@ def draw_b30_header(img: Image.Image, player: Dict[str, Any], b30_avg: float) ->
 
     draw_shadowed_panel(draw, (680, 38, 1040, 206), 8, PANEL, LINE)
     draw.text((732, 74), "CHUNITHM B30", font=font_head, fill=CYAN)
-    draw.text((738, 124), "Local scores | Lxns CN constants", font=font_body, fill=TEXT_SUB)
+    draw.text((738, 124), "Lxns OAuth | CN charts", font=font_body, fill=TEXT_SUB)
 
     draw_shadowed_panel(draw, (1080, 38, 1560, 206), 8, PANEL, LINE)
     draw.text((1112, 78), f"TOTAL {b30_avg:.4f}", font=font_head, fill=GREEN)
-    draw.text((1112, 132), "Local scores + manual records", font=font_body, fill=TEXT_SUB)
+    draw.text((1112, 132), "OAuth personal scores", font=font_body, fill=TEXT_SUB)
     draw.text((1112, 166), "generated by Robinbot", font=font_small, fill=TEXT_SUB)
 
 
@@ -792,7 +319,7 @@ def draw_b30_image(
         draw_score_card(img, item, index, x, card_y, jacket_images.get(str(item["jacket_id"])), card_w, card_h)
 
     footer_font = get_font(19, "Normal")
-    footer = "Data from local score records | Lxns CN constants | generated by Robinbot"
+    footer = "Data from Lxns OAuth | Lxns CN constants | generated by Robinbot"
     fw = text_width(draw, footer, footer_font)
     draw.text(((width - fw) / 2, height - 44), footer, font=footer_font, fill=TEXT_SUB)
     buf = io.BytesIO()
@@ -800,21 +327,9 @@ def draw_b30_image(
     return buf.getvalue()
 
 
-def parse_version(raw: str) -> str:
-    return raw.strip().lower() or SUPPORTED_VERSION
-
-
 @best_rating_cmd.handle()
-async def _(bot: Bot, event: MessageEvent, msg: Message = CommandArg()):
-    from .services.media_jobs import submit
-    result = await submit(bot, event, "player.best", {"mode": "b", "version": parse_version(msg.extract_plain_text())}, origin="command")
-    from .services.results import send_command_result
-    await send_command_result(best_rating_cmd, result, finish=True)
-
-
-@best_rating_30_cmd.handle()
 async def _(bot: Bot, event: MessageEvent):
     from .services.media_jobs import submit
-    result = await submit(bot, event, "player.best", {"mode": "b30", "version": "2026"}, origin="command")
     from .services.results import send_command_result
-    await send_command_result(best_rating_30_cmd, result, finish=True)
+    result = await submit(bot, event, "player.best", {}, origin="command")
+    await send_command_result(best_rating_cmd, result, finish=True)

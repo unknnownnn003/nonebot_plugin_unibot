@@ -1,11 +1,10 @@
 from . import group_policy
-"""Provider-owned persistent FIFO and one worker for all LXNS sync entry points."""
+"""Persistent query/resource FIFO, scoped cancellation and guarded replay."""
 from .error_notices import result_call
 import asyncio
 from pathlib import Path
 from .results import outcome
 from .job_store import JobStore, QueueFull, run_one, notify_once
-from .storage import commit_scores, PartialWriteError
 
 PROVIDER = "nonebot_plugin_unibot"
 _store = None
@@ -21,6 +20,11 @@ _lifecycle = asyncio.Lock()
 _closing = False
 
 
+def valid_request(bot, event):
+    from nonebot.adapters.onebot.v11 import PrivateMessageEvent, GroupMessageEvent
+    return isinstance(event, (PrivateMessageEvent, GroupMessageEvent)) and str(bot.self_id) == str(event.self_id)
+
+
 def _scope(bot, event):
     group = getattr(event, "group_id", None)
     return dict(bot_id=str(bot.self_id), context_type="group" if group is not None else "private",
@@ -33,8 +37,8 @@ async def ensure_started():
         if _closing and _store is not None:
             return _store
         if _store is None:
-            from .. import get_player_score as s
-            _store = JobStore(Path(s.SCORE_DIR).parent / "native_jobs.sqlite3")
+            from .paths import DATA_DIR
+            _store = JobStore(DATA_DIR / "native_jobs.sqlite3")
             await _store.init()
             # No reconstructed Event can manufacture old authorization. Jobs
             # whose real request context was lost are visible as interrupted.
@@ -89,65 +93,12 @@ async def _fetch_with_cancel(awaitable, job, store):
             await asyncio.gather(work, return_exceptions=True)
 
 
-async def _run_sync(user_id: str, job, store):
-    from .. import get_player_score as s
-    import httpx
-    token = (s.config.lxns_token or "").strip()
-    if not token:
-        return outcome("NOT_CONFIGURED", "未配置落雪开发者密钥，无法同步。", status="unavailable")
-    try:
-        await store.update(job.job_id, current_step="resolving_player")
-        async with httpx.AsyncClient() as client:
-            resolved = await _fetch_with_cancel(s._resolve_friend_code(client, user_id, token), job, store)
-            if resolved is None:
-                return outcome("JOB_CANCELLED", "任务已取消，尚未写入成绩。", status="cancelled")
-            friend_code, player, _ = resolved
-            if not friend_code:
-                return outcome("NOT_BOUND", "未找到落雪好友码，请先使用 /bind 绑定。", status="needs_input")
-            await store.update(job.job_id, current_step="fetching_scores")
-            fetched = await _fetch_with_cancel(s._fetch_lxns_all_scores(client, friend_code, token), job, store)
-            if fetched is None:
-                return outcome("JOB_CANCELLED", "任务已取消，尚未写入成绩。", status="cancelled")
-            rows, status, song_count, failed_required, unavailable_required, failed_optional = fetched
-        if status != 200:
-            return outcome("UPSTREAM_UNAVAILABLE", "落雪成绩接口请求失败，本次没有写入。", status="unavailable")
-        parsed, missing = await asyncio.to_thread(s._normalize_lxns_score_items, rows)
-        if not parsed:
-            return outcome("INVALID_DATA" if missing else "NO_SCORES", "落雪没有返回可写入的成绩。", status="needs_input")
-        if failed_required:
-            return outcome("PARTIAL_UPSTREAM", "MASTER/ULTIMA请求失败，本次已取消写入。", status="unavailable")
-        latest = await store.get(job.job_id)
-        if latest.status == "cancel_requested":
-            return outcome("JOB_CANCELLED", "任务已取消，尚未写入成绩。", status="cancelled")
-        await store.update(job.job_id, current_step="committing_scores", side_effect_state="preparing")
-        profile = s._normalize_lxns_player_info(player) if player else None
-        group_policy.check()
-        commit = asyncio.create_task(asyncio.to_thread(commit_scores, user_id, parsed, profile))
-        try:
-            total = await asyncio.shield(commit)
-        except asyncio.CancelledError:
-            # Thread commits cannot be cancelled. Finish observing the commit
-            # before releasing ownership; never report a completed write cancelled.
-            total = await commit
-        result = outcome(data={"user_id": user_id, "song_count": song_count, "fetched": len(parsed),
-                               "total": total, "unavailable_required": unavailable_required, "failed_optional": failed_optional})
-        result.update(effect="local_write", side_effect_state="committed")
-        result["public_hint"] = f"落雪同步成功：获取{len(parsed)}个谱面，当前共{total}个谱面。"
-        return result
-    except PartialWriteError:
-        result = outcome("PARTIAL_WRITE", "成绩已保存，但玩家资料保存失败，请管理员核对。", status="partial")
-        result.update(effect="local_write", side_effect_state="committed")
-        return result
-    except httpx.HTTPError:
-        return outcome("UPSTREAM_UNAVAILABLE", "落雪接口暂时不可用，本次没有写入。", status="unavailable")
-
-
 async def _handle_unchecked(job):
     context = _contexts.get(job.job_id)
     if context is None:
         return outcome("JOB_INTERRUPTED", "原始请求上下文已丢失，任务未继续执行。", status="interrupted")
     bot, event = context
-    if _scope(bot, event) != {key: getattr(job, key) for key in _scope(bot, event)} or (job.capability_id == "score.sync" and job.payload.get("user_id") != job.actor_id):
+    if not valid_request(bot, event) or _scope(bot, event) != {key: getattr(job, key) for key in _scope(bot, event)}:
         return outcome("PERMISSION_DENIED", "任务归属核验失败，本次未执行。", status="denied")
     if job.capability_id == "job.replay":
         return await execute_replay(bot, event, job)
@@ -161,12 +112,12 @@ async def _handle_unchecked(job):
     if job.capability_id in CAPABILITIES:
         from .media_jobs import execute
         return await execute(bot, event, job, _store, _presentations)
-    if job.capability_id != "score.sync":
-        return outcome("CAPABILITY_DISABLED", "任务能力已不可用。", status="unavailable")
-    return await _run_sync(job.actor_id, job, _store)
+    return outcome("CAPABILITY_RETIRED", "该历史业务已退役，请使用 OAuth 直接查询。", status="unavailable")
 
 
 async def _notify(job):
+    if not await private_job_allowed(job):
+        return {"silent": True}
     if job.context_type == "group":
         from types import SimpleNamespace
         capability = job.capability_id
@@ -180,6 +131,14 @@ async def _notify(job):
     if job.response_owner == "agent":
         if llm_api._job_notifier is None:
             return {"deferred": True}
+        # LLM notices may wait in another plugin's queue. Do not hand a future
+        # notification an irreversible copy of personal data to render later.
+        from .player_data import PLAYER_CAPABILITIES
+        from dataclasses import replace
+        if job.capability_id in PLAYER_CAPABILITIES:
+            public = outcome(job.result.get("code", "OK"), "玩家查询任务已结束；原查询结果通过 UniBot 发送，本通知不包含个人资料。", status=job.result.get("status", "ok"),
+                             data={key: job.result.get("data", {}).get(key) for key in ("artifact_delivery", "media_cached")})
+            job = replace(job, result=public)
         return await llm_api.notify_job(job)
     if redundant_media_notice(job):
         return {"silent": True}
@@ -188,7 +147,7 @@ async def _notify(job):
         bot = get_bot(job.bot_id)
     except KeyError:
         return {"deferred": True}
-    label = "剧情" if job.capability_id.startswith("story.") else "资源维护" if job.capability_id.startswith("maintenance.") else "成绩同步" if job.capability_id == "score.sync" else "查询图片"
+    label = "剧情" if job.capability_id.startswith("story.") else "资源维护" if job.capability_id.startswith("maintenance.") else "查询图片"
     text = job.result.get("public_hint") or f"{label}未能完成，请稍后重试或查询任务详情。"
     if job.context_type == "group":
         if not group_policy.enabled(type("Scope", (), {"group_id": int(job.context_id)})(), job.capability_id): return {"silent": True}
@@ -234,15 +193,13 @@ async def _notifications():
             pass
 
 
-async def submit(bot, event, user_id, *, origin="agent"):
-    if str(user_id) != str(event.user_id) or str(bot.self_id) != str(event.self_id):
-        return outcome("PERMISSION_DENIED", "任务必须属于真实发起人。", status="denied")
-    return await submit_operation(bot, event, "score.sync", f"lxns:{user_id}", {"user_id": str(user_id)}, origin=origin)
-
-
 async def submit_operation(bot, event, capability_id, operation_id, payload, *, origin="agent"):
-    if str(bot.self_id) != str(event.self_id):
+    from nonebot.adapters.onebot.v11 import PrivateMessageEvent, GroupMessageEvent
+    if not isinstance(event, (PrivateMessageEvent, GroupMessageEvent)) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "任务身份不匹配。", status="denied")
+    from .player_data import RETIRED, retired
+    if capability_id in RETIRED:
+        return retired()
     if capability_id != "job.replay" and not group_policy.enabled(event, capability_id):
         return outcome("FEATURE_DISABLED", "本群对应功能已关闭。", status="denied")
     store = await ensure_started()
@@ -266,7 +223,7 @@ async def submit_operation(bot, event, capability_id, operation_id, payload, *, 
 
 
 async def existing_source(bot, event, capability_id, operation_id):
-    if str(bot.self_id) != str(event.self_id):
+    if not valid_request(bot, event):
         return outcome("PERMISSION_DENIED", "任务身份不匹配。", status="denied")
     store = await ensure_started()
     job = await store.find_submission(provider=PROVIDER, capability_id=capability_id, operation_id=operation_id,
@@ -282,25 +239,71 @@ async def submission_result(job, created):
                    status=state, data=data)
 
 
+async def private_job_allowed(job, depth=0):
+    from .player_data import RETIRED, job_authorized
+    if job is None or depth > 8 or job.capability_id in RETIRED:
+        return False
+    if job.capability_id == "job.replay":
+        source = await _store.get(job.payload.get("source_job_id", ""))
+        if source is None or any(getattr(source, key) != getattr(job, key) for key in ("bot_id", "actor_id", "context_type", "context_id")):
+            return False
+        return await private_job_allowed(source, depth + 1)
+    return await job_authorized(job)
+
+
+async def public_jobs(jobs):
+    """Gather metadata first, then release one owner's results at a final gate."""
+    from .player_data import PLAYER_CAPABILITIES, RETIRED, get_reader, player_policy_allowed
+    from .oauth import OAuthError
+    resolved, rows = [], []
+    for job in jobs:
+        source, depth = job, 0
+        while source and source.capability_id == "job.replay" and depth < 8:
+            source = await _store.get(source.payload.get("source_job_id", ""))
+            depth += 1
+        if source and source.capability_id == "job.replay":
+            source = None
+        if source and any(getattr(source, key) != getattr(job, key) for key in ("bot_id", "actor_id", "context_type", "context_id")):
+            source = None
+        resolved.append(source)
+        rows.append(dict(job_id=job.job_id, capability_id=job.capability_id, provider=job.provider,
+            actor_id=job.actor_id, source_message_id=job.source_message_id,
+            source_capability=job.payload.get("source_capability", job.capability_id),
+            source_job_id=job.payload.get("source_job_id"), status=job.status, current_step=job.current_step,
+            queue_position=await _store.queue_position(job.job_id), queue_position_scope="queued_only",
+            updated_at=job.updated_at, side_effect_state=job.side_effect_state,
+            delivery=job.delivery_state, notification=job.notification_state,
+            public_error_code=job.public_error_code))
+    # query/list and submission receipts always belong to a single real owner.
+    # No await is permitted after the final credential read and policy checks.
+    owners = {(j.bot_id, j.actor_id) for j in jobs}
+    binding = None
+    if len(owners) == 1 and any(j and j.capability_id in PLAYER_CAPABILITIES for j in resolved):
+        try:
+            binding = await get_reader().oauth.current_binding(*next(iter(owners)))
+        except OAuthError:
+            pass
+    for job, source, row in zip(jobs, resolved, rows):
+        private = source and source.capability_id in PLAYER_CAPABILITIES
+        allowed = source is not None and source.capability_id not in RETIRED
+        if private:
+            allowed = bool(binding and source.payload.get("oauth_binding") == binding and player_policy_allowed(source))
+        row["result"] = job.result if allowed else outcome("AUTHORIZATION_CHANGED", "授权已变化或历史能力已退役，隐藏旧玩家结果；本人任务管理仍可用。", status="denied")
+    return rows
+
+
 async def public_job(job):
-    return dict(job_id=job.job_id, capability_id=job.capability_id, provider=job.provider,
-                actor_id=job.actor_id, source_message_id=job.source_message_id,
-                source_capability=job.payload.get("source_capability", job.capability_id),
-                source_job_id=job.payload.get("source_job_id"), status=job.status, current_step=job.current_step,
-                queue_position=await _store.queue_position(job.job_id), queue_position_scope="queued_only",
-                updated_at=job.updated_at, side_effect_state=job.side_effect_state,
-                delivery=job.delivery_state, notification=job.notification_state,
-                public_error_code=job.public_error_code, result=job.result)
+    return (await public_jobs([job]))[0]
 
 
 async def query(bot, event, action="list", job_id=None):
-    if str(bot.self_id) != str(event.self_id):
+    if not valid_request(bot, event):
         return outcome("PERMISSION_DENIED", "任务身份不匹配。", status="denied")
     store = await ensure_started()
     scope = _scope(bot, event)
     if action == "list":
         jobs = await store.list(**scope, limit=5)
-        return outcome(data={"jobs": [await public_job(job) for job in jobs]})
+        return outcome(data={"jobs": await public_jobs(jobs)})
     job = await store.get(job_id or "")
     if job is None or any(str(getattr(job, key)) != value for key, value in scope.items()):
         return outcome("JOB_NOT_FOUND", "当前会话中没有你可访问的这个任务。", status="needs_input")
@@ -320,6 +323,8 @@ async def replay(bot, event, job_id, *, origin=None, before_send=None):
     if checked["data"]["status"] in {"queued", "running", "cancel_requested"}:
         return outcome("JOB_RUNNING", "原任务尚未结束，请先查询进度。", status="running", data=checked["data"])
     target = await _store.get(job_id)
+    if not await private_job_allowed(target):
+        return outcome("AUTHORIZATION_CHANGED", "原玩家授权已变化，不能补发旧结果。", status="denied")
     if target.capability_id == "job.replay":
         return await replay(bot, event, target.payload["source_job_id"], origin=origin, before_send=before_send)
     if not group_policy.enabled(event, target.capability_id):
@@ -333,7 +338,12 @@ async def replay(bot, event, job_id, *, origin=None, before_send=None):
     if origin is not None:
         return await submit_operation(bot, event, "job.replay", f"replay:{event.message_id}:{job_id}",
                                       {"source_job_id": job_id}, origin=origin)
-    result = await _presentations.replay(job_id, bot, event, limit=200 if before_send else 20, before_send=before_send)
+    original_before_send = before_send
+    async def checked_send():
+        if not await private_job_allowed(target):
+            return False
+        return await original_before_send() if original_before_send else True
+    result = await _presentations.replay(job_id, bot, event, limit=200 if before_send else 20, before_send=checked_send)
     if not result["remaining"]:
         old = await _store.get(job_id)
         saved = dict(old.result)
@@ -351,7 +361,11 @@ async def execute_replay(bot, event, job):
     async def admit():
         nonlocal count
         count += 1
-        return await _store.start_effect(job.job_id, f"replaying_media:{count}")
+        source = await _store.get(job.payload["source_job_id"])
+        if not await private_job_allowed(source):
+            return False
+        admitted = await _store.start_effect(job.job_id, f"replaying_media:{count}")
+        return admitted and await private_job_allowed(source)
     output = await replay(bot, event, job.payload["source_job_id"], before_send=admit)
     latest = await _store.get(job.job_id)
     if latest.status == "cancel_requested" and output.get("data", {}).get("remaining", True):

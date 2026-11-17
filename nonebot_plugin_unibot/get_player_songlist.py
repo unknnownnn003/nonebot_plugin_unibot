@@ -1,27 +1,16 @@
-from nonebot.adapters.onebot.v11 import Bot
-from .services.job_store import async_call
-import asyncio
-import aiofiles
-from .services.results import outcome, image
+"""OAuth player profile renderer and native player-query commands."""
 from nonebot import on_command
-from nonebot.adapters import Event
-from nonebot.adapters.onebot.v11 import MessageSegment
-from nonebot.log import logger
-from nonebot.exception import FinishedException
-from .config import Config
-from .user_bind import get_bind_info
-from nonebot import get_plugin_config
-import httpx
-import platform
+from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message
+from nonebot.params import CommandArg
+from PIL import Image, ImageDraw, ImageFont
 import io
-try:
-    from PIL import Image, ImageDraw, ImageFont
-except ImportError:
-    pass
-
-config = get_plugin_config(Config)
+import platform
+from .services.job_store import async_call
+from .services.results import outcome, image
+from .services.paths import DATA_DIR
 
 get_score = on_command("个人信息", aliases={"分数", "chuinfo"}, priority=5, block=True)
+song_scores_cmd = on_command("chu成绩", priority=5, block=True)
 
 def get_font(size, weight="Normal"):
     try:
@@ -82,17 +71,7 @@ def draw_player_info(data: dict, char_bytes: bytes = None) -> bytes:
             return draw.textbbox((0, 0), text, font=f)[2]
         return draw.textsize(text, font=f)[0]
 
-    lxns_r = data.get("lxns_rating")
-    rin_r = data.get("rin_rating")
-    if lxns_r is not None and rin_r is not None and lxns_r != rin_r:
-        rating_str = f"{lxns_r:.2f}(lxns) / {rin_r:.2f}(rin)"
-    else:
-        lxns_r = data.get("lxns_rating")
-    rin_r = data.get("rin_rating")
-    if lxns_r is not None and rin_r is not None and lxns_r != rin_r:
-        rating_str = f"{lxns_r:.2f}(lxns) / {rin_r:.2f}(rin)"
-    else:
-        rating_str = f"{rating:.2f}"
+    rating_str = f"{rating:.2f}"
     op_str = f"{over_power:.2f} ({op_progress}%)"
     play_str = f"{play_count}"
 
@@ -150,116 +129,32 @@ def draw_player_info(data: dict, char_bytes: bytes = None) -> bytes:
     img.save(buf, format="PNG")
     return buf.getvalue()
 
-async def get_user_friend_code(user_qq: str) -> str:
-    """
-    简易获取好友码函数：
-    先通过 QQ 向落雪 API 盲查。如果查询成功并有 friend_code，则返回该码；
-    如果 API 报错或未绑定，则在本地的 user_bind 文件中查询是否有绑定记录。
-    如果全都没有，则返回空字符串。
-    """
-    if not config.lxns_token:
-        return ""
-        
-    url = f"https://maimai.lxns.net/api/v0/chunithm/player/qq/{user_qq}"
-    headers = {
-        "Authorization": config.lxns_token
-    }
-    
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(url, headers=headers, timeout=10.0)
-            if response.status_code == 200:
-                data = response.json().get('data', {})
-                fc = data.get('friend_code')
-                if fc:
-                    return str(fc)
-        except Exception as e:
-            logger.error(f"查询好友码失败: {e}")
-            
-    bind_data = get_bind_info()
-    return bind_data.get(user_qq, "")
+async def character_bytes(player):
+    character = player.get("character") or {}
+    identifier = character.get("id")
+    if type(identifier) is int and identifier >= 0:
+        path = DATA_DIR / "character" / f"{identifier}.png"
+        if path.is_file():
+            return await async_call(path.read_bytes)
+    return None
 
-async def query_player_profile(user_qq, progress=None):
-    import os, json
-    from .services.paths import DATA_DIR
-    SCORE_DIR = os.path.join(DATA_DIR, 'score')
-    rin_info_path = os.path.join(SCORE_DIR, f'{user_qq}_info.json')
-    rin_info = {}
-    if os.path.exists(rin_info_path):
-        try:
-            async with aiofiles.open(rin_info_path, 'r', encoding='utf-8') as f:
-                rin_info = json.loads(await f.read())
-        except (OSError, ValueError, TypeError):
-            pass
-    lxns_failed = False
-    lxns_data = {}
-    if not config.lxns_token:
-        if not rin_info:
-            return outcome('NOT_CONFIGURED', '未配置落雪咖啡屋(Lxns) Token，且本地没有可用玩家信息。请配置后重试，或上传 Rin 的 JSON 文件。', status='unavailable')
-            return
-        lxns_failed = True
-    else:
-        headers = {'Authorization': config.lxns_token}
-        if progress:
-            await progress()
-        url = f'https://maimai.lxns.net/api/v0/chunithm/player/qq/{user_qq}'
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(url, headers=headers, timeout=10.0)
-                if response.status_code != 200:
-                    bind_data = get_bind_info()
-                    friend_code = bind_data.get(user_qq)
-                    if friend_code:
-                        url = f'https://maimai.lxns.net/api/v0/chunithm/player/{friend_code}'
-                        response = await client.get(url, headers=headers, timeout=10.0)
-                if response.status_code == 200:
-                    lxns_data = response.json().get('data', {})
-                else:
-                    lxns_failed = True
-            except FinishedException:
-                raise
-            except Exception as e:
-                logger.error(f'获取分数失败: {e}')
-                lxns_failed = True
-    if lxns_failed and (not rin_info):
-        return outcome('NOT_BOUND', 'QQ号未绑定落雪查分器，且本地无JSON信息，建议在lxns查分器上绑定QQ号，或者发送/update更新。', status='needs_input')
-        return
-    data = lxns_data
-    if lxns_data:
-        data['lxns_rating'] = lxns_data.get('rating', 0.0)
-    if rin_info:
-        data['rin_rating'] = rin_info.get('PlayerRating', 0.0)
-        if lxns_failed:
-            data['name'] = rin_info.get('UserName', 'Unknown')
-            data['level'] = rin_info.get('Level', 0)
-            data['rating'] = data['rin_rating']
-            data['total_play_count'] = rin_info.get('PlayCount', 0)
-        else:
-            data['rating'] = data['lxns_rating']
-    char_img_bytes = None
-    char_id = data.get('character', {}).get('id')
-    if char_id is not None and (not lxns_failed):
-        char_path = os.path.join(DATA_DIR, 'character', f'{char_id}.png')
-        if os.path.exists(char_path):
-            try:
-                async with aiofiles.open(char_path, 'rb') as f:
-                    char_img_bytes = await f.read()
-            except Exception as e:
-                logger.error(f'读取本地角色图片失败: {e}')
-    try:
-        img_bytes = await async_call(draw_player_info, data, char_img_bytes)
-    except FinishedException:
-        raise
-    except Exception as e:
-        logger.error(f'生成图片失败: {e}')
-        return outcome('RENDER_FAILED', '生成图片失败。', status='unavailable')
-        return
-    return outcome(data={'name': data.get('name'), 'rating': data.get('rating'), 'lxns_rating': data.get('lxns_rating'), 'rin_rating': data.get('rin_rating')}, artifacts=[image(img_bytes)])
+
+async def query_player_profile(snapshot):
+    content = await async_call(draw_player_info, snapshot.player, await character_bytes(snapshot.player))
+    return outcome(data={"player": snapshot.player}, artifacts=[image(content)])
 
 
 @get_score.handle()
-async def _(bot: Bot, event: Event):
+async def _(bot: Bot, event: MessageEvent):
     from .services.media_jobs import submit
-    result = await submit(bot, event, "player.profile", {}, origin="command")
     from .services.results import send_command_result
+    result = await submit(bot, event, "player.profile", {}, origin="command")
     await send_command_result(get_score, result, finish=True)
+
+
+@song_scores_cmd.handle()
+async def _(bot: Bot, event: MessageEvent, msg: Message = CommandArg()):
+    from .services.media_jobs import submit
+    from .services.results import send_command_result
+    result = await submit(bot, event, "player.song_scores", {"query": msg.extract_plain_text().strip()}, origin="command")
+    await send_command_result(song_scores_cmd, result, finish=True)

@@ -1,12 +1,7 @@
 from nonebot.adapters.onebot.v11 import Bot
 from .services.job_store import async_call
-import asyncio
-import aiofiles
 from .services.results import outcome, image
-import json
 import os
-import time
-import httpx
 import math
 import io
 import platform
@@ -17,29 +12,13 @@ from nonebot.adapters import Event
 from nonebot.adapters.onebot.v11 import MessageSegment, Message
 from nonebot.params import CommandArg
 from nonebot.log import logger
-from nonebot.exception import FinishedException
-from nonebot import get_plugin_config
 
-from .config import Config
-
-config = get_plugin_config(Config)
 
 from .services.paths import DATA_DIR as _DATA_DIR
 DATA_DIR = str(_DATA_DIR)
-SONGLIST_PATH = os.path.join(DATA_DIR, "songlist.json")
 JACKET_DIR = os.path.join(DATA_DIR, "jacket")
-SCORE_DIR = os.path.join(DATA_DIR, "score")
 
 chulist_cmd = on_command("chulist", priority=5, block=True)
-
-def load_songlist_full():
-    if not os.path.exists(SONGLIST_PATH):
-        return [], [], []
-    with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
-        from .services.song_model import active_catalog
-        data = active_catalog(json.load(f))
-        return data.get("songs", []), data.get("versions", []), data.get("genres", [])
-
 
 def parse_term_to_difficulty(term: str):
     is_exact = False
@@ -52,8 +31,9 @@ def parse_term_to_difficulty(term: str):
         pass
     return exact_level, is_exact
 
-def get_target_charts(query_text: str):
-    songs, versions, genres = load_songlist_full()
+def get_target_charts(query_text: str, catalog):
+    raw = catalog.as_dict()
+    songs, versions, genres = raw["songs"], raw.get("versions", []), raw.get("genres", [])
     
     # Normalize query for space-separated multi-word terms
     query = query_text.lower()
@@ -121,13 +101,9 @@ def get_target_charts(query_text: str):
         for diff in valid_diffs:
             s_version = version_map.get(diff.get("version", song.get("version")), "")
             d = diff.get("difficulty")
-            c = diff.get("lx_level_value", diff.get("level_value", 0.0))
-            if c is None:
-                c = diff.get("level_value", 0.0)
-            l = diff.get("lx_level", diff.get("level", ""))
-            if l is None:
-                l = diff.get("level", "")
-            
+            c = diff["level_value"]
+            l = diff.get("level", "")
+
             diff_passes = True
             for term in terms:
                 # Check if term matches difficulty
@@ -162,177 +138,6 @@ def get_target_charts(query_text: str):
 
     return list(charts.values())
 
-def parse_user_data(qq: str):
-    json_path = os.path.join(DATA_DIR, "score", f"{qq}.json")
-    if not os.path.exists(json_path):
-        return None, None
-    mtime = os.path.getmtime(json_path)
-    upload_date = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
-    
-    with open(json_path, 'r', encoding='utf-8') as f:
-        try:
-            data = json.load(f)
-        except:
-            return {}, upload_date
-        
-    user_best = {}
-    for row in data:
-        if isinstance(row, dict) and row.get("source") == "manual":
-            continue
-        s_id = str(row.get("id", ""))
-        l_idx = str(row.get("level_index", ""))
-        
-        try:
-            score = int(row.get("score", 0))
-        except:
-            score = 0
-            
-        fc = row.get("full_combo", "")
-        
-        key = f"{s_id}_{l_idx}"
-        if key not in user_best:
-            user_best[key] = {"score": score, "full_combo": fc}
-        else:
-            if score > user_best[key]["score"]:
-                user_best[key] = {"score": score, "full_combo": fc}
-                
-    return user_best, upload_date
-
-def calculate_op(level_value, score, fc_status):
-    bonus = 0.0
-    fc = str(fc_status).lower()
-    if fc == "fullcombo": bonus = 0.5
-    elif fc == "alljustice": bonus = 1.0
-    elif fc == "alljusticecritical": bonus = 1.25
-    
-    if score >= 1007500:
-        op = (level_value + 2.0) * 5.0 + bonus + (score - 1007500) * 0.0015
-    elif score >= 1005000:
-        op = (level_value + 1.5 + ((score - 1005000) // 50) * 0.01) * 5.0 + bonus
-    elif score >= 1000000:
-        op = (level_value + 1.0 + ((score - 1000000) // 100) * 0.01) * 5.0 + bonus
-    elif score >= 990000:
-        op = (level_value + 0.6 + ((score - 990000) // 250) * 0.01) * 5.0 + bonus
-    elif score >= 975000:
-        op = (level_value + 0.0 + ((score - 975000) // 250) * 0.01) * 5.0 + bonus
-    elif score >= 950000:
-        op = (level_value - 1.5 + ((score - 950000) // 150) * 0.01) * 5.0 + bonus
-    elif score >= 925000:
-        op = (level_value - 3.0 + ((score - 925000) // 150) * 0.01) * 5.0 + bonus
-    elif score >= 900000:
-        op = (level_value - 5.0 + ((score - 900000) // 250) * 0.01) * 5.0 + bonus
-    else:
-        op = 0.0
-    
-    return max(0.0, op)
-
-async def get_player_info_api(user_qq: str):
-    res = {"name": user_qq, "rating": 0.0, "level": 0, "title": "", "char_bytes": None, "lxns_rating": None, "rin_rating": None}
-    
-    rin_info = {}
-    rin_info_path = os.path.join(SCORE_DIR, f"{user_qq}_info.json")
-    if os.path.exists(rin_info_path):
-        try:
-            with open(rin_info_path, "r", encoding="utf-8") as f:
-                rin_info = json.load(f)
-        except:
-            pass
-
-    lxns_success = False
-    if config.lxns_token:
-        headers = {"Authorization": config.lxns_token}
-
-        try:
-            from .user_bind import get_bind_info
-            bind_data = get_bind_info()
-            friend_code = bind_data.get(user_qq)
-        except Exception:
-            friend_code = None
-
-        url = f"https://maimai.lxns.net/api/v0/chunithm/player/qq/{user_qq}"      
-
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(url, headers=headers, timeout=10.0)   
-                if response.status_code != 200 and friend_code:
-                    url = f"https://maimai.lxns.net/api/v0/chunithm/player/{friend_code}"
-                    response = await client.get(url, headers=headers, timeout=10.0)
-
-                if response.status_code == 200:
-                    data = response.json().get('data', {})
-                    res["name"] = data.get('name', 'Unknown')
-                    res["lxns_rating"] = data.get('rating', 0.0)
-                    res["rating"] = res["lxns_rating"]
-                    res["level"] = data.get('level', 0)
-                    reborn_count = data.get('reborn_count', data.get('rebornCount', 0))
-                    res["level"] += 100 * reborn_count
-
-                    title_obj = data.get('title', data.get('trophy', {}))
-                    if isinstance(title_obj, dict):
-                        res["title"] = title_obj.get('name', '')
-                    else: res["title"] = str(title_obj)
-
-                    char_id = data.get('character', {}).get('id')
-                    if char_id is not None:
-                        char_path = os.path.join(DATA_DIR, "character", f"{char_id}.png")
-                        if os.path.exists(char_path):
-                            with open(char_path, "rb") as f:
-                                res["char_bytes"] = f.read()
-                    lxns_success = True
-            except Exception as e:
-                logger.error(f"获取玩家信息失败: {e}")
-
-    if rin_info:
-        res["rin_rating"] = rin_info.get("PlayerRating", 0.0)
-        if not lxns_success:
-            res["rating"] = res["rin_rating"]
-            if rin_info.get("UserName"):
-                res["name"] = rin_info["UserName"]
-            if rin_info.get("Level"):
-                res["level"] = rin_info["Level"]
-
-    return res
-    headers = {"Authorization": config.lxns_token}
-    
-    try:
-        from .user_bind import get_bind_info
-        bind_data = get_bind_info()
-        friend_code = bind_data.get(user_qq)
-    except Exception:
-        friend_code = None
-        
-    url = f"https://maimai.lxns.net/api/v0/chunithm/player/qq/{user_qq}"
-
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(url, headers=headers, timeout=10.0)
-            if response.status_code != 200 and friend_code:
-                url = f"https://maimai.lxns.net/api/v0/chunithm/player/{friend_code}"
-                response = await client.get(url, headers=headers, timeout=10.0)
-            
-            if response.status_code == 200:
-                data = response.json().get('data', {})
-                res["name"] = data.get('name', 'Unknown')
-                res["rating"] = data.get('rating', 0.0)
-                res["level"] = data.get('level', 0)
-                reborn_count = data.get('reborn_count', data.get('rebornCount', 0))
-                res["level"] += 100 * reborn_count
-                
-                title_obj = data.get('title', data.get('trophy', {}))
-                if isinstance(title_obj, dict):
-                    res["title"] = title_obj.get('name', '')
-                else: res["title"] = str(title_obj)
-                
-                char_id = data.get('character', {}).get('id')
-                if char_id is not None:
-                    char_path = os.path.join(DATA_DIR, "character", f"{char_id}.png")
-                    if os.path.exists(char_path):
-                        with open(char_path, "rb") as f:
-                            res["char_bytes"] = f.read()
-                return res
-        except Exception as e:
-            logger.error(f"获取玩家信息失败: {e}")
-    return res
 
 def get_font(size, weight="Normal"):
     try:
@@ -422,12 +227,7 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
     text_x = margin_side + 120
     draw.text((text_x, 20), name, font=font_xl, fill=color_text)
     draw.text((text_x, 75), f"Lv.{level} | {title}", font=font_normal, fill=(139, 233, 253))
-    lxns_r = player_info.get("lxns_rating")
-    rin_r = player_info.get("rin_rating")
-    if lxns_r is not None and rin_r is not None and lxns_r != rin_r:
-        rating_str = f"Rating: {lxns_r:.2f} (lxns) / {rin_r:.2f} (rin)"
-    else:
-        rating_str = f"Rating: {rating:.2f}"
+    rating_str = f"Rating: {rating:.2f}"
     draw.text((text_x, 105), rating_str, font=font_medium, fill=(80, 250, 123))
     
     percent = total_op / total_theoretical_op * 100 if total_theoretical_op > 0 else 0
@@ -558,7 +358,7 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
     img.save(buf, format="PNG")
     return buf.getvalue()
 
-async def query_progress(user_qq, query_text, progress=None):
+async def query_progress(snapshot, query_text, catalog):
     no_cat = False
     if '--nocat' in query_text:
         no_cat = True
@@ -566,17 +366,15 @@ async def query_progress(user_qq, query_text, progress=None):
     if not query_text:
         return outcome('INVALID_ARGUMENT', '请提供查询条件（难度/定数/版本/分类等），例如: /chulist 13+ sun 车万', status='needs_input')
         return
-    user_best, upload_date = await async_call(parse_user_data, user_qq)
-    if user_best is None:
-        return outcome('NO_SCORES', '数据不存在，请发送/chuupdate', status='needs_input')
-        return
-    target_charts = await async_call(get_target_charts, query_text)
+    user_best = {f"{r['id']}_{r['level_index']}": r for r in snapshot.scores}
+    upload_date = snapshot.player.get("upload_time", "Unknown")
+    target_charts = await async_call(get_target_charts, query_text, catalog)
     if not target_charts:
         return outcome('NOT_FOUND', '未找到符合条件的谱面！', status='needs_input')
         return
-    if progress:
-        await progress()
-    player_info = await get_player_info_api(user_qq)
+    from .get_player_songlist import character_bytes
+    player_info = dict(snapshot.player, title=(snapshot.player.get("trophy") or {}).get("name", ""),
+                       char_bytes=await character_bytes(snapshot.player))
     draw_items = []
     song_stats = {}
     for c in target_charts:
@@ -585,8 +383,8 @@ async def query_progress(user_qq, query_text, progress=None):
         play = user_best.get(key)
         if play:
             score = play['score']
-            fc = play['full_combo']
-            op = calculate_op(c['level_value'], score, fc)
+            fc = play.get('full_combo') or ''
+            op = play['over_power']
         else:
             op = 0.0
             score = 0
@@ -605,7 +403,7 @@ async def query_progress(user_qq, query_text, progress=None):
     try:
         img_bytes = await async_call(draw_chulist_image, draw_items, total_op, total_theoretical_op, query_text, player_info, upload_date, no_cat=no_cat)
     except Exception as e:
-        logger.error(f'Image gen failed: {e}')
+        logger.error('OAuth 进度图生成失败，未记录玩家数据。')
         return outcome('RENDER_FAILED', '生成图片失败。', status='unavailable')
         return
     return outcome(data={'total_op': total_op, 'theoretical_op': total_theoretical_op, 'chart_count': len(draw_items), 'constant_source': 'lx'}, artifacts=[image(img_bytes)])

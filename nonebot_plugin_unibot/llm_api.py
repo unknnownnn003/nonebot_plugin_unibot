@@ -9,7 +9,7 @@ from .services import group_policy
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "3.3.0"
+CAPABILITY_VERSION = "4.0.0"
 
 
 class SearchArgs(BaseModel):
@@ -31,33 +31,14 @@ class AliasArgs(SongIdArgs):
     alias: str = Field(min_length=1, max_length=120)
 
 
-class BestArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    mode: Literal["b", "b30"] = "b"
-    version: str = Field("2026", max_length=16)
-
-
 class EmptyArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-
-
-class BindArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    friend_code: str = Field(min_length=1, max_length=32, pattern=r"^\d+$")
 
 
 class MaintenanceArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     resource: Literal["songlist", "jackets", "collections", "stories"]
     full_refresh: bool = False
-
-
-class ManualScoreArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    query: str = Field(min_length=1, max_length=120)
-    level_index: int = Field(3, ge=0, le=5)
-    score: int = Field(ge=0, le=1010000)
-    combo: str = Field("", max_length=24)
 
 
 class GameStartArgs(BaseModel):
@@ -73,6 +54,10 @@ class GameGuessArgs(BaseModel):
 class RecommendArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     filter: str = Field("", max_length=20, description="原推什么参数：等级如13+，或aj/ajc/fc；空为全部")
+
+
+class SongScoreArgs(SearchArgs):
+    level_index: int | None = Field(None, ge=0, le=5)
 
 
 class StoryArgs(BaseModel):
@@ -93,11 +78,13 @@ def _describe_capabilities():
                  parameters=SearchArgs.model_json_schema(), effect="none", long_task=True, keywords=["中二", "是什么歌", "查歌", "歌曲", "曲目"]),
             dict(id="song.detail", name="nb_unibot_song_detail", description="按明确歌曲 ID 查询中二节奏详情并发送原曲目图片。",
                  parameters=SongIdArgs.model_json_schema(), effect="none", long_task=True, keywords=["歌曲详情", "曲目详情", "歌曲ID"]),
-            dict(id="player.best", name="nb_unibot_best", description="查询当前发起人的原始成绩图；b国服B30+N20，b30本地成绩按落雪国服定数计算B30。",
-                 parameters=BestArgs.model_json_schema(), effect="none", long_task=True, keywords=["查分", "成绩", "b30", "b图", "rating", "最近打得"]),
-            dict(id="player.profile", name="nb_unibot_profile", description="当前发起人的原个人信息图，保留落雪与Rin回退。",
+            dict(id="player.best", name="nb_unibot_best", description="查询当前真实发起人的落雪 OAuth B30；直接读取个人成绩，无需手动同步。",
+                 parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["查分", "成绩", "b30", "b图", "rating", "最近打得"]),
+            dict(id="player.profile", name="nb_unibot_profile", description="当前真实发起人的完整落雪 OAuth 个人资料图。",
                  parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["个人信息", "玩家信息", "个人资料"]),
-            dict(id="player.progress", name="nb_unibot_progress", description="当前发起人的原国服OP进度图（chulist）；query沿用难度/定数/版本/分类条件。",
+            dict(id="player.song_scores", name="nb_unibot_song_scores", description="查询本人 OAuth 单曲全部已记录难度成绩，支持别名和可选难度；关联 WORLD'S END 保留真实ID。",
+                 parameters=SongScoreArgs.model_json_schema(), effect="none", long_task=True, keywords=["单曲成绩", "chu成绩", "这首成绩"]),
+            dict(id="player.progress", name="nb_unibot_progress", description="当前真实发起人的 OAuth 成绩进度图（chulist）；query为难度/定数/版本/分类条件。",
                  parameters=SearchArgs.model_json_schema(), effect="none", long_task=True, keywords=["进度", "chulist", "完成率"]),
             dict(id="player.recommend", name="nb_unibot_recommend", description="原推什么算法推荐当前发起人可推的谱面；保留原图。",
                  parameters=RecommendArgs.model_json_schema(), effect="none", long_task=True, keywords=["推荐", "推什么", "推分"]),
@@ -125,20 +112,14 @@ def _describe_capabilities():
                  parameters=GameGuessArgs.model_json_schema(), effect="write", keywords=["猜歌", "猜曲答案"]),
             dict(id="help.read", name="nb_unibot_help", description="发送原 UniBot 指令帮助图片，不包含模型管理权限。",
                  parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["帮助", "chuhelp", "命令列表"]),
-            dict(id="player.bind", name="nb_unibot_bind", description="绑定当前真实发起人的落雪好友码；需要用户确认后写入。",
-                 parameters=BindArgs.model_json_schema(), effect="write", keywords=["绑定", "bind", "好友码"]),
-            dict(id="score.submit", name="nb_unibot_score_submit", description="给当前真实发起人保存一条手动成绩；需要用户确认后写入。",
-                 parameters=ManualScoreArgs.model_json_schema(), effect="write", keywords=["传分", "手动成绩", "保存成绩"]),
-            dict(id="score.sync", name="nb_unibot_score_sync", description="排队同步当前真实发起人的落雪成绩；需要用户确认后提交任务。",
-                 parameters=EmptyArgs.model_json_schema(), effect="write", long_task=True, keywords=["同步成绩", "lxupdate", "全量同步"]),
-            dict(id="score.import_file", name="nb_unibot_score_import", description="导入当前消息附带的成绩文件；需要用户确认后写入。",
-                 parameters=EmptyArgs.model_json_schema(), effect="write", keywords=["上传成绩", "chuupdate", "成绩文件"]),
+
+
             dict(id="job.list", name="nb_unibot_jobs", description="读取当前Bot/会话中自己的最近任务；不会重新提交任务。",
-                 parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["任务", "进度", "排队", "同步怎么样"]),
+                 parameters=EmptyArgs.model_json_schema(), effect="none", keywords=["任务", "进度", "排队", "查询结果"]),
             dict(id="job.get", name="nb_unibot_job", description="按任务ID获取当前会话中自己任务的新鲜状态。",
                  parameters=JobArgs.model_json_schema(), effect="none", keywords=["任务状态", "任务详情"]),
             dict(id="job.cancel", name="nb_unibot_cancel_job", description="请求取消当前会话中自己的任务；提交中只能请求取消，不能提前宣称已取消。",
-                 parameters=JobArgs.model_json_schema(), effect="write", keywords=["取消任务", "取消同步", "停止同步"]),
+                 parameters=JobArgs.model_json_schema(), effect="write", keywords=["取消任务", "取消查询", "停止查询"]),
             dict(id="job.replay", name="nb_unibot_replay_job", description="提交当前会话本人缓存媒体的补发任务；可查询/取消，不重新生成，需要确认。",
                  parameters=JobArgs.model_json_schema(), effect="platform_write", long_task=True, keywords=["补发中二任务", "补发剧情", "剧情没收到", "重发剧情"])]
 
@@ -152,12 +133,12 @@ def describe_capabilities():
 @group_policy.checked
 async def prepare_capability(name, arguments, context):
     """Resolve write targets before the user sees a concrete program preview."""
-    import asyncio
     from nonebot.adapters.onebot.v11 import GroupMessageEvent, PrivateMessageEvent
     from .services.results import outcome
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(event.self_id) != str(bot.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
+    from .services.player_data import RETIRED, retired
     if name.startswith("oauth."):
         return outcome("NATIVE_ONLY", "OAuth 授权与解绑请由本人使用原生命令，模型不能代理。", status="denied")
     if name == "maintenance.import_chunirec" or (name == "maintenance.refresh" and arguments.get("resource") in {"chunirec", "chunirec_file"}):
@@ -166,8 +147,9 @@ async def prepare_capability(name, arguments, context):
     from .services.command_receipts import source_owned
     if await source_owned(bot, event):
         return outcome("ALREADY_HANDLED", "原命令已接管这条消息，不再创建重复操作预览。", status="unknown")
-    models = {"player.bind": BindArgs, "score.submit": ManualScoreArgs, "score.sync": EmptyArgs,
-              "score.import_file": EmptyArgs, "game.start": GameStartArgs, "game.guess": GameGuessArgs,
+    if name in RETIRED:
+        return retired()
+    models = {"game.start": GameStartArgs, "game.guess": GameGuessArgs,
               "game.hint": EmptyArgs, "game.give_up": EmptyArgs, "job.cancel": JobArgs, "job.replay": JobArgs}
     try:
         normalized = models[name].model_validate(arguments).model_dump() if name in models else dict(arguments)
@@ -205,22 +187,6 @@ async def prepare_capability(name, arguments, context):
         if not normalized["alias"]:
             return outcome("INVALID_ARGUMENT", "别名不能为空。", status="needs_input")
         constraints["song_title"] = target["data"].get("title", "")
-    if name == "score.submit":
-        from .song import find_song_matches, pick_song_match
-        song, ambiguous = pick_song_match(await asyncio.to_thread(find_song_matches, normalized["query"], 8))
-        if ambiguous:
-            return outcome("AMBIGUOUS_TARGET", "请先用明确歌曲ID指定传分目标。", status="needs_input",
-                           data={"candidates": [{"id": m["song"].get("id"), "title": m["song"].get("title")} for m in ambiguous[:8]]})
-        if not song:
-            return outcome("NOT_FOUND", "未找到匹配的曲目。", status="needs_input")
-        choices = [d for d in song.get("difficulties", []) if d.get("difficulty") == normalized["level_index"]]
-        if len(choices) != 1:
-            return outcome("AMBIGUOUS_TARGET" if choices else "INVALID_ARGUMENT",
-                           "请使用具体歌曲ID和该曲目存在的谱面难度；关联多张 WORLD'S END 时需指定独立ID。", status="needs_input")
-        from .services.song_model import chart_owner
-        song = chart_owner(song, choices[0])
-        normalized["query"] = str(song["id"])
-        constraints["song_title"] = str(song.get("title", ""))
     if name in {"game.guess", "game.hint", "game.give_up"}:
         if not isinstance(event, GroupMessageEvent):
             return outcome("GROUP_ONLY", "猜曲游戏只在群聊中可用。", status="denied")
@@ -239,6 +205,7 @@ async def invoke_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
+    from .services.player_data import RETIRED, retired
     if name.startswith("oauth."):
         return outcome("NATIVE_ONLY", "OAuth 授权与解绑请由本人使用原生命令，模型不能代理。", status="denied")
     if name == "maintenance.import_chunirec" or (name == "maintenance.refresh" and arguments.get("resource") in {"chunirec", "chunirec_file"}):
@@ -247,7 +214,9 @@ async def invoke_capability(name, arguments, context):
     from .services.command_receipts import source_owned
     if await source_owned(bot, event):
         return outcome("ALREADY_HANDLED", "这条消息已由原命令接管，不能再次执行业务；请查询原任务或记录。", status="unknown")
-    if name in {"maintenance.refresh", "song.alias_add", "song.alias_delete", "player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up", "game.start", "game.guess", "job.cancel", "job.replay"} and not context.get("confirmed", False):
+    if name in RETIRED:
+        return retired()
+    if name in {"maintenance.refresh", "song.alias_add", "song.alias_delete", "game.hint", "game.give_up", "game.start", "game.guess", "job.cancel", "job.replay"} and not context.get("confirmed", False):
         return outcome("AUTHORIZATION_REQUIRED", "需要当前用户核对操作预览并确认。", status="denied")
     if name in {"game.guess", "game.hint", "game.give_up"} and not context.get("constraints", {}).get("game_round_id"):
         return outcome("STATE_CHANGED", "操作没有绑定有效猜曲局，请重新预览。", status="needs_input")
@@ -274,20 +243,10 @@ async def invoke_capability(name, arguments, context):
             args = SearchArgs.model_validate(arguments)
             from .services.song import aliases
             output = await aliases(args.query)
-        elif name == "player.best":
-            args = BestArgs.model_validate(arguments)
-            from .services.media_jobs import submit
-            output = await submit(bot, event, name, args.model_dump())
-        elif name == "player.profile":
-            EmptyArgs.model_validate(arguments)
-            from .services.media_jobs import submit
-            output = await submit(bot, event, name, {})
-        elif name == "player.progress":
-            args = SearchArgs.model_validate(arguments)
-            from .services.media_jobs import submit
-            output = await submit(bot, event, name, args.model_dump())
-        elif name == "player.recommend":
-            args = RecommendArgs.model_validate(arguments)
+        elif name in {"player.best", "player.profile", "player.progress", "player.recommend", "player.song_scores"}:
+            model = {"player.best": EmptyArgs, "player.profile": EmptyArgs, "player.progress": SearchArgs,
+                     "player.recommend": RecommendArgs, "player.song_scores": SongScoreArgs}[name]
+            args = model.model_validate(arguments)
             from .services.media_jobs import submit
             output = await submit(bot, event, name, args.model_dump())
         elif name == "story.search":
@@ -338,18 +297,6 @@ async def invoke_capability(name, arguments, context):
             EmptyArgs.model_validate(arguments)
             from .services.media_jobs import submit
             output = await submit(bot, event, name, {})
-        elif name == "player.bind":
-            args = BindArgs.model_validate(arguments)
-            from .services.scores import bind
-            output = await bind(str(event.user_id), args.friend_code)
-        elif name == "score.submit":
-            args = ManualScoreArgs.model_validate(arguments)
-            from .services.scores import submit_manual
-            output = await submit_manual(str(event.user_id), args.query, args.level_index, args.score, args.combo)
-        elif name == "score.sync":
-            EmptyArgs.model_validate(arguments)
-            from .services.sync import submit
-            output = await submit(bot, event, str(event.user_id))
         elif name == "job.replay":
             args = JobArgs.model_validate(arguments)
             from .services.sync import replay
@@ -358,10 +305,6 @@ async def invoke_capability(name, arguments, context):
             args = EmptyArgs.model_validate(arguments) if name == "job.list" else JobArgs.model_validate(arguments)
             from .services.sync import query
             output = await query(bot, event, name.split(".")[1], getattr(args, "job_id", None))
-        elif name == "score.import_file":
-            EmptyArgs.model_validate(arguments)
-            from .services.uploads import import_file
-            output = await import_file(bot, event, str(event.user_id))
         else:
             return outcome("CAPABILITY_DISABLED", "能力未注册。", status="unavailable")
     except ValidationError:
@@ -393,8 +336,11 @@ async def get_job_materials(job_id, context):
     checked = await query(bot, event, "get", job_id)
     if checked.get("status") != "ok":
         return []
-    from .services.sync import _presentations
-    return await _presentations.model_images(job_id, scope(bot, event)) if _presentations else []
+    from .services.sync import _presentations, _store, private_job_allowed
+    if not await private_job_allowed(await _store.get(job_id)):
+        return []
+    images = await _presentations.model_images(job_id, scope(bot, event)) if _presentations else []
+    return images if await private_job_allowed(await _store.get(job_id)) else []
 
 
 async def notify_job(job):

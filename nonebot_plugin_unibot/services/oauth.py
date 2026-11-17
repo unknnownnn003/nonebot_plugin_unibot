@@ -57,6 +57,7 @@ class OAuthService:
         self.clock = clock
         self.group_allowed = group_allowed
         self._locks = {}  # Only active operations; removed when the last waiter exits.
+        self._invalidators = []
         self._metadata = None
         self._keys = None
         self._keys_at = 0
@@ -222,6 +223,8 @@ class OAuthService:
         # Provider currently publishes no revocation endpoint. Never invent one.
         # Deletion also cancels pending callbacks and defeats late refresh writes.
         await async_call(self.store.unlink, owner_key(bot, qq))
+        for invalidate in self._invalidators:
+            invalidate(str(bot), str(qq))
         return "remote_revocation_unavailable"
 
     async def access_token(self, bot, qq):
@@ -232,6 +235,8 @@ class OAuthService:
         try:
             async with lock:
                 row = await async_call(self.store.get, owner)
+                if row and row["status"] == "refreshing" and row["updated"] + 120 > self.clock():
+                    raise OAuthError("BUSY")
                 if not row or row["status"] != "active":
                     raise OAuthError("NOT_AUTHORIZED")
                 value = self.store.unpack(row["payload"])
@@ -244,6 +249,7 @@ class OAuthService:
                 try:
                     reply = await self._http("POST", TOKEN, dict(self._client(), grant_type="refresh_token", refresh_token=value["refresh_token"]))
                     updated = await self._credential(reply, subject=value["subject"])
+                    updated["binding_id"] = value.get("binding_id") or secrets.token_hex(16)
                     saved = await async_call(self.store.save_refresh, owner, reservation, "active", updated, self.clock())
                     if not saved:
                         raise OAuthError("NOT_AUTHORIZED")
@@ -264,4 +270,18 @@ class OAuthService:
 
     async def invalidate_access(self, bot, qq, rejected_token):
         """3B uses this after a definite 401; a stale response cannot revoke a new token."""
-        await async_call(self.store.invalidate, owner_key(bot, qq), rejected_token, self.clock())
+        changed = await async_call(self.store.invalidate, owner_key(bot, qq), rejected_token, self.clock())
+        if changed:
+            for invalidate in self._invalidators:
+                invalidate(str(bot), str(qq))
+        return changed
+
+    async def credential_lease(self, bot, qq):
+        await self.access_token(bot, qq)
+        return await async_call(self.store.credential_lease, owner_key(bot, qq), self.settings.fingerprint)
+
+    async def binding_matches(self, bot, qq, binding):
+        return await async_call(self.store.binding_matches, owner_key(bot, qq), binding, self.settings.fingerprint)
+
+    async def current_binding(self, bot, qq):
+        return await async_call(self.store.current_binding, owner_key(bot, qq), self.settings.fingerprint)
