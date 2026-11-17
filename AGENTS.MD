@@ -90,13 +90,23 @@ git log --oneline -5
 
 提交前确认只暂存自己的改动，避免把本地 `data/`、用户成绩、token、图片缓存或他人未提交代码带入提交。
 
-## Git 工作流状态
+## Git 工作流（2026-11-17 更新）
 
-本目录是独立 Git 仓库。每次接手检查实际分支、远端及工作区，不把历史记录中的分支名或未提交状态当作固定要求。按范围暂存文件，例如只提交本文档时使用：
+本目录是独立 Git 仓库。用户已授权本项目默认直接在 `main` 开发，每个阶段完成针对性测试和必要检查后自动 Commit 并 Push 到 GitHub 的 `origin/main`，方便远程审查，无需逐次询问。本约定优先于协作总入口中的默认新建任务分支规则，仅适用于 UniBot 仓库，不扩大到其他插件、App 或服务器。
+
+- 每次接手先检查实际分支、`git status --short --branch`、暂存区、远端与最近提交，保护已有修改。切换到 `main` 前确认不会覆盖修改；有独立工作时先隔离或保存可恢复检查点，不擅自重置、清场或丢弃文件。
+- 开始开发与推送前获取远端状态；落后时仅在工作区安全的情况下快进同步。若与远端分叉，检查双方差异并安全合并、重新验证，保留已有提交；不能通过强制推送或覆盖式重置绕过冲突。无法安全解决时报告具体阻塞并保留现场。
+- 阶段完成后先运行与改动相关的测试、`git diff --check`，按明确文件范围暂存，检查 `git diff --cached --check`、暂存内容和敏感信息，再提交并普通推送。禁止全量暂存混入未经检查的改动，禁止 `--force`、`--force-with-lease` 或其他改写远端历史的推送。
+- 推送后核对本地 `HEAD` 与远端 `main` 提交及工作区状态。提交或推送失败须如实报告，不能将本地提交称为已同步；远端并发更新造成拒绝时，重新获取、保留双方历史并验证后重试。
+- 自动 Commit/Push 的授权不包括 GitHub Actions 部署、服务器同步、服务重启或发布。不得新增、启用或手动触发部署；若仓库接入了推送即部署的流程，先处理部署触发边界再推送。业务代码、运行数据与凭据仍遵守本文件的保护要求。
+
+例如仅修改本文档且检查通过后：
 
 ```powershell
-git add AGENTS.MD
-git commit -m "Add agent project notes"
+git add -- AGENTS.MD
+git diff --cached --check
+git commit -m "docs: update development workflow"
+git push origin main
 ```
 
 
@@ -112,7 +122,7 @@ git commit -m "Add agent project notes"
 
 - 本 App 工作区为 `E:/projects/my_app`，项目协作总入口见 [AGENTS.md](E:/projects/my_app/AGENTS.md)，详细用户需求见 [requirements.md](E:/projects/my_app/docs/requirements.md)，群策略迁移与验收见 [group-policy-update.md](E:/projects/my_app/docs/group-policy-update.md)。本插件业务细则仍以本文件及目标子目录规则为准。
 - 本地三仓库位于 `D:/Files/nonebot/nonebot_plugin_unknnownnn`、`D:/Files/nonebot/nonebot_plugin_unibot`、`D:/Files/nonebot/nonebot_plugin_llmchat`；UniBot 的规则文件名为 `AGENTS.MD`。跨插件修改须读取各自规则，其他插件不动。
-- 编辑前检查当前 Git 分支与工作区，先保护既有修改；用户已允许合理保存既有工作，提交时明确既有内容、本轮改动与实际验证范围。按范围提交，不能用全量暂存混入未经检查的数据，不重置或清理他人工作，不擅自推送、合并或发布。
+- 编辑前检查当前 Git 分支与工作区，先保护既有修改；用户已允许合理保存既有工作，提交时明确既有内容、本轮改动与实际验证范围。按范围提交，不能用全量暂存混入未经检查的数据，不重置或清理他人工作。UniBot 的 main 开发及阶段自动 Commit/Push 遵循上文 Git 工作流授权，其他仓库的推送、合并、发布仍须在对应授权范围内执行。
 - 不提交真实 .env、令牌、密钥、聊天/账号/成绩数据、缓存、预览图和本地部署快照；公开模板使用占位值。中文用明确 UTF-8 读写，避免默认 ANSI 回写造成乱码。
 - 依赖缓存和临时验证文件优先使用 `E:/projects/my_app/.tools/`，可复用 `tools/env.ps1` 设置环境；不得为测试擅自安装完整 NoneBot 宿主、连接真实账号或发送群消息。只报告实际执行的验证，不把语法检查或 mock 测试称为线上闭环。
 - 先本地修改和验证，再按会话授权同步 `/root/robinbot/plugins/` 下的对应插件；检查线上基线、任务状态与配置，备份后再更新，保留可回滚版本。已明确授权的同一同步范围继续执行，不重复确认。
