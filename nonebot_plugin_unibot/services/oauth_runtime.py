@@ -9,6 +9,27 @@ from .error_notices import error_text
 _service = None
 
 
+def protect_oauth_logs():
+    """Hide sensitive native messages as well as callback request log records."""
+    from nonebot.log import logger
+    # Loguru has one global patcher. Preserve a host-installed patcher and avoid
+    # wrapping it twice when configuration is retried.
+    previous = logger._core.patcher
+    if getattr(previous, "_unibot_oauth", False):
+        return
+
+    def redact(record):
+        if previous:
+            previous(record)
+        if any(marker in record["message"] for marker in
+               ("落雪确认", "/oauth/authorize", "/oauth/lxns/callback")):
+            record["message"] = "UniBot OAuth sensitive operation (details redacted)"
+            record["exception"] = None
+
+    redact._unibot_oauth = True
+    logger.configure(patcher=redact)
+
+
 def get_service():
     """Internal phase 3B accessor; callers must validate identity and live policy."""
     if _service is None:
@@ -69,6 +90,7 @@ def configure():
     config = get_plugin_config(Config)
     if not config.lxns_oauth_enabled:
         return
+    protect_oauth_logs()
     try:
         from fastapi import FastAPI
         from .oauth import CALLBACK_PATH, OAuthService, Settings

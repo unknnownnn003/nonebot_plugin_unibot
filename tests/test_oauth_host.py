@@ -31,6 +31,19 @@ from nonebot_plugin_unibot.services import oauth_runtime as runtime, group_polic
 from nonebot_plugin_unibot.services.oauth import OAuthError, CALLBACK_PATH
 assert runtime._service is not None
 assert runtime.get_service() is runtime._service
+from nonebot.log import logger
+records=[]
+sink=logger.add(lambda message: records.append(message.record),format='{message}')
+logger.bind(component='host').info("Private message: /落雪确认 fixture-confirmation")
+logger.debug("send_private_msg https://maimai.lxns.net/oauth/authorize?state=fixture-state")
+logger.info("ordinary diagnostic")
+logger.remove(sink)
+assert all('fixture-confirmation' not in r['message'] and 'fixture-state' not in r['message'] for r in records)
+assert records[0]['extra']['component']=='host'
+assert records[-1]['message']=='ordinary diagnostic'
+patcher=logger._core.patcher
+runtime.protect_oauth_logs()
+assert logger._core.patcher is patcher
 assert runtime._service.store.path==paths.OAUTH_DIR/'credentials.sqlite3'
 assert len([r for r in nonebot.get_driver().server_app.routes if getattr(r,'path',None)==CALLBACK_PATH])==1
 assert len(llm_api.describe_capabilities())==25
