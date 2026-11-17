@@ -82,7 +82,7 @@ assert image.startswith(b'\xff\xd8')
 assert sum(text.startswith("WORLD'S END") for text in labels)==2
 assert any('8001' in text and '21000' in text for text in labels)
 assert any('8002' in text and '23000' in text for text in labels)
-assert llm_api.CAPABILITY_VERSION=='4.0.0'
+assert llm_api.CAPABILITY_VERSION=='4.1.0'
 specs=llm_api.describe_capabilities()
 assert 'maintenance.import_chunirec' not in {spec['id'] for spec in specs}
 assert 'chunirec' not in llm_api.MaintenanceArgs.model_json_schema()['properties']['resource']['enum']

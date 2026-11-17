@@ -82,7 +82,7 @@ def configure():
         settings = Settings(config.lxns_oauth_client_id, config.lxns_oauth_client_secret.get_secret_value(),
                             config.lxns_oauth_redirect_uri, config.lxns_oauth_encryption_key.get_secret_value())
         store = OAuthStore(OAUTH_DIR, settings.encryption_key)
-        service = OAuthService(settings, store, group_allowed=lambda group: group_policy.enabled(SimpleNamespace(group_id=group), "player.bind"))
+        service = OAuthService(settings, store, group_allowed=lambda group: group_policy.enabled(SimpleNamespace(group_id=group), "oauth.manage"))
         app.add_middleware(ScrubCallbackQuery)
         app.add_route(CALLBACK_PATH, callback_endpoint(service), methods=["GET"])
         _service = service
@@ -106,7 +106,7 @@ async def command(bot, event, action, argument=""):
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(event.self_id) != str(bot.self_id):
         return error_text("无法核验当前请求者。")
     group = getattr(event, "group_id", None)
-    if group is not None and not group_policy.enabled(event, "player.bind"):
+    if group is not None and not group_policy.enabled(event, "oauth.manage"):
         return error_text(HINTS["FEATURE_DISABLED"])
     if action == "confirm" and group is not None:
         return "请在机器人私聊中完成网页确认。"
@@ -133,7 +133,7 @@ async def command(bot, event, action, argument=""):
         if group is None:
             return message
         # Do not fall back to publishing a link or account status into the group.
-        if not group_policy.enabled(event, "player.bind"):
+        if not group_policy.enabled(event, "oauth.manage"):
             return error_text(HINTS["FEATURE_DISABLED"])
         try:
             await bot.send_private_msg(user_id=event.user_id, message=message)

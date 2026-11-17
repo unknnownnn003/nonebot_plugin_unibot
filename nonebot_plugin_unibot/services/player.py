@@ -17,8 +17,8 @@ async def query(bot, event, capability, arguments, *, expected=None, checkpoint=
         catalog = Catalog(await async_call(read_catalog, SONGLIST_PATH)) if capability != "player.profile" else Catalog({"songs": []})
         known = {(str(song.id), chart.difficulty) for song in catalog.songs.values() for chart in song.charts}
         unmatched = sum((str(row["id"]), row["level_index"]) not in known for row in snapshot.scores) if capability != "player.profile" else 0
-        if capability == "player.best":
-            output = await best(snapshot, catalog)
+        if capability in {"player.best", "player.b50"}:
+            output = await best(snapshot, catalog, b50=capability == "player.b50")
         elif capability == "player.profile":
             from ..get_player_songlist import query_player_profile
             output = await query_player_profile(snapshot)
@@ -54,18 +54,31 @@ async def query(bot, event, capability, arguments, *, expected=None, checkpoint=
         return outcome("CATALOG_UNAVAILABLE", "当前国服曲库不可用，请管理员更新曲库后重试。", status="unavailable")
 
 
-async def best(snapshot, catalog):
+async def best(snapshot, catalog, *, b50=False):
     from .. import best_rating as b
-    meta = b.build_chart_meta([song.as_dict() for song in catalog.songs.values()])
-    items = [b.build_item(meta[(str(r["id"]), r["level_index"])], r) for r in snapshot.scores
-             if (str(r["id"]), r["level_index"]) in meta]
-    items.sort(key=lambda row: (row["rating"], row["score"], row["id"], row["level_index"]), reverse=True)
-    items = items[:30]
-    if not items:
-        return outcome("NO_MATCHED_SCORES", "没有匹配当前国服普通谱面的成绩；WORLD'S END 不参与标准 B30。", status="needs_input")
-    jackets = await b.prepare_jackets(items)
-    content = await async_call(b.draw_b30_image, snapshot.player, items, jackets)
-    return outcome(data={"b30_average": b.section_average(items, 30), "chart_count": len(items)}, artifacts=[image(content)])
+    from .rating import select, average
+    try:
+        old, new, unknown, version = select(snapshot, catalog, b50=b50)
+    except ValueError:
+        return outcome("RATING_VERSION_UNAVAILABLE", "曲库缺少落雪当前国服版本，请管理员 /更新songlist 后再查 B50；未猜测新曲范围。", status="unavailable")
+    if not old and not new and unknown:
+        return outcome("RATING_VERSION_UNCLASSIFIED", f"{unknown} 条成绩的歌曲版本未知或晚于当前国服版本，无法构成B50；请更新曲库核对。", status="unavailable", data={"unclassified_scores": unknown})
+    if not old and not new:
+        return outcome("NO_MATCHED_SCORES", "没有可纳入统计的国服普通谱面成绩；WORLD'S END、禁用和尚未配信谱面不参与。", status="needs_input")
+    jackets = await b.prepare_jackets(old + new)
+    if b50:
+        content = await async_call(b.draw_b50_image, snapshot.player, old, new, jackets, version)
+        data = {"rating_estimate": average(old + new, 50), "best30_average": average(old, 30),
+                "new20_average": average(new, 20), "best30_count": len(old), "new20_count": len(new),
+                "rating_version": version, "unclassified_scores": unknown}
+        hint = "B50：旧版本 BEST 30 + 当前版本 NEW 20，缺位按零计，合计除以50；个人资料 Rating 为落雪返回值。"
+        if unknown:
+            hint += f" {unknown} 条歌曲版本未知或晚于当前版本的成绩未分区，请更新曲库核对。"
+    else:
+        content = await async_call(b.draw_b30_image, snapshot.player, old, jackets)
+        data = {"b30_average": average(old, 30), "chart_count": len(old)}
+        hint = "B30：所有版本普通谱面按落雪单谱面 Rating 排序取30，缺位按零计；此均值不是个人总 Rating。"
+    return outcome(hint=hint, data=data, artifacts=[image(content)])
 
 
 def split_query(query, level_index=None):
@@ -100,16 +113,19 @@ async def song_scores(snapshot, catalog, query, level_index=None):
     lines = [f"{family.get('title', '')}（原曲ID {family['id']}）"]
     for row in rows:
         metadata = row["charts"]
-        chart = metadata[0]
         row["metadata_ambiguous"] = len(metadata) > 1
+        row["standard_rating_applicable"] = row["level_index"] < 5
+        row["standard_op_applicable"] = row["level_index"] < 5
         label = LEVELS[row["level_index"]]
         if row["level_index"] == 5:
+            row["upstream_metrics"] = {"rating": row.pop("rating"), "over_power": row.pop("over_power")}
             label += " [" + " / ".join(f"{c.get('kanji', '')} ★{c.get('star', '')}" for c in metadata) + "]"
             if len(metadata) > 1:
                 label += "（同ID多谱面，API未区分，保留全部元数据）"
         lines.append(f"{label} · ID {row['id']} · 谱面版本 {'/'.join(str(c.get('version', '')) for c in metadata)}\n"
-                     f"{row['score']:,} | Rating {row['rating']:.4f} | OP {row['over_power']:.2f}\n"
-                     f"{row.get('clear') or '-'} / {row.get('full_combo') or '-'} / {row.get('full_chain') or '-'}")
+                     + (f"{row['score']:,} | WORLD'S END（不计普通 Rating / OP）\n" if row["level_index"] == 5 else
+                      f"{row['score']:,} | Rating {row['rating']:.4f} | OP {row['over_power']:.2f}\n")
+                     + f"{row.get('clear') or '-'} / {row.get('full_combo') or '-'} / {row.get('full_chain') or '-'}")
     if not rows:
         lines.append("落雪没有返回该曲所选难度的个人成绩；未将缺失记录当作零分。")
     return outcome("OK" if rows else "NO_SONG_SCORES", "\n".join(lines), status="ok" if rows else "needs_input",

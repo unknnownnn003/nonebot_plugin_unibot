@@ -33,7 +33,7 @@ assert runtime._service is not None
 assert runtime.get_service() is runtime._service
 assert runtime._service.store.path==paths.OAUTH_DIR/'credentials.sqlite3'
 assert len([r for r in nonebot.get_driver().server_app.routes if getattr(r,'path',None)==CALLBACK_PATH])==1
-assert len(llm_api.describe_capabilities())==24
+assert len(llm_api.describe_capabilities())==25
 assert all(not s['id'].startswith('oauth.') for s in llm_api.describe_capabilities())
 assert 'fixture-secret' not in repr(nonebot.get_plugin_config(plugin.module.Config))
 assert 'fixture-secret' not in repr(runtime._service.settings)

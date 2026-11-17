@@ -9,7 +9,7 @@ from .services import group_policy
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "4.0.0"
+CAPABILITY_VERSION = "4.1.0"
 
 
 class SearchArgs(BaseModel):
@@ -78,13 +78,15 @@ def _describe_capabilities():
                  parameters=SearchArgs.model_json_schema(), effect="none", long_task=True, keywords=["中二", "是什么歌", "查歌", "歌曲", "曲目"]),
             dict(id="song.detail", name="nb_unibot_song_detail", description="按明确歌曲 ID 查询中二节奏详情并发送原曲目图片。",
                  parameters=SongIdArgs.model_json_schema(), effect="none", long_task=True, keywords=["歌曲详情", "曲目详情", "歌曲ID"]),
-            dict(id="player.best", name="nb_unibot_best", description="查询当前真实发起人的落雪 OAuth B30；直接读取个人成绩，无需手动同步。",
-                 parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["查分", "成绩", "b30", "b图", "rating", "最近打得"]),
+            dict(id="player.best", name="nb_unibot_best", description="查询本人全版本普通谱面Rating前30的B30单榜均值，不是个人总Rating。",
+                 parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["查分", "成绩", "b30", "rating", "最近打得"]),
+            dict(id="player.b50", name="nb_unibot_b50", description="查询本人国服B50：旧版本BEST30与当前版本NEW20，按歌曲版本分区，缺位计零；共用OAuth快照。",
+                 parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["b50", "best30", "new20", "国服rating"]),
             dict(id="player.profile", name="nb_unibot_profile", description="当前真实发起人的完整落雪 OAuth 个人资料图。",
                  parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["个人信息", "玩家信息", "个人资料"]),
-            dict(id="player.song_scores", name="nb_unibot_song_scores", description="查询本人 OAuth 单曲全部已记录难度成绩，支持别名和可选难度；关联 WORLD'S END 保留真实ID。",
+            dict(id="player.song_scores", name="nb_unibot_song_scores", description="查询本人 OAuth 单曲全部已记录难度成绩，支持别名和可选难度；关联 WORLD'S END 保留真实ID，WE不计普通Rating/OP。",
                  parameters=SongScoreArgs.model_json_schema(), effect="none", long_task=True, keywords=["单曲成绩", "chu成绩", "这首成绩"]),
-            dict(id="player.progress", name="nb_unibot_progress", description="当前真实发起人的 OAuth 成绩进度图（chulist）；query为难度/定数/版本/分类条件。",
+            dict(id="player.progress", name="nb_unibot_progress", description="本人OAuth MASTER/ULTIMA筛选进度；OP按筛选谱面逐张合计，非游戏内总OP，WE不参与；query为难度/定数/版本/分类条件。",
                  parameters=SearchArgs.model_json_schema(), effect="none", long_task=True, keywords=["进度", "chulist", "完成率"]),
             dict(id="player.recommend", name="nb_unibot_recommend", description="原推什么算法推荐当前发起人可推的谱面；保留原图。",
                  parameters=RecommendArgs.model_json_schema(), effect="none", long_task=True, keywords=["推荐", "推什么", "推分"]),
@@ -243,8 +245,8 @@ async def invoke_capability(name, arguments, context):
             args = SearchArgs.model_validate(arguments)
             from .services.song import aliases
             output = await aliases(args.query)
-        elif name in {"player.best", "player.profile", "player.progress", "player.recommend", "player.song_scores"}:
-            model = {"player.best": EmptyArgs, "player.profile": EmptyArgs, "player.progress": SearchArgs,
+        elif name in {"player.b50", "player.best", "player.profile", "player.progress", "player.recommend", "player.song_scores"}:
+            model = {"player.b50": EmptyArgs, "player.best": EmptyArgs, "player.profile": EmptyArgs, "player.progress": SearchArgs,
                      "player.recommend": RecommendArgs, "player.song_scores": SongScoreArgs}[name]
             args = model.model_validate(arguments)
             from .services.media_jobs import submit

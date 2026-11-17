@@ -53,11 +53,22 @@ async def asset_bytes(client, url):
 async def refresh_songlist(context):
     from .. import songlist_update as s
     async with http_safety.client() as client:
-        songs = await context.network(client.get(s.BASE_URL + s.API_PATH, params={"notes": True}, timeout=30), "fetching_songlist")
+        config = await context.network(client.get(s.BASE_URL + "/api/v0/site/config", timeout=30), "fetching_cn_version")
+        config.raise_for_status()
+        config = config.json()
+        if config.get("success") is not True or config.get("code") != 200:
+            raise ValueError("Invalid public site configuration")
+        version = config.get("data", {}).get("resource_version", {}).get("chunithm")
+        if type(version) is not int or version <= 0:
+            raise ValueError("Missing CN resource version")
+        songs = await context.network(client.get(s.BASE_URL + s.API_PATH, params={"notes": True, "version": version}, timeout=30), "fetching_songlist")
         songs.raise_for_status()
         aliases = await context.network(client.get(s.BASE_URL + "/api/v0/chunithm/alias/list", timeout=30), "fetching_song_aliases")
         aliases.raise_for_status()
         payload, aliases = songs.json(), aliases.json()
+        if version not in {v.get("version") for v in payload.get("versions", []) if isinstance(v, dict)}:
+            raise ValueError("CN version absent from catalog")
+        payload["rating_version"] = version
     counts = await context.write("committing_songlist", s.commit_lxns_songlist, payload, aliases)
     return outcome(hint=("更新成功！songlist.json 及歌曲别名已成功获取并覆盖。\n"
                          f"曲目数：{counts['song_count']}，别名数：{counts['alias_count']}\n文件修改时间：{counts['mtime']}"), data=counts)

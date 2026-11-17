@@ -14,7 +14,7 @@ import httpx
 from .oauth import ISSUER, OAuthError, owner_key
 from .results import outcome
 
-PLAYER_CAPABILITIES = frozenset({"player.best", "player.profile", "player.progress", "player.recommend", "player.song_scores"})
+PLAYER_CAPABILITIES = frozenset({"player.b50", "player.best", "player.profile", "player.progress", "player.recommend", "player.song_scores"})
 RETIRED = frozenset({"player.bind", "score.sync", "score.submit", "score.import_file"})
 
 

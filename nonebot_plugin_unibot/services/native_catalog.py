@@ -181,13 +181,22 @@ NATIVE_CATALOG = json.loads(r'''{
       }
     ]
   },
+  "player.b50": {
+    "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
+    "native_commands": [
+      {
+        "command": "b50",
+        "line": 14,
+        "matcher": "best_rating_50_cmd",
+        "module": "best_rating",
+        "registration": "on_command"
+      }
+    ]
+  },
   "player.best": {
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
-        "aliases": [
-          "b"
-        ],
         "command": "b30",
         "line": 13,
         "matcher": "best_rating_cmd",

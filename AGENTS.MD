@@ -2,13 +2,13 @@
 
 ## 当前项目与入口
 
-NoneBot2 / OneBot v11 的 CHUNITHM 国服插件，入口为 `nonebot_plugin_unibot/__init__.py`。公共歌曲、谱面与定数使用落雪国服；玩家资料与完整 Score[] 仅使用落雪 OAuth 个人 API。当前主线已完成第三阶段 B，图片视觉重设计留给第四阶段。
+NoneBot2 / OneBot v11 的 CHUNITHM 国服插件，入口为 `nonebot_plugin_unibot/__init__.py`。公共歌曲、谱面与定数使用落雪国服；玩家资料与完整 Score[] 仅使用落雪 OAuth 个人 API。当前主线已完成第三阶段 C，图片视觉重设计留给第四阶段。
 
 - `user_bind.py`：只注册本人 OAuth 授权、确认、状态、解绑；保留模块名是为沿用综合插件的 `scores` 策略映射，不读取旧好友码。
 - `services/oauth.py`、`oauth_store.py`、`oauth_runtime.py`：官方授权协议、加密持久凭据、可选 HTTPS 回调与真实 OneBot 命令。
 - `services/player_data.py`：完整 Player + Score[] 的唯一查询快照、60秒内存缓存、身份/授权代次/策略/取消检查；不读取旧成绩文件。
-- `services/player.py`：B30、个人资料、进度、推荐、单曲成绩共用服务。
-- `best_rating.py`、`get_player_songlist.py`、`overpower_list_local.py`、`recommendation.py`：现有图片及命令适配。`/b` 是 `/b30` 的别名，不保留第二成绩模型。
+- `services/player.py`：B30/B50、个人资料、进度、推荐、单曲成绩共用服务；`services/rating.py`统一配信、禁用及版本分区。
+- `best_rating.py`、`get_player_songlist.py`、`overpower_list_local.py`、`recommendation.py`：现有图片及命令适配。`/b` 已删除；`/b30` 单榜与 `/b50` 双区共用快照，不建立第二成绩模型。
 - `services/song_model.py`：唯一活动曲库 Catalog/Song/Chart；`song.py`：查询、详情与别名；`chuguess.py`：猜曲。
 - `songlist_update.py`、`get_resource.py`、`collection_update.py`、`story.py`：曲库和资源/剧情维护。
 - `services/media_jobs.py`、`sync.py`、`job_store.py`、`presentation_store.py`、`command_receipts.py`：统一队列、幂等、取消、投递和缓存补发。`sync.py` 名字保留为队列契约，成绩同步业务已删除。
@@ -53,7 +53,7 @@ NoneBot2 / OneBot v11 的 CHUNITHM 国服插件，入口为 `nonebot_plugin_unib
 
 ## LLM 接口与三插件依赖
 
-- 当前 API_VERSION=1、CAPABILITY_VERSION=4.0.0，公开24项能力。玩家能力为 `player.best/profile/progress/recommend/song_scores`，均为真实请求人的OAuth查询；OAuth授权/确认/解绑保持原生，不交给模型代理。
+- 当前 API_VERSION=1、CAPABILITY_VERSION=4.1.0，公开25项能力。玩家能力为 `player.best/profile/progress/recommend/song_scores`，均为真实请求人的OAuth查询；OAuth授权/确认/解绑保持原生，不交给模型代理。
 - 参数schema、ID、nb_unibot名称、effect、long_task、结果码与制品是跨插件契约。变更须核对LLMChat调用方、动态发现、静态快照及综合面板，按语义调整版本。当前移除 `player.bind`、`score.submit/sync/import_file`，旧缓存明确拒绝；`player.best`不再接收mode/version。
 - 保留 `describe_capabilities/context`、prepare/invoke、任务通知、材料及表达接口。结果统一 `services/results.outcome`，拒绝/缺配置/未知结果不能假报成功。写入继续真实用户确认和执行时重查权限。
 - `services/native_catalog.py` 由**本仓** `tools/export_native_catalog.py` 生成；命令改动后生成并运行 `--check`。OAuth单独列入NATIVE_ONLY_COMMANDS，不作为模型工具。不能运行旧邻仓生成器覆盖。
@@ -98,3 +98,18 @@ git diff --check
 ## 协作入口
 
 App总入口为 [AGENTS](E:/projects/my_app/AGENTS.md)，本插件业务与本轮用户授权优先。本地邻仓为 `D:/Files/nonebot/nonebot_plugin_llmchat`、`D:/Files/nonebot/nonebot_plugin_unknnownnn`；跨仓修改前需单独授权并读取各自规则。服务器 `/root/robinbot/plugins/`、Caddy及 `robinbot.service` 等均不在本轮写入范围；不重启NapCat、不退出QQ。
+
+
+## 第三阶段 C：统计语义与联动
+
+- `/b`及其别名完全删除。`player.best` / `/b30`按全版本已匹配且有效的普通谱面Rating降序取30，分母固定30，标题为B30均值，不能称作玩家总Rating。`player.b50` / `/b50`按歌曲版本分为旧曲BEST30与当前曲NEW20，互不重叠，缺位计零，合计除50；两者只读同一OAuth快照。
+- 当前国服版本从落雪 `/api/v0/site/config` 的 `resource_version.chunithm`取得，并显式传给曲库请求，验证后随曲库原子写入`rating_version`。不能取`versions`最大值、谱面追加版本或本机日期猜测。旧曲ULTIMA保留自身版本展示，但不改变歌曲所属分区；旧曲库缺此元数据时B50明确拒绝，更新曲库后恢复。
+- 普通Rating/OP排除WORLD’S END和disabled曲目。按歌曲及谱面release_date在UTC+8当天07:00生效；日期缺失或无效沿用官方不限制契约。WORLD’S END单曲结果显示实际分数/ID/属性，普通Rating/OP标为不适用，上游数值仅保留在明确标记的upstream_metrics，不作为标准指标输出。
+- `/chulist`筛选MASTER/ULTIMA，每张筛选谱面各计一次，分组与总计同口径，未记录计零。明确标记“筛选谱面OP合计，非游戏内按曲最高的玩家总OP”；不可把此值冒充完整账号OP。公式仅计算理论上限，个人OP用落雪返回值。
+- OAuth群策略标识使用内部`oauth.manage`映射至原`scores`键，不再借用已退役`player.bind`工具名。原命令模块仍为user_bind；B30/B50/单曲等沿用player，推荐沿用recommend，群功能键和选择不重置。
+- 只有当前维护的契约进入测试与能力快照。邻仓回归器不再排除旧断言；删除退役附件/同步测试，保留明确拒绝及新OAuth替代覆盖。LLMChat生成器不能覆盖UniBot原生命令目录；公开schema快照由其`tools/export_capabilities.py`生成并检查。
+- 本阶段用户特别授权三个本地插件的本次联动修改及按范围Commit/Push；不扩展到其他仓库或生产环境。既有邻仓未推送提交不应夹带发布；远端缺失时保留本地提交，报告需要的远端信息。
+
+## 后续服务器配置交接
+
+用户2026-11-17说明OAuth密钥相关配置已放在本地`.env.prod`，服务器尚未修改。本阶段不读取、输出、提交或复制真实密钥，也不部署。后续明确获准同步服务器时，将该文件内容追加到服务器`.env.prod`文末；先安全备份并检查同名键冲突，在私密文件操作中处理，不把原值写入日志、命令参数、模型上下文或Git。

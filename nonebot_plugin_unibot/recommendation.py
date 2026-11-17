@@ -117,6 +117,8 @@ async def recommend_chart(snapshot, query_text, catalog):
             level_filter = None
         elif not level_filter:
             level_filter = None
+    from .services.rating import eligible
+    allowed = {(str(s.id), c.difficulty) for s in catalog.songs.values() for c in s.charts if eligible(s, c)}
     songs = catalog.as_dict()["songs"]
     score_dict = {f"{row['id']}_{row['level_index']}": row for row in snapshot.scores}
     candidates = []
@@ -124,7 +126,7 @@ async def recommend_chart(snapshot, query_text, catalog):
         song_id = str(song.get('id'))
         for diff in song.get('difficulties', []):
             level_index = str(diff.get('difficulty', ''))
-            if level_index not in ('3', '4'):
+            if level_index not in ('3', '4') or (song_id, diff.get('difficulty')) not in allowed:
                 continue
             level_str = str(diff.get('level', ''))
             level_value = float(diff.get('level_value', 0.0))

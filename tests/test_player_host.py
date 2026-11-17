@@ -32,7 +32,9 @@ from nonebot_plugin_unibot.services.oauth import OAuthService,Settings
 from nonebot_plugin_unibot.services.oauth_store import OAuthStore
 from nonebot.adapters.onebot.v11 import Bot,MessageSegment
 from nonebot_plugin_unibot.services.presentation_store import scope
-paths.SONGLIST_PATH.write_text(json.dumps(fixture()),encoding='utf-8')
+catalog=fixture();catalog['rating_version']=24000
+catalog['versions'].append(dict(version=20000,title='CHUNITHM NEW'))
+paths.SONGLIST_PATH.write_text(json.dumps(catalog),encoding='utf-8')
 native_song.add_song_alias('10','family-alias')
 legacy=paths.DATA_DIR/'score';legacy.mkdir(exist_ok=True)
 (legacy/'7.json').write_text('[{"id":10,"score":999999999}]')
@@ -82,7 +84,7 @@ async def run():
     bind();bind('8')
     with patch.object(group_policy,'enabled',side_effect=lambda *a:allowed or getattr(a[0],'group_id',None) is None),patch.object(group_policy,'scope',side_effect=lambda *a:nullcontext()),patch.object(b,'prepare_jackets',AsyncMock(return_value={})),patch.object(rec,'download_jacket',AsyncMock(return_value=None)):
         snapshot=await reader.get(bot,e,'player.best')
-        for cap,args in [('player.best',{}),('player.profile',{}),('player.progress',{'query':'new'}),('player.recommend',{'filter':''}),('player.song_scores',{'query':'family-alias'})]:
+        for cap,args in [('player.best',{}),('player.b50',{}),('player.profile',{}),('player.progress',{'query':'new'}),('player.recommend',{'filter':''}),('player.song_scores',{'query':'family-alias'})]:
             result=await player.query(bot,e,cap,args)
             assert result['status']=='ok',(cap,result)
             if cap!='player.profile':assert result['data']['unmatched_scores']==1
@@ -90,6 +92,9 @@ async def run():
                 assert result['data']['chart_count']==2
                 assert abs(result['data']['b30_average']-1.09)<1e-9
                 assert result['artifacts'][0]['content'].startswith(b'\x89PNG')
+            if cap=='player.b50':
+                assert result['data']['best30_count']==2 and result['data']['new20_count']==0
+                assert abs(result['data']['rating_estimate']-.654)<1e-9
             if cap=='player.song_scores':
                 assert {r['id'] for r in result['data']['scores']}=={10,8001}
                 assert {r['level_index'] for r in result['data']['scores']}=={3,4,5}
@@ -97,6 +102,8 @@ async def run():
         result=await player.query(bot,e,'player.song_scores',{'query':'8001 we'})
         assert [r['id'] for r in result['data']['scores']]==[8001]
         assert result['data']['song_id']==10
+        assert '不计普通 Rating / OP' in result['public_hint']
+        assert 'rating' not in result['data']['scores'][0] and result['data']['scores'][0]['standard_op_applicable'] is False
         # Same-ID WE metadata remains a list, never last-write-wins by difficulty.
         saved_catalog=paths.SONGLIST_PATH.read_bytes()
         multiple=json.loads(saved_catalog)
@@ -112,9 +119,9 @@ async def run():
         assert rendered['full_combo']=='' and rendered['full_chain']=='fullchain'
         result=await player.query(bot,e,'player.song_scores',{'query':'Same title'})
         assert result['code']=='AMBIGUOUS_TARGET'
-        specs=llm_api.describe_capabilities();assert len(specs)==24 and llm_api.CAPABILITY_VERSION=='4.0.0'
+        specs=llm_api.describe_capabilities();assert len(specs)==25 and llm_api.CAPABILITY_VERSION=='4.1.0'
         assert not {'player.bind','score.submit','score.sync','score.import_file'} & {s['id'] for s in specs}
-        assert next(s for s in specs if s['id']=='player.best')['native_commands'][0]['aliases']==['b']
+        assert next(s for s in specs if s['id']=='player.best')['native_commands'][0].get('aliases',[])==[]
         for method in [llm_api.prepare_capability,llm_api.invoke_capability]:
             for retired in ['player.bind','score.submit','score.sync','score.import_file']:
                 assert (await method(retired,{},dict(bot=bot,event=e,confirmed=True)))['code']=='CAPABILITY_RETIRED'

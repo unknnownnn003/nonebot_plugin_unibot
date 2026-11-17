@@ -10,7 +10,7 @@ from weakref import WeakValueDictionary
 
 _submission_locks = WeakValueDictionary()
 
-CAPABILITIES = {"player.best", "player.profile", "player.progress", "player.recommend",
+CAPABILITIES = {"player.b50", "player.best", "player.profile", "player.progress", "player.recommend",
                 "player.song_scores", "song.search", "song.detail", "help.read"}
 
 
@@ -129,7 +129,7 @@ async def execute(bot, event, job, store, presentations):
         if len(contents) != len(artifacts):
             return outcome("UNSUPPORTED_MEDIA_PLAN", "媒体类型尚不支持。", status="failed")
         text = output.get("public_hint") or output.get("fallback_text")
-        if job.capability_id == "player.song_scores" and text:
+        if job.capability_id in {"player.song_scores", "player.best", "player.b50", "player.progress"} and text:
             contents.append(MessageSegment.text(text))
         elif contents and output.get("data", {}).get("unmatched_scores"):
             contents.append(MessageSegment.text(text))
