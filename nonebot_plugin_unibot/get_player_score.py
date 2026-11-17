@@ -118,6 +118,9 @@ def _load_song_meta() -> Dict[str, Dict[str, Any]]:
         else:
             songs = [v for v in raw.values() if isinstance(v, dict)]
 
+    from .services.song_model import active_catalog
+    songs = active_catalog({"songs": songs})["songs"]
+
     song_meta: Dict[str, Dict[str, Any]] = {}
     for song in songs:
         if not isinstance(song, dict):
@@ -131,19 +134,24 @@ def _load_song_meta() -> Dict[str, Dict[str, Any]]:
         title = song.get("title") or song.get("song_name") or ""
 
         diff_map: Dict[str, Dict[str, Any]] = {}
+        ambiguous_difficulties = set()
         for diff in difficulties:
             if not isinstance(diff, dict):
                 continue
             di = diff.get("difficulty")
             if di is None:
                 continue
+            if str(di) in ambiguous_difficulties:
+                continue
+            if str(di) in diff_map:
+                diff_map.pop(str(di))
+                ambiguous_difficulties.add(str(di))
+                continue  # Legacy score keys cannot identify same-ID WE variants.
             diff_map[str(di)] = {
                 "level": diff.get("level"),
                 "level_value": diff.get("level_value"),
                 "lx_level": diff.get("lx_level"),
                 "lx_level_value": diff.get("lx_level_value"),
-                "chunirec_level": diff.get("chunirec_level"),
-                "chunirec_level_value": diff.get("chunirec_level_value"),
             }
 
         song_meta[str(song_id)] = {
@@ -170,7 +178,7 @@ def _inject_level_value(items: List[Dict[str, Any]], song_meta: Dict[str, Dict[s
         elif "level_value" not in new_item:
             new_item["level_value"] = None
 
-        for key in ["lx_level_value", "chunirec_level_value", "lx_level", "chunirec_level"]:
+        for key in ["lx_level_value", "lx_level"]:
             if diff_info.get(key) is not None:
                 new_item[key] = diff_info.get(key)
 
@@ -315,14 +323,16 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
         await _error_call(manual_score.finish, "未找到匹配的曲目。")
 
     difficulties = local_song.get("difficulties", []) if isinstance(local_song, dict) else []
-    diff_info = next(
-        (diff for diff in difficulties if isinstance(diff, dict) and _as_int(diff.get("difficulty"), -1) == level_index),
-        None,
-    )
+    choices = [diff for diff in difficulties if isinstance(diff, dict) and _as_int(diff.get("difficulty"), -1) == level_index]
+    if len(choices) > 1:
+        await manual_score.finish("存在多张关联谱面，请用具体 WORLD'S END 歌曲 ID 指定。")
+    diff_info = choices[0] if choices else None
     if not diff_info:
         await manual_score.finish("匹配到曲目，但该曲目没有对应难度。")
 
-    song_id = str(local_song.get("id"))
+    from .services.song_model import chart_owner
+    local_song = chart_owner(local_song, diff_info)
+    song_id = str(diff_info.get("song_id", local_song.get("id")))
     now = datetime.now(timezone.utc).isoformat()
     row: Dict[str, Any] = {
         "id": song_id,
@@ -332,7 +342,6 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
         "level": diff_info.get("level"),
         "level_value": diff_info.get("level_value"),
         "lx_level_value": diff_info.get("lx_level_value"),
-        "chunirec_level_value": diff_info.get("chunirec_level_value"),
         "rank": "",
         "clear": "",
         "full_combo": normalize_manual_combo(combo),

@@ -9,7 +9,7 @@ from .services import group_policy
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "3.2.0"
+CAPABILITY_VERSION = "3.3.0"
 
 
 class SearchArgs(BaseModel):
@@ -48,7 +48,7 @@ class BindArgs(BaseModel):
 
 class MaintenanceArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    resource: Literal["songlist", "chunirec", "jackets", "collections", "stories"]
+    resource: Literal["songlist", "jackets", "collections", "stories"]
     full_refresh: bool = False
 
 
@@ -86,17 +86,14 @@ class StoryCategoryArgs(BaseModel):
 
 
 def _describe_capabilities():
-    return [dict(id="maintenance.refresh", name="nb_unibot_maintenance", description="排队更新原曲库/chunirec/曲绘/收藏品/剧情资源；仅SUPERUSER，全局写入需确认。",
+    return [dict(id="maintenance.refresh", name="nb_unibot_maintenance", description="排队更新落雪国服曲库/曲绘/收藏品/剧情资源；仅SUPERUSER，全局写入需确认。",
                  parameters=MaintenanceArgs.model_json_schema(), effect="write", long_task=True,
-                 keywords=["更新曲库", "更新songlist", "更新chunirec", "更新曲绘", "更新收藏品", "更新剧情", "维护资源"]),
-            dict(id="maintenance.import_chunirec", name="nb_unibot_import_chunirec", description="将当前附件中的fetch_chunirec_data.py曲库JSON排队合并；仅SUPERUSER，需确认，不是个人成绩导入。",
-                 parameters=EmptyArgs.model_json_schema(), effect="write", long_task=True,
-                 keywords=["上传chunirec", "上传日服曲库", "导入曲库", "上传日服songlist"]),
+                 keywords=["更新曲库", "更新songlist", "更新曲绘", "更新收藏品", "更新剧情", "维护资源"]),
             dict(id="song.search", name="nb_unibot_song", description="中二节奏查歌、歌曲详情与歧义候选图。",
                  parameters=SearchArgs.model_json_schema(), effect="none", long_task=True, keywords=["中二", "是什么歌", "查歌", "歌曲", "曲目"]),
             dict(id="song.detail", name="nb_unibot_song_detail", description="按明确歌曲 ID 查询中二节奏详情并发送原曲目图片。",
                  parameters=SongIdArgs.model_json_schema(), effect="none", long_task=True, keywords=["歌曲详情", "曲目详情", "歌曲ID"]),
-            dict(id="player.best", name="nb_unibot_best", description="查询当前发起人的原始成绩图；b国服B30+N20，b30本地日服定数B30。",
+            dict(id="player.best", name="nb_unibot_best", description="查询当前发起人的原始成绩图；b国服B30+N20，b30本地成绩按落雪国服定数计算B30。",
                  parameters=BestArgs.model_json_schema(), effect="none", long_task=True, keywords=["查分", "成绩", "b30", "b图", "rating", "最近打得"]),
             dict(id="player.profile", name="nb_unibot_profile", description="当前发起人的原个人信息图，保留落雪与Rin回退。",
                  parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["个人信息", "玩家信息", "个人资料"]),
@@ -161,11 +158,13 @@ async def prepare_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(event.self_id) != str(bot.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
+    if name == "maintenance.import_chunirec" or (name == "maintenance.refresh" and arguments.get("resource") in {"chunirec", "chunirec_file"}):
+        from .services.maintenance import retired_source
+        return retired_source()
     from .services.command_receipts import source_owned
     if await source_owned(bot, event):
         return outcome("ALREADY_HANDLED", "原命令已接管这条消息，不再创建重复操作预览。", status="unknown")
     models = {"player.bind": BindArgs, "score.submit": ManualScoreArgs, "score.sync": EmptyArgs,
-              "maintenance.import_chunirec": EmptyArgs,
               "score.import_file": EmptyArgs, "game.start": GameStartArgs, "game.guess": GameGuessArgs,
               "game.hint": EmptyArgs, "game.give_up": EmptyArgs, "job.cancel": JobArgs, "job.replay": JobArgs}
     try:
@@ -188,22 +187,7 @@ async def prepare_capability(name, arguments, context):
             return outcome("PERMISSION_DENIED", "资源维护仅SUPERUSER可用。", status="denied")
         if normalized["full_refresh"] and normalized["resource"] != "jackets":
             return outcome("INVALID_ARGUMENT", "完整重下仅适用于曲绘。", status="needs_input")
-        if normalized["resource"] == "chunirec":
-            from .songlist_update import config
-            if not config.chunirec_token:
-                return outcome("NOT_CONFIGURED", "未配置chunirec令牌，当前不能在线同步该曲库。", status="unavailable")
         constraints["scope"] = "global"
-    if name == "maintenance.import_chunirec":
-        EmptyArgs.model_validate(arguments)
-        if not native_superuser(bot, event):
-            return outcome("PERMISSION_DENIED", "资源维护仅SUPERUSER可用。", status="denied")
-        from .services.attachments import file_reference
-        import hashlib, json
-        reference = file_reference(event)
-        if reference is None:
-            return outcome("NEED_ATTACHMENT", "请在当前请求中附上曲库JSON文件。", status="needs_input")
-        constraints = dict(scope="global", attachment_reference=hashlib.sha256(json.dumps(reference, sort_keys=True, default=str).encode()).hexdigest(),
-                           attachment_name=str(reference.get("name") or reference.get("file_name") or "当前附件")[:120])
     if name in {"song.alias_add", "song.alias_delete"}:
         try:
             normalized = AliasArgs.model_validate(arguments).model_dump()
@@ -227,6 +211,12 @@ async def prepare_capability(name, arguments, context):
                            data={"candidates": [{"id": m["song"].get("id"), "title": m["song"].get("title")} for m in ambiguous[:8]]})
         if not song:
             return outcome("NOT_FOUND", "未找到匹配的曲目。", status="needs_input")
+        choices = [d for d in song.get("difficulties", []) if d.get("difficulty") == normalized["level_index"]]
+        if len(choices) != 1:
+            return outcome("AMBIGUOUS_TARGET" if choices else "INVALID_ARGUMENT",
+                           "请使用具体歌曲ID和该曲目存在的谱面难度；关联多张 WORLD'S END 时需指定独立ID。", status="needs_input")
+        from .services.song_model import chart_owner
+        song = chart_owner(song, choices[0])
         normalized["query"] = str(song["id"])
         constraints["song_title"] = str(song.get("title", ""))
     if name in {"game.guess", "game.hint", "game.give_up"}:
@@ -247,10 +237,13 @@ async def invoke_capability(name, arguments, context):
     event, bot = context["event"], context["bot"]
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)) or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "无法核验当前请求者。", status="denied")
+    if name == "maintenance.import_chunirec" or (name == "maintenance.refresh" and arguments.get("resource") in {"chunirec", "chunirec_file"}):
+        from .services.maintenance import retired_source
+        return retired_source()
     from .services.command_receipts import source_owned
     if await source_owned(bot, event):
         return outcome("ALREADY_HANDLED", "这条消息已由原命令接管，不能再次执行业务；请查询原任务或记录。", status="unknown")
-    if name in {"maintenance.refresh", "maintenance.import_chunirec", "song.alias_add", "song.alias_delete", "player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up", "game.start", "game.guess", "job.cancel", "job.replay"} and not context.get("confirmed", False):
+    if name in {"maintenance.refresh", "song.alias_add", "song.alias_delete", "player.bind", "score.submit", "score.sync", "score.import_file", "game.hint", "game.give_up", "game.start", "game.guess", "job.cancel", "job.replay"} and not context.get("confirmed", False):
         return outcome("AUTHORIZATION_REQUIRED", "需要当前用户核对操作预览并确认。", status="denied")
     if name in {"game.guess", "game.hint", "game.give_up"} and not context.get("constraints", {}).get("game_round_id"):
         return outcome("STATE_CHANGED", "操作没有绑定有效猜曲局，请重新预览。", status="needs_input")
@@ -259,15 +252,6 @@ async def invoke_capability(name, arguments, context):
             args = MaintenanceArgs.model_validate(arguments)
             from .services.maintenance import submit
             output = await submit(bot, event, args.resource, args.full_refresh)
-        elif name == "maintenance.import_chunirec":
-            EmptyArgs.model_validate(arguments)
-            prepared = await prepare_capability(name, arguments, context)
-            if prepared.get("status") != "ok":
-                return prepared
-            if prepared["constraints"].get("attachment_reference") != context.get("constraints", {}).get("attachment_reference"):
-                return outcome("STATE_CHANGED", "当前附件已变化，请重新预览。", status="needs_input")
-            from .services.maintenance import submit_import
-            output = await submit_import(bot, event)
         elif name in {"song.alias_add", "song.alias_delete"}:
             args = AliasArgs.model_validate(arguments)
             if name == "song.alias_delete" and not native_superuser(bot, event):

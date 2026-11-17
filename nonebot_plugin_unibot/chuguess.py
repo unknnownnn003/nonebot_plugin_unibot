@@ -89,7 +89,8 @@ def load_songlist() -> List[Dict[str, Any]]:
     try:
         with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("songs", [])
+        from .services.song_model import active_catalog
+        return active_catalog(data)["songs"]
     except Exception as e:
         logger.error(f"读取 songlist 失败: {e}")
         return []
@@ -172,12 +173,10 @@ def pick_random_song_and_jacket() -> Optional[Tuple[Dict[str, Any], Image.Image,
 
     candidates = []
     for song in songs:
-        song_id = str(song.get("id", ""))
-        jacket_id = song_id
-        if song_id in available_ids:
+        from .services.song_model import jacket_id as resource_id
+        jacket_id = str(resource_id(song))
+        if jacket_id in available_ids:
             candidates.append((song, jacket_id))
-        if song.get("origin_id") and str(song["origin_id"]) in available_ids:
-            candidates.append((song, str(song["origin_id"])))
 
     if not candidates:
         return None

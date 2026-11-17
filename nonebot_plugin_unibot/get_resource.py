@@ -134,21 +134,6 @@ async def write_bytes_atomic(path: str, content: bytes) -> None:
     os.replace(temp_path, path)
 
 
-def collect_chunirec_jacket_ids(songs: list) -> set[str]:
-    ids: set[str] = set()
-    for song in songs:
-        if not isinstance(song, dict) or song.get("data_source") != "chunirec":
-            continue
-        for key in ("id", "jacket_id", "rinnet_id", "chunirec_id"):
-            value = song.get(key)
-            if value not in (None, ""):
-                ids.add(str(value))
-        for diff in song.get("difficulties", []) or []:
-            if isinstance(diff, dict) and diff.get("origin_id") not in (None, ""):
-                ids.add(str(diff["origin_id"]))
-    return ids
-
-
 def purge_cached_jackets(ids: set[str]) -> int:
     removed = 0
     for sid in ids:

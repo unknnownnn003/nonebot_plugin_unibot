@@ -21,7 +21,7 @@
 
 - `README.md`：用户侧指令说明。
 - `nonebot_plugin_unibot/__init__.py`：插件元数据与模块导入入口。
-- `nonebot_plugin_unibot/config.py`：插件配置模型，当前声明 `lxns_token`、`chunirec_token`、`naominet_token`、`naominet_session` 四个可选字段。后续退役数据源前仍保留现有配置兼容。
+- `nonebot_plugin_unibot/config.py`：插件配置模型，当前仅声明 `lxns_token`；旧日服凭据配置已不读取，宿主旧配置键不自动删除。
 - `nonebot_plugin_unibot/requirements.txt`：运行依赖清单。
 - `nonebot_plugin_unibot/user_bind.py`：QQ 到落雪好友码的本地绑定。
 - `nonebot_plugin_unibot/get_player_score.py`：成绩上传、解析、合并和同步逻辑。
@@ -74,7 +74,7 @@ pip install -r nonebot_plugin_unibot\requirements.txt
 
 ```powershell
 $env:PYTHONPYCACHEPREFIX = Join-Path $PWD '.tools/pycache'
-python -m compileall -q nonebot_plugin_unibot tools/fetch_chunirec_data.py
+python -m compileall -q nonebot_plugin_unibot tools tests
 # 完成后恢复本次命令前的 PYTHONPYCACHEPREFIX 设置
 ```
 
@@ -141,10 +141,10 @@ git push origin main
 ## LLM 能力接口与三插件依赖
 
 - UniBot 拥有查歌、查分、资源维护及其任务和结果。LLMChat 的 `agent_tools.py` 只发现已加载插件的 `llm_api`，负责工具编排与确认，不另写成绩文件、不复制查询算法、不通过构造群消息绕回命令。UniBot 不反向依赖 LLMChat 才能完成原生命令或任务。
-- 当前 `llm_api.API_VERSION=1`、`CAPABILITY_VERSION="3.2.0"`；接口包括 `describe_capabilities`、`describe_context`、`prepare_capability`、`invoke_capability`、`set_job_notifier` 及任务材料/表达接口。版本号是本次核对的基线，接手时核对实际代码。LLMChat 当前要求 API v1，旧于 3.1.2 的提供者写能力会被限制。
+- 当前 `llm_api.API_VERSION=1`、`CAPABILITY_VERSION="3.3.0"`；接口包括 `describe_capabilities`、`describe_context`、`prepare_capability`、`invoke_capability`、`set_job_notifier` 及任务材料/表达接口。版本号是本次核对的基线，接手时核对实际代码。LLMChat 当前要求 API v1，旧于 3.1.2 的提供者写能力会被限制。
 - 参数 schema、能力 ID、`nb_unibot_*` 名称、effect、long_task、状态和制品结构是跨插件契约。结果使用 `services/results.outcome` 的 `status/code/data/public_hint/fallback_text/artifacts/effect/retryable`，拒绝、缺配置、结果未知不能伪装成功。改契约须评估兼容并按需调整版本，不悄悄复用旧 ID 表示不同操作。
 - Bot、用户、群、权限和附件来自可信调用上下文；模型参数不能指定身份、SUPERUSER 或任意本地路径。写入沿用准备预览、真实用户确认、执行时重查权限和约束；预览后目标、附件、群策略变化须拒绝或重新预览。
-- `services/native_catalog.py` 由 LLMChat 的 `tools/export_native_catalog.py` 生成，不手改；命令增删改名时核对生成器及其写入范围，再更新原命令目录、schema、帮助与 README。未获跨仓库授权时只记录依赖，不运行会改其他仓库的生成器。
+- `services/native_catalog.py` 现由本仓 `tools/export_native_catalog.py` 生成，不手改；命令增删改名时运行生成及 `--check`，同步 schema、帮助和 README。旧邻仓生成器包含已退役映射，不得运行它覆盖本仓目录，也不擅自修改邻仓的生成器或静态快照。
 - 原生与 LLM 入口共用 `command_receipts`、`services/sync.py`、`job_store.py`、`storage.py` 和 `presentation_store.py`。保持真实作用域、幂等、取消、停机中断、未知副作用不自动重试及补发只读缓存；LLM 通知器缺席时不能阻断原生结果。
 - 综合插件拥有 `feature_manager.py`、`services/group_policy.py`、`services/policy_guard.py` 和统一设置/维护入口。UniBot 的 `services/group_policy.py` 动态适配该策略，不能另建同名配置作为第二策略源。
 
@@ -158,7 +158,7 @@ git push origin main
 
 ## 后续落雪国服与 OAuth 改造约束
 
-- 已确认的后续方向是仅保留落雪国服数据源并支持 OAuth 直接查分。本阶段只整理目录和规则，不删除 Rin/CSV 导入、chunirec/naominet 路径，不改国服 B 图、本地日服 B30、推荐、OP 或渲染行为。
+- 第二阶段 B 已统一落雪国服曲库与定数，撤下 chunirec/naominet 曲库更新、上传、凭据和抓取工具；Rin/CSV 仅保留成绩导入及本地资料兼容。第三阶段再替换 OAuth 和成绩获取，不在本阶段引入授权流程或重做图片 UI。
 - 开始实施前列清影响面：曲库合并与 ID/定数映射、`get_player_score` 的解析和本地提交、个人资料 Rin 回退、`best_rating` 与 `services/player` 的 b/b30 分支，以及维护任务、历史队列、LLM schema/目录、综合设置面板、帮助和配置模板。数据源退役不能只删 HTTP 请求。
 - 对旧 `songlist.json` 的 `data_source/chunirec_id/rinnet_id/lx_*/chunirec_*`、用户成绩、手动记录、资料与别名建立明确迁移规则。先备份和只读试算，报告映射冲突、无法匹配、覆盖与保留数量；迁移可重复执行、有版本与回滚路径。不得以空数据覆盖错误响应，不将日服定数直接解释为国服，不静默抛弃用户成绩。
 - OAuth 实施前查阅落雪当时的官方协议，确认国服支持、端点、scope、授权模式、回调部署方式与刷新/撤销语义，不从现有开发者 `lxns_token` 推断用户授权能力；不提前写死未核验的协议细节。
@@ -173,3 +173,13 @@ git push origin main
 - 接口/策略变更：隔离加载、缺少 LLM/综合提供者、schema 与目录一致性、真实用户权限、群/私聊隔离、预览后关停、排队后关停、延迟通知、旧工具拒绝与本人任务管理；用真实 Bot + fake adapter 断言被拒绝时底层 API 未调用。
 - 存储/数据源变更：脱敏 fixtures 覆盖旧数据、重复导入、并发提交、部分写入失败和迁移重跑/回滚；`storage.commit_scores` 只保证单文件原子替换，成绩与资料两个文件不是事务。OAuth 另覆盖 state 重放/串号、过期/撤销、刷新并发、密钥脱敏、失败不覆写本地成绩。
 - 测试只使用临时目录与 mock 网络/适配器；没有本轮真实验收授权时，不连接真实账号、不发送群消息、不写线上配置。报告实际命令和结果，区分语法、mock、宿主与线上验证。本阶段不部署、不重启服务、不修改 App 交接文件。
+
+## 第二阶段 B 起的歌曲与谱面约定
+
+- 唯一活动曲库模型是 `services/song_model.py` 的 `Catalog/Song/Chart`，来源 `lxns_cn`、持久结构 `schema_version=2`。各消费者使用同一只读投影，不再直接消费外源歌曲或日服定数。旧混合文件原件不自动改写，更新时先完整备份到 LocalStore `catalog_backups/`。
+- 歌曲按原始落雪 ID 区分，谱面保留所属歌曲 ID、难度、定数、版本、物量及未知上游属性。ULTIMA 的版本取谱面自身版本；禁止用原曲旧版本覆盖它，标准难度重复要拒绝写入。
+- WORLD'S END 可以是独立歌曲。只按难度5的明确 `origin_id` 关联到存在的普通原曲，在查询层聚合，持久层不折叠歌曲；同名、同曲师、相同曲绘均不构成身份等价。无原曲、冲突关联和链式关联保持独立。多个 WORLD'S END 不能放进以难度为唯一键的字典覆盖。
+- 详情和结构化结果须保留独立 ID、origin_id、kanji、star、歌曲/谱面版本。曲绘使用明确原曲资源 ID；成绩/手动传分始终写实际谱面所属歌曲 ID，不能写成聚合页 ID；关联多谱面时要求明确选择。
+- `/b30` 继续可用，但仅按国服谱面元数据计算；未知旧 ID 的成绩只标记未匹配，不按标题自动映射、不删除、不回退日服定数。原成绩同步和导入仍走原队列及存储，相关历史兼容和第三阶段缺口见 [曲库模型说明](docs/lxns-cn-catalog.md)。
+- 已退役的公开命令和工具不得留在帮助/schema/能力目录中；旧缓存调用及旧队列参数明确返回 `SOURCE_RETIRED`，不得暗中重定向成另一次写入或假报成功。综合插件群策略的功能键/模块映射不变；其旧设置选项及邻仓旧测试快照只记录依赖，修改须单独授权。
+- 执行 `python -m unittest discover -s tests -v`、`python tests/run_neighbor_regressions.py`、目录生成检查和语法检查。邻仓6条已退役断言在本地适配器显式列出并由本仓新契约测试替代；`--legacy-contracts` 可复现原有不兼容断言，不能将它们算作通过。真实账号和服务器均不参与本阶段验证。

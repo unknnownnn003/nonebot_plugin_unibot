@@ -125,7 +125,9 @@ def _write_songlist_data(data: Dict[str, Any]) -> None:
 
 def _load_songlist_data() -> Optional[Dict[str, Any]]:
     with SONGLIST_LOCK:
-        return _read_songlist_data()
+        from .services.song_model import active_catalog
+        data = _read_songlist_data()
+        return active_catalog(data) if data else None
 
 
 def set_song_aliases(song_id: str, aliases: List[str]) -> Optional[Dict[str, Any]]:
@@ -137,7 +139,7 @@ def set_song_aliases(song_id: str, aliases: List[str]) -> Optional[Dict[str, Any
         if not isinstance(data, dict):
             raise ValueError("songlist.json 格式异常")
         for song_data in data.get("songs", []):
-            if isinstance(song_data, dict) and str(song_data.get("id")) == str(song_id):
+            if isinstance(song_data, dict) and song_data.get("data_source") in (None, "lx", "lxns", "lxns_cn") and str(song_data.get("id")) == str(song_id):
                 song_data["aliases"] = list(aliases)
                 _write_songlist_data(data)
                 return song_data
@@ -151,7 +153,7 @@ def add_song_alias(song_id: str, alias_name: str) -> Tuple[bool, bool]:
         if not isinstance(data, dict):
             return False, False
         for song_data in data.get("songs", []):
-            if isinstance(song_data, dict) and str(song_data.get("id")) == str(song_id):
+            if isinstance(song_data, dict) and song_data.get("data_source") in (None, "lx", "lxns", "lxns_cn") and str(song_data.get("id")) == str(song_id):
                 aliases = song_data.setdefault("aliases", [])
                 if not isinstance(aliases, list):
                     aliases = []
@@ -171,7 +173,7 @@ def remove_song_alias(song_id: str, alias_name: str) -> Tuple[bool, bool]:
         if not isinstance(data, dict):
             return False, False
         for song_data in data.get("songs", []):
-            if isinstance(song_data, dict) and str(song_data.get("id")) == str(song_id):
+            if isinstance(song_data, dict) and song_data.get("data_source") in (None, "lx", "lxns", "lxns_cn") and str(song_data.get("id")) == str(song_id):
                 aliases = song_data.get("aliases", [])
                 if not isinstance(aliases, list):
                     return True, False
@@ -187,7 +189,9 @@ def find_song_matches(query: str, limit: int = 8) -> List[Dict[str, Any]]:
     if not data:
         return []
 
-    songs = data.get("songs", [])
+    from .services.song_model import Catalog
+    catalog = Catalog(data, legacy=True)
+    songs = [song.as_dict() for song in catalog.songs.values()]
     query_exact = query.strip().lower()
     query_variants = _string_variants(query)
     if not query_exact and not query_variants:
@@ -221,8 +225,12 @@ def find_song_matches(query: str, limit: int = 8) -> List[Dict[str, Any]]:
                 best_value = value
 
         if best_score >= 0.64:
-            matches[song_id] = {
-                "song": song,
+            group_id = int(song_id) if query_exact.isdigit() else catalog.parent_id(int(song_id))
+            key = str(group_id)
+            if key in matches and matches[key]["score"] >= best_score:
+                continue
+            matches[key] = {
+                "song": catalog.query_song(group_id),
                 "score": best_score,
                 "source": best_source,
                 "matched": best_value,
@@ -410,13 +418,13 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
     else:
         version = str(version_raw)
 
-    local_diffs = {d["difficulty"]: d for d in local_song.get("difficulties", [])}
-    api_diffs = {d.get("difficulty", idx): d for idx, d in enumerate(api_detail.get("difficulties", []))}
+    local_diffs = sorted(local_song.get("difficulties", []), key=lambda d: (d["difficulty"], d.get("song_id", song_id)))
+    api_diffs = {(d.get("song_id", api_detail.get("id", song_id)), d.get("difficulty", idx)): d for idx, d in enumerate(api_detail.get("difficulties", []))}
 
     card_width = 800
     
     # 动态布局准备：先画在一张极长的大画布上，以便处理换行
-    temp_img = Image.new("RGBA", (card_width, 4000), BG_COLOR)
+    temp_img = Image.new("RGBA", (card_width, max(4000, 600 + len(local_diffs) * 300)), BG_COLOR)
     draw = ImageDraw.Draw(temp_img)
 
     jacket_size = 200
@@ -455,9 +463,9 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
 
     start_y = max(current_y, 40 + jacket_size + 30)
 
-    for diff_idx in sorted(local_diffs.keys()):
-        ld = local_diffs[diff_idx]
-        ad = api_diffs.get(diff_idx, {})
+    for ld in local_diffs:
+        diff_idx = ld["difficulty"]
+        ad = api_diffs.get((ld.get("song_id", song_id), diff_idx), ld)
 
         color = DIFF_COLORS[diff_idx] if diff_idx < len(DIFF_COLORS) else (100, 100, 100)
         diff_name = DIFF_NAMES[diff_idx] if diff_idx < len(DIFF_NAMES) else f"DIFF {diff_idx}"
@@ -465,19 +473,23 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
         designer = ld.get("note_designer", ad.get("note_designer", "-"))
         if str(designer) == "0": designer = "-"
         designer_str = f"Designer: {designer}"
+        if diff_idx in (4, 5):
+            designer_str += f" | ID: {ld.get('song_id', song_id)} | Version: {ld.get('version', version_raw)}"
+        if diff_idx == 5:
+            designer_str += f" | {ld.get('kanji', '')} ★{ld.get('star', '?')} | Origin: {ld.get('origin_id', '?')}"
         
         des_w, _, d_h = wrap_text_with_height(designer_str, font_small, card_width - 120, draw)
         
-        total = ad.get("total") or ad.get("notes", {}).get("total", "?")
-        tap = ad.get("tap") or ad.get("notes", {}).get("tap", "?")
-        hold = ad.get("hold") or ad.get("notes", {}).get("hold", "?")
-        slide = ad.get("slide") or ad.get("notes", {}).get("slide", "?")
-        air = ad.get("air") or ad.get("notes", {}).get("air", "?")
-        flick = ad.get("flick") or ad.get("notes", {}).get("flick", "?")
+        total = ad.get("total") or (ad.get("notes") or {}).get("total", "?")
+        tap = ad.get("tap") or (ad.get("notes") or {}).get("tap", "?")
+        hold = ad.get("hold") or (ad.get("notes") or {}).get("hold", "?")
+        slide = ad.get("slide") or (ad.get("notes") or {}).get("slide", "?")
+        air = ad.get("air") or (ad.get("notes") or {}).get("air", "?")
+        flick = ad.get("flick") or (ad.get("notes") or {}).get("flick", "?")
         
         notes_str = f"Total: {total} | Tap: {tap} | Hold: {hold} | Slide: {slide} | Air: {air} | Flick: {flick}"
         if total == "?" and "notes" in ad:
-            n = ad["notes"]
+            n = ad["notes"] or {}
             notes_str = f"Total: {n.get('total', '?')} | Tap: {n.get('tap', '?')} | Hold: {n.get('hold', '?')} | Slide: {n.get('slide', '?')} | Air: {n.get('air', '?')} | Flick: {n.get('flick', '?')}"
         
         notes_w, _, n_h = wrap_text_with_height(notes_str, font_small, card_width - 120, draw)
@@ -504,9 +516,9 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
             draw.rounded_rectangle([40, start_y, card_width - 40, start_y + box_h], radius=8, fill=None, outline=(220, 50, 50), width=2)
 
         level_val = ld.get("level_value", ld.get("level", "?"))
-        # 定数为 0 时（chunirec 未收录定数），直接使用 level 字段
+        # 未提供标准定数时保留标级；WORLD'S END 属性另行展示
         if level_val is None or (isinstance(level_val, (int, float)) and float(level_val) == 0):
-            level_str = str(ld.get("level") or ld.get("chunirec_level") or "?")
+            level_str = str(ld.get("level") or "?")
         else:
             try:
                 level_str = f"{float(level_val):.1f}"
@@ -595,7 +607,8 @@ def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jack
 async def download_match_jacket(match: Dict[str, Any]) -> Optional[Image.Image]:
     song = match.get("song", {})
     try:
-        song_id = song.get("id", 0) if song.get("data_source") == "chunirec" else int(song.get("id", 0))
+        from .services.song_model import jacket_id
+        song_id = jacket_id(song)
     except (TypeError, ValueError):
         song_id = 0
     return await download_jacket(song_id)

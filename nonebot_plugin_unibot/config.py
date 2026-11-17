@@ -4,6 +4,3 @@ from typing import Optional
 class Config(BaseModel):
     """Plugin Config Here"""
     lxns_token: Optional[str] = None
-    chunirec_token: Optional[str] = None
-    naominet_token: Optional[str] = None
-    naominet_session: Optional[str] = None

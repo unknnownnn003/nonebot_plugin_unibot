@@ -1,15 +1,11 @@
 """Maintenance workflows using the original conversion, cache and link rules."""
 import asyncio
-import gzip
-import io
 from datetime import datetime
 import json
 import os
 from pathlib import Path
 import re
 import time
-import zipfile
-import zlib
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -20,74 +16,6 @@ from .maintenance import Stopped, observed_io
 from . import http_safety
 
 MAX_ASSET_BYTES = 30 * 1024 * 1024
-MAX_IMPORT_BYTES = 50 * 1024 * 1024
-
-
-def parse_import(raw, depth=0, budget=None):
-    budget = [MAX_IMPORT_BYTES] if budget is None else budget
-    if len(raw) > MAX_IMPORT_BYTES or depth > 4:
-        raise ValueError("import expansion limit")
-    if raw.startswith(b"\x1f\x8b"):
-        with gzip.GzipFile(fileobj=io.BytesIO(raw)) as file:
-            content = file.read(budget[0] + 1)
-        budget[0] -= len(content)
-        if budget[0] < 0:
-            raise ValueError("import expansion limit")
-        return parse_import(content, depth + 1, budget)
-    if raw.startswith(b"PK"):
-        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-            members = archive.infolist()
-            if len(members) > 256:
-                raise ValueError("too many archive members")
-            for member in sorted(members, key=lambda item: not item.filename.lower().endswith(".json")):
-                if member.is_dir():
-                    continue
-                if member.file_size > budget[0]:
-                    raise ValueError("import expansion limit")
-                with archive.open(member) as file:
-                    content = file.read(budget[0] + 1)
-                budget[0] -= len(content)
-                if budget[0] < 0:
-                    raise ValueError("import expansion limit")
-                try:
-                    return parse_import(content, depth + 1, budget)
-                except (ValueError, UnicodeDecodeError):
-                    continue
-            raise ValueError("no JSON in archive")
-    for encoding in (None, "utf-8-sig", "utf-8", "gbk", "gb2312", "utf-16", "latin-1"):
-        try:
-            return json.loads(raw if encoding is None else raw.decode(encoding))
-        except (ValueError, UnicodeDecodeError):
-            continue
-    raise ValueError("invalid import JSON")
-
-
-async def import_chunirec(context, bot, event):
-    from .. import songlist_update as s
-    from .attachments import read_file, AttachmentError
-    try:
-        raw = await context.network(read_file(bot, event, MAX_IMPORT_BYTES, prefer_get_file=True, check=context.check), "reading_chunirec_attachment")
-        payload = await observed_io(parse_import, raw)
-        rows = payload.get("chunirec_payload") if isinstance(payload, dict) else None
-        if not isinstance(rows, list) or not rows:
-            return outcome("INVALID_DATA", "文件格式错误：缺少 chunirec_payload 或不是有效列表。", status="needs_input")
-        ids = {}
-        for item in payload.get("naominet_id_map", []):
-            if isinstance(item, list) and len(item) >= 3:
-                ids[(str(item[0]), str(item[1]))] = str(item[2])
-        counts = await context.write("committing_chunirec_upload", s.commit_chunirec_songlist, rows, ids)
-        note = str(payload.get("naominet_status", "未包含 naominet 数据"))[:160]
-        return outcome(hint=("chunirec 上传曲库同步完成！\n"
-            f"新增：{counts['added']}，刷新：{counts['refreshed']}，保留落雪已有：{counts['skipped_lx']}\n"
-            f"数字 ID：{note}\n文件修改时间：{counts['mtime']}"), data={**counts, "trust": "user_content"})
-    except AttachmentError as exc:
-        return outcome(exc.code, exc.hint, status="needs_input")
-    except (ValueError, zipfile.BadZipFile, gzip.BadGzipFile, zlib.error, EOFError):
-        if context.possible_effect:
-            raise
-        return outcome("INVALID_DATA", "文件不合法、压缩层数过多或超过50MB限制。", status="needs_input")
-
-
 def write_bytes(path, content):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,7 +53,7 @@ async def asset_bytes(client, url):
 async def refresh_songlist(context):
     from .. import songlist_update as s
     async with http_safety.client() as client:
-        songs = await context.network(client.get(s.BASE_URL + s.API_PATH, timeout=30), "fetching_songlist")
+        songs = await context.network(client.get(s.BASE_URL + s.API_PATH, params={"notes": True}, timeout=30), "fetching_songlist")
         songs.raise_for_status()
         aliases = await context.network(client.get(s.BASE_URL + "/api/v0/chunithm/alias/list", timeout=30), "fetching_song_aliases")
         aliases.raise_for_status()
@@ -135,58 +63,24 @@ async def refresh_songlist(context):
                          f"曲目数：{counts['song_count']}，别名数：{counts['alias_count']}\n文件修改时间：{counts['mtime']}"), data=counts)
 
 
-async def refresh_chunirec(context):
-    from .. import songlist_update as s
-    token = s.config.chunirec_token
-    if not token:
-        return outcome("NOT_CONFIGURED", "同步失败：未配置 chunirec_token。", status="unavailable")
-    ids, note = {}, "未配置 naominet_token，跳过数字 ID 补全"
-    async with http_safety.client() as client:
-        response = await context.network(client.get(s.CHUNIREC_SHOWALL_URL,
-            params={"region": s.CHUNIREC_REGION, "token": token}, timeout=30), "fetching_chunirec")
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, list):
-            return outcome("INVALID_DATA", "chunirec未返回曲库列表，本次未写入。", status="unavailable")
-        naominet = (s.config.naominet_token or "").strip()
-        if naominet:
-            try:
-                class GuardedClient:
-                    async def get(self, *args, **kwargs):
-                        await context.check()
-                        return await context.network(client.get(*args, **kwargs), "fetching_naominet_ids")
-                ids, note = await context.network(s.fetch_naominet_id_map(GuardedClient(), naominet,
-                    (s.config.naominet_session or "").strip() or None), "resolving_chunirec_ids")
-            except Stopped:
-                raise
-            except Exception:
-                note = "naominet 数字 ID 补全失败，保留原有ID"
-    counts = await context.write("committing_chunirec", s.commit_chunirec_songlist, payload, ids)
-    return outcome(hint=("chunirec 曲库同步完成！\n"
-        f"新增：{counts['added']}，刷新：{counts['refreshed']}，保留落雪已有：{counts['skipped_lx']}\n"
-        f"数字 ID：{note}\n文件修改时间：{counts['mtime']}"), data=counts)
-
-
 async def refresh_jackets(context, full_refresh=False):
     from .. import get_resource as s
     def read():
-        songs = json.loads((Path(s.DATA_DIR) / "songlist.json").read_text(encoding="utf-8")).get("songs")
+        from .song_model import read_catalog
+        songs = read_catalog(Path(s.DATA_DIR) / "songlist.json").get("songs")
         if not isinstance(songs, list) or not songs:
             raise ValueError("missing songlist")
         return songs, s.load_jacket_status()
     songs, cache = await observed_io(read)
     targets = {}
     for song in songs:
-        identity = song.get("jacket_id") or song.get("rinnet_id") or song.get("id")
-        for diff in song.get("difficulties", []) or []:
-            if diff.get("difficulty") in (4, 5):
-                identity = diff.get("origin_id", identity)
-                break
+        from .song_model import jacket_id
+        identity = jacket_id(song)
         if identity is not None and s.should_use_lxns_jacket(str(identity)):
             targets[str(identity)] = song
     purged = 0
     if full_refresh:
-        ids = set(targets) | s.collect_chunirec_jacket_ids(songs)
+        ids = set(targets)
         purged = await context.write("purging_jacket_cache", s.purge_cached_jackets, ids)
         for identity in ids:
             cache.pop(identity, None)

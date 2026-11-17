@@ -56,7 +56,8 @@ def load_versions() -> list[int]:
     try:
         if SONGLIST_FILE.exists():
             with open(SONGLIST_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                from .services.song_model import active_catalog
+                data = active_catalog(json.load(f))
             versions_data = data.get("versions", [])
             if versions_data:
                 versions = [v.get("version") for v in versions_data if isinstance(v, dict)]

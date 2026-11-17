@@ -1,6 +1,6 @@
 # nonebot-plugin-unibot
 
-基于 NoneBot2 的 CHUNITHM (中二节奏) 查分、曲库、剧情与图片生成插件。插件主要接入落雪 (Lxns) 查分器 API，同时可从 chunirec 同步日服新曲信息，用于补充最新曲库与谱面定数。
+基于 NoneBot2 的 CHUNITHM (中二节奏) 查分、曲库、剧情与图片生成插件。歌曲、谱面和定数统一使用落雪 (Lxns) 国服曲库；旧成绩上传和同步方式在第三阶段替换前继续兼容。
 
 
 ## 指令列表
@@ -14,7 +14,7 @@
 | `/lxupdate` | USER | 从国服接口同步已绑定账号的国服成绩到本地。 |
 | `/cf <歌名或ID> [难度] <分数> [fc/aj]` | USER | 手动传分，别名：`/传分`、`/手动传分`、`/addscore`、`/mscore`。难度为空时默认 `MAS`，重复传分不会阻止低分写入，生成 `/b30` 时会和国服成绩取最高分。 |
 | `/b` | USER | 生成国服 B30+N20 查分图：只使用国服成绩和国服定数，忽略用户手动传分。推分建议也只从国服曲库中选择。 |
-| `/b30` | USER | 生成本地 B30 查分图：国服成绩与手动传分取最高分，使用日服定数，不再拆分 B30+N20。 |
+| `/b30` | USER | 生成本地 B30 查分图：国服成绩与手动传分取最高分，使用落雪国服定数，不再拆分 B30+N20。 |
 | `/个人信息` | USER | 查询并生成玩家的国服游玩个人数据图片（别名：`/分数`、`/chuinfo`）。 |
 | `/chulist <查询条件> [--nocat]` | USER | 按难度、定数、版本或特定分类生成对应的 Overpower 进度及评价统计图，支持多个条件叠加取交集。该命令只使用国服曲库和国服成绩。 |
 | `[曲名或ID]是什么歌` | USER | 根据曲名、别名、罗马音、简繁体或变体字模糊查询并生成歌曲详情图（无前缀触发，例如：`1066是什么歌`）。 |
@@ -31,9 +31,7 @@
 
 | 指令 | 权限 | 描述 |
 | --- | --- | --- |
-| `/更新songlist` | SUPERUSER | 从国服更新本地 `songlist.json` 曲库数据。更新时会保留用户本地别名，并尽量保留已有日服定数。 |
-| `/更新chunirec` | SUPERUSER | 从日服同步新曲，并转换为国服 songlist 兼容格式；已存在的国服曲目优先保留。配置 `naominet_token` 后会尝试补全与未来国服一致的数字 ID。别名：`/更新chunirecsonglist`、`/更新日服songlist`。 |
-| `/上传chunirec` | SUPERUSER | 当服务器无法直接访问 chunirec API 时，上传本地拉取的日服曲库 JSON 数据文件进行离线同步。详见下方「离线同步」说明。 |
+| `/更新songlist` | SUPERUSER | 从国服更新本地 `songlist.json` 曲库数据。更新时按原始 ID 保留本地别名，并备份完整旧曲库。 |
 | `/更新曲绘 [full]` | SUPERUSER | 从落雪获取并更新曲绘到 `data/jacket/` 目录；默认限速增量补缺并缓存缺图状态，传 `full`/`force`/`完整`/`重下` 时完整重下。落雪没有的曲绘保持为空，不再使用 chunirec/RinNET 回退。 |
 | `/更新收藏品` | SUPERUSER | 同步收藏品资源。 |
 | `/更新剧情` | SUPERUSER | 同步剧情索引与文本资源。 |
@@ -52,10 +50,11 @@ B/B30、个人信息、OP进度、推荐、歌曲详情/候选图和帮助图也
 
 ## 数据源说明
 
-- 国服曲库仍是国服功能的优先数据源。`/更新songlist` 会保留本地别名，并继续兼容已有的日服补充字段。
-- 日服曲库用于补充日服新曲和谱面定数。同步后的歌曲会写入国服 songlist 兼容结构，谱面中会同时保留 `lx_level_value` 与 `chunirec_level_value`，以便 `/b` 与 `/b30` 分别使用不同定数来源。
-- naominet 只用于补充日服新曲的未来国服数字 ID。naominet 歌曲接口需要登录令牌；未配置或鉴权失败时，日服同步仍会继续，但无法自动补数字 ID。曲绘统一从落雪获取，落雪没有则留空。
-- 手动传分与国服成绩分表存储。`/b30` 会读取两边成绩并按同一谱面取最高分，`/b`、`/chulist` 仍只按国服数据口径生成。
+- 歌曲和谱面只使用落雪国服数据。旧混合曲库按来源在内存中过滤；下次 `/更新songlist` 写入统一结构前会完整备份旧文件，不删除旧成绩、绑定、别名或曲绘。
+- ULTIMA 保留自身谱面版本；WORLD'S END 保留独立歌曲 ID、`origin_id`、属性、星级和版本。查询原曲时可合并展示明确关联的 WORLD'S END，不按同名合并其他歌曲；独立 ID 查询仍可用。
+- `/b30` 仍读取国服和手动成绩取最高分，但改用国服定数。无法匹配国服谱面的历史记录保留在磁盘，结构化结果提供未匹配数量；全部无法匹配时返回明确说明。
+- Rin JSON、CSV 导入与本地玩家资料回退仅作为第三阶段前的旧成绩兼容，不参与曲库、歌曲 ID 或定数补全；原落雪开发者密钥同步暂不变。
+- 已移除日服曲库更新、上传和抓取工具。旧缓存工具调用、历史维护任务和综合面板的旧日服选项返回 `SOURCE_RETIRED`，提示改用 `/更新songlist`，不会发起外源请求或伪报成功。
 
 ## 配置
 
@@ -63,34 +62,7 @@ B/B30、个人信息、OP进度、推荐、歌曲详情/候选图和帮助图也
 
 | 配置项 | 用途 |
 | --- | --- |
-| `lxns_token` | 调用落雪接口，同步玩家成绩、玩家信息和 songlist。 |
-| `chunirec_token` | 调用 chunirec `music/showall` 接口，同步日服曲库补充数据。 |
-| `naominet_token` | 可选。调用 naominet 接口读取歌曲数字 ID，用于日服新曲 ID 补全；可填写登录 token 或完整 `Bearer ...`。 |
-| `naominet_session` | 可选。naominet 的 `SESSION` cookie 值。若接口需要浏览器登录态，和 `naominet_token` 一起配置。 |
-
-## 离线同步（服务器无法访问 chunirec 时）
-
-当 NoneBot 服务器无法直接访问 `api.chunirec.net` 时，可通过本地拉取 + 上传的方式完成日服曲库同步：
-
-1. **在本地 PC 上运行拉取脚本**：
-   ```bash
-   cd tools
-   python fetch_chunirec_data.py
-   ```
-   按提示输入 chunirec Token（和可选的 naominet Token），脚本会生成一个 `chunirec_data_YYYYMMDD_HHMMSS.json` 文件。脚本不再下载 chunirec 曲绘。
-
-2. **上传到 bot**：将生成的 JSON 文件通过 QQ 发送给 bot，同时使用命令：
-   ```
-   /上传chunirec [附带 JSON 文件]
-   ```
-   Bot 会解析文件并调用与 `/更新chunirec` 相同的合并逻辑完成同步。
-
-3. **设置环境变量（可选）**：脚本也支持通过环境变量传入 Token，方便自动化：
-   ```bash
-   set CHUNIREC_TOKEN=your_token_here
-   set NAOMINET_TOKEN=your_naominet_token
-   python fetch_chunirec_data.py
-   ```
+| `lxns_token` | 调用落雪开发者接口，同步玩家成绩和玩家信息；公共曲库更新不要求此密钥。 |
 
 ## 帮助与交互维护
 
@@ -109,4 +81,4 @@ B/B30、个人信息、OP进度、推荐、歌曲详情/候选图和帮助图也
 
 ## 开发与目录维护
 
-开发约定见 [AGENTS.MD](AGENTS.MD)，本地工具见 [tools/README.md](tools/README.md)，历史资料归档与跨插件依赖审计见 [第一阶段整理记录](docs/phase1-housekeeping.md)。运行数据已统一使用 NoneBot LocalStore；升级前按 [存储迁移说明](docs/localstore-migration.md) 离线复制并校验旧 `data/`，原件保留用于回滚，运行数据不随源码提交。上文资源路径如 `data/jacket/` 表示原相对布局，新版对应 LocalStore 数据根下的 `jacket/`。仅保留落雪国服与 OAuth 直接查分属于后续改造方向，当前指令和数据源行为保持现状。
+开发约定见 [AGENTS.MD](AGENTS.MD)，本地工具见 [tools/README.md](tools/README.md)，历史资料归档与跨插件依赖审计见 [第一阶段整理记录](docs/phase1-housekeeping.md)。运行数据已统一使用 NoneBot LocalStore；升级前按 [存储迁移说明](docs/localstore-migration.md) 离线复制并校验旧 `data/`，原件保留用于回滚，运行数据不随源码提交。上文资源路径如 `data/jacket/` 表示原相对布局，新版对应 LocalStore 数据根下的 `jacket/`。国服单一曲库已在第二阶段 B 实施，详见 [曲库模型说明](docs/lxns-cn-catalog.md)；OAuth、成绩获取替换和图片 UI 重做仍留待第三阶段。

@@ -133,7 +133,8 @@ async def recommend_chart(user_qq, query_text, progress=None):
     try:
         async with aiofiles.open(SONGLIST_PATH, 'r', encoding='utf-8') as f:
             data = json.loads(await f.read())
-        songs = data.get('songs', [])
+        from .services.song_model import active_catalog
+        songs = active_catalog(data)['songs']
     except Exception as e:
         logger.error(f'读取 songlist.json 出错: {e}')
         return outcome('INVALID_DATA', '读取曲库数据失败。', status='unavailable')

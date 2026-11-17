@@ -36,7 +36,8 @@ def load_songlist_full():
     if not os.path.exists(SONGLIST_PATH):
         return [], [], []
     with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
+        from .services.song_model import active_catalog
+        data = active_catalog(json.load(f))
         return data.get("songs", []), data.get("versions", []), data.get("genres", [])
 
 
@@ -104,13 +105,9 @@ def get_target_charts(query_text: str):
     charts = {}
 
     for song in songs:
-        if song.get("data_source") == "chunirec":
-            continue
-
         song_id = str(song["id"])
         origin_id = song.get("origin_id", song_id)
         
-        s_version = version_map.get(song.get("version"), "")
         s_genre_raw = song.get("genre", "").lower()
         s_genre_search = s_genre_raw
         for base_genre, aliases in genre_aliases.items():
@@ -122,6 +119,7 @@ def get_target_charts(query_text: str):
         valid_diffs = [diff for diff in song.get("difficulties", []) if diff.get("difficulty") in (3, 4)]
 
         for diff in valid_diffs:
+            s_version = version_map.get(diff.get("version", song.get("version")), "")
             d = diff.get("difficulty")
             c = diff.get("lx_level_value", diff.get("level_value", 0.0))
             if c is None:

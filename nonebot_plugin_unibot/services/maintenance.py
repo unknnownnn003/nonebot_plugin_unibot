@@ -6,7 +6,7 @@ import json
 from .results import outcome
 from .permissions import native_superuser
 
-RESOURCES = {"songlist": "落雪曲库", "chunirec": "chunirec曲库", "jackets": "曲绘",
+RESOURCES = {"songlist": "落雪曲库", "jackets": "曲绘",
              "collections": "收藏品", "stories": "剧情"}
 
 
@@ -97,16 +97,14 @@ async def run(bot, event, job, store):
         from . import resource_tasks
         if resource == "songlist":
             result = await resource_tasks.refresh_songlist(context)
-        elif resource == "chunirec":
-            result = await resource_tasks.refresh_chunirec(context)
+        elif resource in {"chunirec", "chunirec_file"}:
+            return retired_source()
         elif resource == "jackets":
             result = await resource_tasks.refresh_jackets(context, args.get("full_refresh", False))
         elif resource == "collections":
             result = await resource_tasks.refresh_collections(context)
         elif resource == "stories":
             result = await resource_tasks.refresh_stories(context)
-        elif resource == "chunirec_file":
-            result = await resource_tasks.import_chunirec(context, bot, event)
         else:
             return outcome("INVALID_ARGUMENT", "未知维护资源。", status="needs_input")
     except Stopped as exc:
@@ -130,6 +128,8 @@ async def submit(bot, event, resource, full_refresh=False, *, origin="agent"):
     from .sync import submit_operation
     if not native_superuser(bot, event):
         return outcome("PERMISSION_DENIED", "资源维护仅SUPERUSER可用。", status="denied")
+    if resource in {"chunirec", "chunirec_file"}:
+        return retired_source()
     if resource not in RESOURCES or (full_refresh and resource != "jackets"):
         return outcome("INVALID_ARGUMENT", "请指定已支持的资源；完整重下仅适用于曲绘。", status="needs_input")
     args = dict(resource=resource, full_refresh=full_refresh)
@@ -138,14 +138,5 @@ async def submit(bot, event, resource, full_refresh=False, *, origin="agent"):
                                   {"arguments": args}, origin=origin)
 
 
-async def submit_import(bot, event, *, origin="agent"):
-    from .attachments import file_reference
-    from .sync import submit_operation
-    if not native_superuser(bot, event):
-        return outcome("PERMISSION_DENIED", "资源维护仅SUPERUSER可用。", status="denied")
-    attachment = file_reference(event)
-    if attachment is None:
-        return outcome("NEED_ATTACHMENT", "请上传由 fetch_chunirec_data.py 生成的 JSON 数据文件。", status="needs_input")
-    digest = hashlib.sha256(json.dumps(attachment, sort_keys=True, default=str).encode()).hexdigest()
-    return await submit_operation(bot, event, "maintenance.import_chunirec", f"chunirec_upload:{digest}",
-        {"arguments": {"resource": "chunirec_file"}}, origin=origin)
+def retired_source():
+    return outcome("SOURCE_RETIRED", "日服曲库维护已退役，请使用 /更新songlist 更新落雪国服曲库；历史文件已保留。", status="unavailable")

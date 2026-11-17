@@ -29,7 +29,6 @@ SONGLIST_PATH = os.path.join(DATA_DIR, "songlist.json")
 LXNS_BASE_URL = "https://maimai.lxns.net/api/v0/chunithm"
 
 SUPPORTED_VERSION = "2026"
-KNOWN_FUTURE_VERSIONS = {"verse", "xverse", "xversex"}
 MAX_RATING_SCORE = 1009000
 
 best_rating_cmd = on_command("b", priority=5, block=True)
@@ -111,7 +110,8 @@ def load_song_data() -> Tuple[List[Dict[str, Any]], Set[int]]:
         return [], set()
     try:
         with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
-            raw = json.load(f)
+            from .services.song_model import active_catalog
+            raw = active_catalog(json.load(f))
     except Exception as e:
         logger.error(f"读取 songlist.json 失败: {e}")
         return [], set()
@@ -128,45 +128,22 @@ def load_song_data() -> Tuple[List[Dict[str, Any]], Set[int]]:
 
 
 def build_chart_meta(songs: List[Dict[str, Any]], const_source: str = "default") -> Dict[Tuple[str, int], Dict[str, Any]]:
-    meta: Dict[Tuple[str, int], Dict[str, Any]] = {}
-    for song in songs:
-        if not isinstance(song, dict):
-            continue
-        song_id = str(song.get("jacket_id") or song.get("rinnet_id") or song.get("id") or "")
-        chart_id = str(song.get("id", ""))
-        alternate_ids = {
-            str(value)
-            for value in (chart_id, song.get("chunirec_id"), song.get("rinnet_id"), song.get("jacket_id"))
-            if value not in (None, "")
-        }
-        title = song.get("title") or song.get("song_name") or ""
-        version = safe_int(song.get("version"), 0)
-        for diff in song.get("difficulties", []) or []:
-            if not isinstance(diff, dict):
-                continue
-            level_index = safe_int(diff.get("difficulty"), -1)
-            if level_index < 0:
-                continue
-            jacket_id = str(diff.get("origin_id") or song.get("origin_id") or song_id) if level_index == 5 else song_id
-            level_value = diff.get("level_value")
-            level = diff.get("level")
-            if const_source == "lx":
-                level_value = diff.get("lx_level_value", level_value)
-                level = diff.get("lx_level", level)
-            elif const_source == "chunirec":
-                level_value = diff.get("chunirec_level_value", level_value)
-                level = diff.get("chunirec_level", level)
-            chart = {
-                "id": chart_id,
-                "jacket_id": jacket_id,
-                "song_name": title,
-                "level": level,
-                "level_value": safe_float(level_value, 0.0),
-                "level_index": level_index,
-                "version": version,
-            }
-            for lookup_id in alternate_ids:
-                meta[(lookup_id, level_index)] = dict(chart)
+    from .services.song_model import Catalog
+    catalog = Catalog({"songs": songs}, legacy=True)
+    meta = {}
+    for song in catalog.songs.values():
+        for chart in song.charts:
+            diff = chart.attributes
+            if chart.difficulty == 5:
+                continue  # WORLD'S END has no standard rating constant.
+            key = (str(song.id), chart.difficulty)
+            if key in meta:
+                raise ValueError("Ambiguous chart identity")
+            meta[key] = dict(id=str(song.id), jacket_id=str(chart.jacket_id),
+                song_name=song.attributes.get("title", ""), level=diff.get("level"),
+                level_value=diff["level_value"], level_index=chart.difficulty,
+                version=diff.get("version", song.attributes.get("version", 0)),
+                song_version=song.attributes.get("version", 0))
     return meta
 
 
@@ -376,7 +353,7 @@ def normalize_lxns_item(item: Dict[str, Any], chart_meta: Dict[Tuple[str, int], 
 def normalize_local_item(
     item: Dict[str, Any],
     chart_meta: Dict[Tuple[str, int], Dict[str, Any]],
-    const_source: str = "chunirec",
+    const_source: str = "lx",
 ) -> Optional[Dict[str, Any]]:
     song_id = str(item.get("id", ""))
     level_index = safe_int(item.get("level_index"), -1)
@@ -384,18 +361,7 @@ def normalize_local_item(
         return None
     meta = dict(chart_meta.get((song_id, level_index), {}))
     if not meta:
-        level_value = item.get("chunirec_level_value") if const_source == "chunirec" else item.get("lx_level_value")
-        if level_value is None:
-            level_value = item.get("level_value")
-        meta = {
-            "id": song_id,
-            "jacket_id": song_id,
-            "song_name": item.get("song_name") or f"ID {song_id}",
-            "level": item.get("level") or "",
-            "level_value": safe_float(level_value, 0.0),
-            "level_index": level_index,
-            "version": 0,
-        }
+        return None  # Preserve unmatched legacy rows on disk, never invent CN constants.
     return build_item(meta, item, use_stored_rating=False)
 
 
@@ -786,7 +752,7 @@ def draw_b30_header(img: Image.Image, player: Dict[str, Any], b30_avg: float) ->
 
     draw_shadowed_panel(draw, (680, 38, 1040, 206), 8, PANEL, LINE)
     draw.text((732, 74), "CHUNITHM B30", font=font_head, fill=CYAN)
-    draw.text((738, 124), "All versions | ChuniRec constants", font=font_body, fill=TEXT_SUB)
+    draw.text((738, 124), "Local scores | Lxns CN constants", font=font_body, fill=TEXT_SUB)
 
     draw_shadowed_panel(draw, (1080, 38, 1560, 206), 8, PANEL, LINE)
     draw.text((1112, 78), f"TOTAL {b30_avg:.4f}", font=font_head, fill=GREEN)
@@ -826,7 +792,7 @@ def draw_b30_image(
         draw_score_card(img, item, index, x, card_y, jacket_images.get(str(item["jacket_id"])), card_w, card_h)
 
     footer_font = get_font(19, "Normal")
-    footer = "Data from local score records | ChuniRec constants | generated by Robinbot"
+    footer = "Data from local score records | Lxns CN constants | generated by Robinbot"
     fw = text_width(draw, footer, footer_font)
     draw.text(((width - fw) / 2, height - 44), footer, font=footer_font, fill=TEXT_SUB)
     buf = io.BytesIO()

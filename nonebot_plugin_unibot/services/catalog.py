@@ -19,7 +19,6 @@ def _describe(specs, context):
     root = __package__.rsplit(".services", 1)[0]
     score_config = getattr(sys.modules.get(root + ".get_player_score"), "config", None)
     rating_config = getattr(sys.modules.get(root + ".best_rating"), "config", score_config)
-    update_config = getattr(sys.modules.get(root + ".songlist_update"), "config", None)
     lxns = bool(getattr(score_config, "lxns_token", None))
     rating = bool(getattr(rating_config, "lxns_token", None))
     output = {}
@@ -33,7 +32,7 @@ def _describe(specs, context):
             code, hint = "FEATURE_DISABLED", "本群对应功能已关闭。"
         elif name.startswith("game.") and not group:
             code, hint = "GROUP_ONLY", "猜曲只在群聊中可用。"
-        elif name in {"maintenance.refresh", "maintenance.import_chunirec", "song.alias_delete"} and not native_superuser(bot, event):
+        elif name in {"maintenance.refresh", "song.alias_delete"} and not native_superuser(bot, event):
             code, hint = "PERMISSION_DENIED", "此能力仅原SUPERUSER规则允许的用户可用。"
         elif name == "score.sync" and not lxns:
             code, hint = "NOT_CONFIGURED", "未配置落雪开发者密钥，请管理员配置后再同步。"
@@ -41,9 +40,8 @@ def _describe(specs, context):
             row["argument_requirements"] = {"mode=b": "需配置落雪开发者密钥", "mode=b30": "读取本地成绩；不要求在线密钥"}
             row["argument_availability"] = {"mode=b": rating, "mode=b30": True}
         elif name == "maintenance.refresh":
-            row["argument_requirements"] = {"resource=chunirec": "需配置chunirec令牌", "full_refresh=true": "仅曲绘可用"}
-            row["argument_availability"] = {"resource=chunirec": bool(getattr(update_config, "chunirec_token", None))}
-        if name in {"score.import_file", "maintenance.import_chunirec"}:
+            row["argument_requirements"] = {"full_refresh=true": "仅曲绘可用"}
+        if name == "score.import_file":
             row["input_requirements"] = ["当前真实事件的受控文件附件"]
         if code:
             row.update(available=False, unavailable_code=code, unavailable_hint=hint)

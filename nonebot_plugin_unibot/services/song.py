@@ -45,14 +45,14 @@ async def search(query, *, prepared=None):
         return outcome("INVALID_DATA", "匹配到的曲目数据中缺少ID。", status="unavailable")
     detail = await s.fetch_song_detail(song_id)
     if not detail:
-        if local_song.get("data_source") == "chunirec":
-            detail = local_song
-        else:
-            return outcome("UPSTREAM_UNAVAILABLE", "已匹配到曲目，但在获取详情时失败，可能网络连接有误或接口异常。", status="unavailable")
-    jacket = await s.download_jacket(song_id)
+        detail = local_song  # Validated local LXNS records remain usable offline.
+    from .song_model import jacket_id
+    jacket = await s.download_jacket(jacket_id(local_song))
     content = await async_call(s.render_song_image, local_song, detail, jacket)
     return outcome(data={"id": song_id, "title": local_song.get("title"),
-                         "data_source": local_song.get("data_source")}, artifacts=[image(content)])
+                         "data_source": local_song.get("data_source"),
+                         "charts": local_song.get("difficulties", []),
+                         "related_song_ids": [row["id"] for row in local_song.get("related_songs", [])]}, artifacts=[image(content)])
 
 
 async def aliases(query):
@@ -78,11 +78,11 @@ async def detail(song_id):
         return outcome("NOT_FOUND", "没有找到这个曲目 ID。", status="needs_input")
     detail_data = await s.fetch_song_detail(local_song.get("id"))
     if not detail_data:
-        if local_song.get("data_source") == "chunirec":
-            detail_data = local_song
-        else:
-            return outcome("UPSTREAM_UNAVAILABLE", "已找到曲目，但获取详情失败，请稍后重试。", status="unavailable")
-    jacket = await s.download_jacket(local_song.get("id"))
+        detail_data = local_song
+    from .song_model import jacket_id
+    jacket = await s.download_jacket(jacket_id(local_song))
     content = await async_call(s.render_song_image, local_song, detail_data, jacket)
     return outcome(data={"id": local_song.get("id"), "title": local_song.get("title"),
-                         "data_source": local_song.get("data_source")}, artifacts=[image(content)])
+                         "data_source": local_song.get("data_source"),
+                         "charts": local_song.get("difficulties", []),
+                         "related_song_ids": [row["id"] for row in local_song.get("related_songs", [])]}, artifacts=[image(content)])
