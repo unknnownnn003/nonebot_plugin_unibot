@@ -8,7 +8,8 @@ import nonebot_plugin_localstore as store
 
 from .data_migration import require_migrated
 
-LEGACY_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+PACKAGE_DIR = Path(__file__).resolve().parents[1]
+LEGACY_DATA_DIR = PACKAGE_DIR / "data"
 DATA_DIR = store.get_plugin_data_dir().resolve()
 CACHE_DIR = store.get_plugin_cache_dir().resolve()
 require_migrated(LEGACY_DATA_DIR, DATA_DIR)
@@ -17,5 +18,6 @@ require_migrated(LEGACY_DATA_DIR, DATA_DIR)
 # the only copy of a jacket, story, user score, or presentation awaiting replay.
 SONGLIST_PATH = DATA_DIR / "songlist.json"
 JACKET_DIR = DATA_DIR / "jacket"
+ASSETS_DIR = PACKAGE_DIR / "assets"
 STORY_DIR = DATA_DIR / "story"
 OAUTH_DIR = DATA_DIR / "oauth"

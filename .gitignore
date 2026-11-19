@@ -55,3 +55,6 @@ font_preview.png
 # LocalStore when this repository is used as the host working directory
 /cache/
 /config/
+
+# Private 4A HDD-derived UI pack. Copy locally to a private deployment only.
+/nonebot_plugin_unibot/assets/ui/

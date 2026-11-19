@@ -1,155 +1,30 @@
-import asyncio
-import json
-import os
-import time
-
-import httpx
+"""Native command for the shared jacket maintenance task."""
 from nonebot import on_command
-from pathlib import Path
-from nonebot.adapters.onebot.v11 import Message, Bot, MessageEvent
-from nonebot.log import logger
+from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
-
-try:
-    import aiofiles
-except ImportError:
-    aiofiles = None
-
-from .services.paths import DATA_DIR as _DATA_DIR
-DATA_DIR = str(_DATA_DIR)
-JACKET_DIR = os.path.join(DATA_DIR, "jacket")
-JACKET_STATUS_PATH = os.path.join(DATA_DIR, "jacket_status.json")
-LXNS_JACKET_URL = "https://assets.lxns.net/chunithm/jacket/{song_id}.png"
-LXNS_CONCURRENCY = 1
-LXNS_REQUEST_INTERVAL = 1.0
-MAX_INCREMENTAL_REQUESTS = 80
-MISSING_RECHECK_SECONDS = 7 * 24 * 60 * 60
-FAILED_RECHECK_SECONDS = 24 * 60 * 60
-MAX_RATE_LIMIT_RETRIES = 2
-MAX_RATE_LIMIT_SLEEP = 60
-FULL_REFRESH_KEYWORDS = {
-    "full",
-    "force",
-    "--full",
-    "--force",
-    "all",
-    "refresh",
-    "完整",
-    "重下",
-    "全量",
-    "重新下载",
-}
 
 update_jacket = on_command("更新曲绘", permission=SUPERUSER, priority=5, block=True)
 
 
-def looks_like_png(content: bytes) -> bool:
-    return len(content) >= 8 and content.startswith(b"\x89PNG\r\n\x1a\n")
-
-
-def is_existing_jacket_valid(path: str) -> bool:
-    if not os.path.exists(path) or os.path.getsize(path) <= 8:
+def jacket_refresh_option(text):
+    option = text.strip().lower()
+    if option in {"", "全部", "all"}:
         return False
-    try:
-        with open(path, "rb") as f:
-            return looks_like_png(f.read(8))
-    except Exception:
-        return False
-
-
-def should_use_lxns_jacket(song_id: str) -> bool:
-    return str(song_id).isdigit()
-
-
-def should_full_refresh(msg: Message) -> bool:
-    arg_text = msg.extract_plain_text().strip().lower()
-    if not arg_text:
-        return False
-    return any(keyword in arg_text for keyword in FULL_REFRESH_KEYWORDS)
-
-
-def load_jacket_status() -> dict:
-    if not os.path.exists(JACKET_STATUS_PATH):
-        return {}
-    try:
-        with open(JACKET_STATUS_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception as e:
-        logger.warning(f"读取曲绘状态缓存失败: {e}")
-        return {}
-
-
-def write_jacket_status(status: dict) -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
-    temp_path = JACKET_STATUS_PATH + ".tmp"
-    with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(status, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    os.replace(temp_path, JACKET_STATUS_PATH)
-
-
-def mark_jacket_status(status: dict, sid: str, state: str, http_status: int = 0) -> None:
-    status[sid] = {
-        "state": state,
-        "http_status": http_status,
-        "checked_at": int(time.time()),
-    }
-
-
-def should_defer_jacket(status: dict, sid: str, now: float) -> bool:
-    record = status.get(sid)
-    if not isinstance(record, dict):
-        return False
-    state = record.get("state")
-    try:
-        checked_at = float(record.get("checked_at", 0))
-    except (TypeError, ValueError):
-        return False
-    if state == "missing":
-        return now - checked_at < MISSING_RECHECK_SECONDS
-    if state in {"failed", "rate_limited"}:
-        return now - checked_at < FAILED_RECHECK_SECONDS
-    return False
-
-
-def parse_retry_after(response: httpx.Response) -> int:
-    value = response.headers.get("Retry-After", "")
-    try:
-        seconds = int(value)
-    except (TypeError, ValueError):
-        return MAX_RATE_LIMIT_SLEEP
-    return max(1, min(seconds, MAX_RATE_LIMIT_SLEEP))
-
-
-async def write_bytes_atomic(path: str, content: bytes) -> None:
-    temp_path = path + ".tmp"
-    if aiofiles:
-        async with aiofiles.open(temp_path, "wb") as f:
-            await f.write(content)
-    else:
-        with open(temp_path, "wb") as f:
-            f.write(content)
-    os.replace(temp_path, path)
-
-
-def purge_cached_jackets(ids: set[str]) -> int:
-    removed = 0
-    for sid in ids:
-        for ext in (".png", ".webp", ".jpg", ".jpeg"):
-            path = os.path.join(JACKET_DIR, f"{sid}{ext}")
-            if Path(path).resolve().parent != Path(JACKET_DIR).resolve():
-                continue
-            if os.path.exists(path):
-                os.remove(path)
-                removed += 1
-    return removed
+    if option in {"full", "force", "--full", "--force", "refresh", "完整", "重下", "全量", "重新下载"}:
+        return True
+    raise ValueError("invalid jacket refresh option")
 
 
 @update_jacket.handle()
-async def handle_update_jacket(bot: Bot, event: MessageEvent, msg: Message = CommandArg()):
+async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     from .services.maintenance import submit
-    result = await submit(bot, event, "jackets", should_full_refresh(msg), origin="command")
-    from .services.results import send_command_result
+    from .services.results import outcome, send_command_result
+
+    try:
+        full = jacket_refresh_option(args.extract_plain_text())
+    except ValueError:
+        result = outcome("INVALID_ARGUMENT", "用法：/更新曲绘 [全部|full]。全部补齐缺失和损坏，full 逐张校验后刷新。", status="needs_input")
+    else:
+        result = await submit(bot, event, "jackets", full_refresh=full, origin="command")
     await send_command_result(update_jacket, result, finish=False)

@@ -3,29 +3,23 @@ from nonebot.adapters.onebot.v11 import Bot
 import json
 import os
 import difflib
-import httpx
 import platform
-import asyncio
 import unicodedata
 from io import BytesIO
 from typing import Optional, Dict, Any, List, Tuple, Set
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-from nonebot import on_regex, get_plugin_config
+from nonebot import on_regex
 from nonebot.adapters.onebot.v11 import MessageEvent, MessageSegment, Message
 from nonebot.log import logger
 
-from .config import Config
 from .songlist_update import SONGLIST_LOCK
 
-config = get_plugin_config(Config)
+from .services.paths import SONGLIST_PATH as _SONGLIST_PATH
+from .services.resources import jacket_image as download_jacket
 
-from .services.paths import DATA_DIR as _DATA_DIR
-DATA_DIR = str(_DATA_DIR)
-SONGLIST_PATH = os.path.join(DATA_DIR, "songlist.json")
-JACKET_DIR = os.path.join(DATA_DIR, "jacket")
-LXNS_JACKET_URL = "https://assets.lxns.net/chunithm/jacket/{song_id}.png"
+SONGLIST_PATH = str(_SONGLIST_PATH)
 
 song_query = on_regex(r"^(.+)是什么歌$", priority=10, block=True)
 
@@ -123,13 +117,6 @@ def _write_songlist_data(data: Dict[str, Any]) -> None:
     os.replace(temp_path, SONGLIST_PATH)
 
 
-def _load_songlist_data() -> Optional[Dict[str, Any]]:
-    with SONGLIST_LOCK:
-        from .services.song_model import active_catalog
-        data = _read_songlist_data()
-        return active_catalog(data) if data else None
-
-
 def set_song_aliases(song_id: str, aliases: List[str]) -> Optional[Dict[str, Any]]:
     """Replace one song's local aliases and return the updated song."""
     with SONGLIST_LOCK:
@@ -184,13 +171,14 @@ def remove_song_alias(song_id: str, alias_name: str) -> Tuple[bool, bool]:
                 return True, True
     return False, False
 
-def find_song_matches(query: str, limit: int = 8) -> List[Dict[str, Any]]:
-    data = _load_songlist_data()
-    if not data:
-        return []
-
-    from .services.song_model import Catalog
-    catalog = Catalog(data, legacy=True)
+def find_song_matches(query: str, limit: int = 8, *, catalog=None) -> List[Dict[str, Any]]:
+    if catalog is None:
+        from .services.song_model import Catalog
+        with SONGLIST_LOCK:
+            data = _read_songlist_data()
+        if not data:
+            return []
+        catalog = Catalog(data, legacy=True)
     songs = [song.as_dict() for song in catalog.songs.values()]
     query_exact = query.strip().lower()
     query_variants = _string_variants(query)
@@ -229,8 +217,10 @@ def find_song_matches(query: str, limit: int = 8) -> List[Dict[str, Any]]:
             key = str(group_id)
             if key in matches and matches[key]["score"] >= best_score:
                 continue
+            view = catalog.query_song(group_id)
+            view["_versions"] = catalog.metadata.get("versions", [])
             matches[key] = {
-                "song": catalog.query_song(group_id),
+                "song": view,
                 "score": best_score,
                 "source": best_source,
                 "matched": best_value,
@@ -284,16 +274,14 @@ def get_font(size: int, weight: str = "Normal") -> ImageFont.FreeTypeFont:
 def draw_text(draw: ImageDraw.ImageDraw, pos: tuple, text: str, font: ImageFont.FreeTypeFont, fill=(255, 255, 255), anchor="la"):
     draw.text(pos, text, font=font, fill=fill, anchor=anchor)
 
-def get_version_name(version_num) -> str:
+def get_version_name(version_num, versions) -> str:
     try:
-        with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            for v in data.get("versions", []):
-                if v.get("version") == int(version_num):
-                    return v.get("title", str(version_num))
-    except Exception:
-        pass
-    return str(version_num)
+        number = int(version_num)
+    except (ValueError, TypeError):
+        return str(version_num)
+    return next((v.get("title", str(version_num)) for v in (versions or [])
+                 if isinstance(v, dict) and v.get("version") == number),
+                str(version_num))
 
 def wrap_text_with_height(text: str, font: ImageFont.FreeTypeFont, max_width: int, draw: ImageDraw.ImageDraw) -> tuple[str, int, int]:
     lines = []
@@ -336,55 +324,11 @@ def match_song_by_query(query: str) -> Optional[Dict[str, Any]]:
     match, _ = pick_song_match(find_song_matches(query, limit=8))
     return match
 
-async def fetch_song_detail(song_id: int) -> Optional[Dict[str, Any]]:
-    url = f"https://maimai.lxns.net/api/v0/chunithm/song/{song_id}"
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(url, timeout=10.0)
-            if resp.status_code == 200:
-                return resp.json()
-        except Exception as e:
-            logger.error(f"Failed to fetch song detail for ID {song_id}: {e}")
-    return None
-
-def should_use_lxns_jacket(song_id: Any) -> bool:
-    return str(song_id).isdigit()
-
-
 def make_empty_jacket(size: int = 200) -> Image.Image:
     return Image.new("RGBA", (size, size), (0, 0, 0, 0))
 
 
-async def download_jacket(song_id: int) -> Optional[Image.Image]:
-    jacket_path = os.path.join(JACKET_DIR, f"{song_id}.png")
-    if os.path.exists(jacket_path):
-        try:
-            return Image.open(jacket_path).convert("RGBA")
-        except Exception:
-            pass
-            
-    async with httpx.AsyncClient() as client:
-        if should_use_lxns_jacket(song_id):
-            try:
-                url = LXNS_JACKET_URL.format(song_id=song_id)
-                resp = await client.get(url, timeout=10.0)
-                if resp.status_code == 200:
-                    if not resp.content.startswith(b"\x89PNG\r\n\x1a\n"):
-                        logger.warning(f"Invalid jacket content for ID {song_id}: status=200, size={len(resp.content)}")
-                        raise ValueError("invalid jacket content")
-                    if not os.path.exists(JACKET_DIR):
-                        os.makedirs(JACKET_DIR)
-                    temp_path = jacket_path + ".tmp"
-                    with open(temp_path, "wb") as f:
-                        f.write(resp.content)
-                    os.replace(temp_path, jacket_path)
-                    return Image.open(BytesIO(resp.content)).convert("RGBA")
-            except Exception as e:
-                logger.error(f"Failed to download jacket for ID {song_id}: {e}")
-
-    return None
-
-def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], jacket_img: Optional[Image.Image]) -> bytes:
+def render_song_image(local_song: Dict[str, Any], jacket_img: Optional[Image.Image]) -> bytes:
     # 颜色常数
     BG_COLOR = (30, 30, 35, 255)
     PANEL_COLOR = (45, 45, 52, 255)
@@ -407,19 +351,16 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
     font_small = get_font(16, "Normal")
     font_diff = get_font(22, "Bold")
 
-    song_id = local_song.get("id", api_detail.get("id"))
-    title = api_detail.get("title") or local_song.get("title", "Unknown")
-    artist = api_detail.get("artist") or local_song.get("artist", "-")
-    genre = api_detail.get("genre") or local_song.get("genre", "-")
-    bpm = api_detail.get("bpm") or local_song.get("bpm", 0)
-    version_raw = api_detail.get("version") or local_song.get("version", "-")
-    if isinstance(version_raw, int) or str(version_raw).isdigit():
-        version = get_version_name(version_raw)
-    else:
-        version = str(version_raw)
+    song_id = local_song["id"]
+    title = local_song.get("title", "Unknown")
+    artist = local_song.get("artist") or "-"
+    genre = local_song.get("genre") or "-"
+    bpm = local_song.get("bpm", 0)
+    version_raw = local_song.get("version", "-")
+    versions = local_song.get("_versions", [])
+    version = get_version_name(version_raw, versions)
 
     local_diffs = sorted(local_song.get("difficulties", []), key=lambda d: (d["difficulty"], d.get("song_id", song_id)))
-    api_diffs = {(d.get("song_id", api_detail.get("id", song_id)), d.get("difficulty", idx)): d for idx, d in enumerate(api_detail.get("difficulties", []))}
 
     card_width = 800
     
@@ -448,10 +389,7 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
     draw_text(draw, (info_x, current_y), f"BPM: {bpm}", font_body, TEXT_SUB)
     current_y += 30
     
-    locked_val = api_detail.get("locked")
-    if locked_val is None:
-        locked_val = local_song.get("locked", False)
-    locked_str = "Yes" if locked_val else "No"
+    locked_str = "Yes" if local_song.get("locked") else "No"
     
     genre_wrapped, _, g_h = wrap_text_with_height(f"Genre: {genre}   Locked: {locked_str}", font_body, max_text_width, draw)
     draw_text(draw, (info_x, current_y), genre_wrapped, font_body, TEXT_SUB)
@@ -465,31 +403,30 @@ def render_song_image(local_song: Dict[str, Any], api_detail: Dict[str, Any], ja
 
     for ld in local_diffs:
         diff_idx = ld["difficulty"]
-        ad = api_diffs.get((ld.get("song_id", song_id), diff_idx), ld)
 
         color = DIFF_COLORS[diff_idx] if diff_idx < len(DIFF_COLORS) else (100, 100, 100)
         diff_name = DIFF_NAMES[diff_idx] if diff_idx < len(DIFF_NAMES) else f"DIFF {diff_idx}"
         
-        designer = ld.get("note_designer", ad.get("note_designer", "-"))
+        designer = ld.get("note_designer", "-")
         if str(designer) == "0": designer = "-"
         designer_str = f"Designer: {designer}"
         if diff_idx in (4, 5):
-            designer_str += f" | Version: {get_version_name(ld.get('version', version_raw))}"
+            designer_str += f" | Version: {get_version_name(ld.get('version', version_raw), versions)}"
         
         des_w, _, d_h = wrap_text_with_height(designer_str, font_small, card_width - 120, draw)
         
-        total = ad.get("total") or (ad.get("notes") or {}).get("total", "?")
-        tap = ad.get("tap") or (ad.get("notes") or {}).get("tap", "?")
-        hold = ad.get("hold") or (ad.get("notes") or {}).get("hold", "?")
-        slide = ad.get("slide") or (ad.get("notes") or {}).get("slide", "?")
-        air = ad.get("air") or (ad.get("notes") or {}).get("air", "?")
-        flick = ad.get("flick") or (ad.get("notes") or {}).get("flick", "?")
+        notes = ld.get("notes")
+        if not isinstance(notes, dict):
+            notes = {}
+        total = notes.get("total", ld.get("total", "?"))
+        tap = notes.get("tap", ld.get("tap", "?"))
+        hold = notes.get("hold", ld.get("hold", "?"))
+        slide = notes.get("slide", ld.get("slide", "?"))
+        air = notes.get("air", ld.get("air", "?"))
+        flick = notes.get("flick", ld.get("flick", "?"))
         
         notes_str = f"Total: {total} | Tap: {tap} | Hold: {hold} | Slide: {slide} | Air: {air} | Flick: {flick}"
-        if total == "?" and "notes" in ad:
-            n = ad["notes"] or {}
-            notes_str = f"Total: {n.get('total', '?')} | Tap: {n.get('tap', '?')} | Hold: {n.get('hold', '?')} | Slide: {n.get('slide', '?')} | Air: {n.get('air', '?')} | Flick: {n.get('flick', '?')}"
-        
+
         notes_w, _, n_h = wrap_text_with_height(notes_str, font_small, card_width - 120, draw)
         
         content_h = 40 + d_h + n_h

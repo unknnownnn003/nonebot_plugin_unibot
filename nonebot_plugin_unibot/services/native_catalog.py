@@ -10,7 +10,7 @@ NATIVE_CATALOG = json.loads(r'''{
           "chu放弃"
         ],
         "command": "放弃",
-        "line": 82,
+        "line": 83,
         "matcher": "giveup_cmd",
         "module": "chuguess",
         "registration": "on_command"
@@ -21,7 +21,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
-        "line": 83,
+        "line": 84,
         "matcher": "guess_cmd",
         "module": "chuguess",
         "pattern": "^[\\.。/]?猜\\s*(.+)?$",
@@ -31,7 +31,7 @@ NATIVE_CATALOG = json.loads(r'''{
       {
         "command": "chuguess",
         "condition": "当前群已有游戏，且命令参数为猜测内容。",
-        "line": 80,
+        "line": 81,
         "matcher": "chuguess_cmd",
         "module": "chuguess",
         "registration": "on_command"
@@ -46,7 +46,7 @@ NATIVE_CATALOG = json.loads(r'''{
           "chu提示"
         ],
         "command": "提示",
-        "line": 81,
+        "line": 82,
         "matcher": "hint_cmd",
         "module": "chuguess",
         "registration": "on_command"
@@ -59,7 +59,7 @@ NATIVE_CATALOG = json.loads(r'''{
       {
         "command": "chuguess",
         "condition": "当前群没有进行中的游戏；参数为难度或留空。",
-        "line": 80,
+        "line": 81,
         "matcher": "chuguess_cmd",
         "module": "chuguess",
         "registration": "on_command"
@@ -72,7 +72,7 @@ NATIVE_CATALOG = json.loads(r'''{
       {
         "command": "chuguess",
         "condition": "当前群已有游戏，且命令参数为空。",
-        "line": 80,
+        "line": 81,
         "matcher": "chuguess_cmd",
         "module": "chuguess",
         "registration": "on_command"
@@ -148,6 +148,9 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
+        "aliases": [
+          "更新曲库"
+        ],
         "command": "更新songlist",
         "line": 19,
         "matcher": "update_songlist",
@@ -157,7 +160,7 @@ NATIVE_CATALOG = json.loads(r'''{
       },
       {
         "command": "更新曲绘",
-        "line": 44,
+        "line": 7,
         "matcher": "update_jacket",
         "module": "get_resource",
         "permission_source": "SUPERUSER",
@@ -165,7 +168,7 @@ NATIVE_CATALOG = json.loads(r'''{
       },
       {
         "command": "更新收藏品",
-        "line": 39,
+        "line": 14,
         "matcher": "update_collection",
         "module": "collection_update",
         "permission_source": "SUPERUSER",
@@ -226,7 +229,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "chulist",
-        "line": 21,
+        "line": 19,
         "matcher": "chulist_cmd",
         "module": "overpower_list_local",
         "registration": "on_command"
@@ -262,7 +265,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "添加别名",
-        "line": 630,
+        "line": 567,
         "matcher": "add_alias_cmd",
         "module": "song",
         "registration": "on_command"
@@ -274,7 +277,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "删除别名",
-        "line": 631,
+        "line": 568,
         "matcher": "del_alias_cmd",
         "module": "song",
         "permission_source": "SUPERUSER",
@@ -287,7 +290,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "查看别名",
-        "line": 632,
+        "line": 569,
         "matcher": "view_alias_cmd",
         "module": "song",
         "registration": "on_command"
@@ -298,7 +301,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
-        "line": 30,
+        "line": 24,
         "matcher": "song_query",
         "module": "song",
         "pattern": "^(.+)是什么歌$",
@@ -310,7 +313,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
-        "line": 30,
+        "line": 24,
         "matcher": "song_query",
         "module": "song",
         "pattern": "^(.+)是什么歌$",

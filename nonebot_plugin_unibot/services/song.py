@@ -20,9 +20,10 @@ async def change_alias(song_id, alias, *, delete=False):
                          "action": "delete" if delete else "add"})
 
 
-async def prepare(query):
+async def prepare(query, *, catalog=None):
     from .. import song as s
-    matches = await async_call(s.find_song_matches, query, limit=8)
+    options = {"catalog": catalog} if catalog is not None else {}
+    matches = await async_call(s.find_song_matches, query, limit=8, **options)
     local_song, ambiguous = s.pick_song_match(matches)
     import copy
     return copy.deepcopy({"song": local_song, "ambiguous": ambiguous})
@@ -43,12 +44,9 @@ async def search(query, *, prepared=None):
     song_id = local_song.get("id")
     if not song_id:
         return outcome("INVALID_DATA", "匹配到的曲目数据中缺少ID。", status="unavailable")
-    detail = await s.fetch_song_detail(song_id)
-    if not detail:
-        detail = local_song  # Validated local LXNS records remain usable offline.
     from .song_model import jacket_id
     jacket = await s.download_jacket(jacket_id(local_song))
-    content = await async_call(s.render_song_image, local_song, detail, jacket)
+    content = await async_call(s.render_song_image, local_song, jacket)
     return outcome(data={"id": song_id, "title": local_song.get("title"),
                          "data_source": local_song.get("data_source"),
                          "charts": local_song.get("difficulties", []),
@@ -76,12 +74,9 @@ async def detail(song_id):
                        if str(item.get("song", {}).get("id")) == str(song_id)), None)
     if local_song is None:
         return outcome("NOT_FOUND", "没有找到这个曲目 ID。", status="needs_input")
-    detail_data = await s.fetch_song_detail(local_song.get("id"))
-    if not detail_data:
-        detail_data = local_song
     from .song_model import jacket_id
     jacket = await s.download_jacket(jacket_id(local_song))
-    content = await async_call(s.render_song_image, local_song, detail_data, jacket)
+    content = await async_call(s.render_song_image, local_song, jacket)
     return outcome(data={"id": local_song.get("id"), "title": local_song.get("title"),
                          "data_source": local_song.get("data_source"),
                          "charts": local_song.get("difficulties", []),

@@ -7,7 +7,7 @@ import io
 import platform
 from .services.job_store import async_call
 from .services.results import outcome, image
-from .services.paths import DATA_DIR
+from .services.resources import player_asset
 
 get_score = on_command("个人信息", aliases={"分数", "chuinfo"}, priority=5, block=True)
 song_scores_cmd = on_command("chu成绩", priority=5, block=True)
@@ -132,13 +132,7 @@ def draw_player_info(data: dict, char_bytes: bytes = None) -> bytes:
     return buf.getvalue()
 
 async def character_bytes(player):
-    character = player.get("character") or {}
-    identifier = character.get("id")
-    if type(identifier) is int and identifier >= 0:
-        path = DATA_DIR / "character" / f"{identifier}.png"
-        if path.is_file():
-            return await async_call(path.read_bytes)
-    return None
+    return await player_asset(player, "character")
 
 
 async def query_player_profile(snapshot):

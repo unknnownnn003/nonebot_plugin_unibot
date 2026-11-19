@@ -37,7 +37,20 @@ original=m.inventory(legacy)
 plugin=nonebot.load_plugin('nonebot_plugin_unibot');assert plugin is not None
 from nonebot_plugin_unibot import song as s, songlist_update as update, best_rating as b, chuguess, overpower_list_local as op
 from nonebot_plugin_unibot.services import player, song as query, maintenance
-from nonebot_plugin_unibot import llm_api
+from nonebot_plugin_unibot import llm_api, get_resource
+from nonebot_plugin_unibot.services.rating import select
+from PIL import Image
+assert not get_resource.jacket_refresh_option('')
+assert not get_resource.jacket_refresh_option(' 全部 ')
+assert get_resource.jacket_refresh_option(' FULL ')
+for value in ('notfull', 'full 全部', 'some force text'):
+    try: get_resource.jacket_refresh_option(value)
+    except ValueError: pass
+    else: raise AssertionError('invalid refresh option was accepted')
+assert s.song_query.rule
+from nonebot_plugin_unibot.services.native_catalog import NATIVE_CATALOG
+assert any(row.get('pattern') == '^(.+)是什么歌$' for row in NATIVE_CATALOG['song.search']['native_commands'])
+
 assert len(chuguess.load_songlist())==5
 from nonebot_plugin_unibot.services.song_model import Catalog,read_catalog
 catalog=Catalog(read_catalog(target/'songlist.json'))
@@ -78,8 +91,8 @@ display=copy.deepcopy(base)
 next(d for d in display['difficulties'] if d['song_id']==8001).update(kanji='半',star=3)
 def record(draw,pos,text,*args,**kwargs):
     labels.append(str(text));return original_draw(draw,pos,text,*args,**kwargs)
-with patch.object(s,'draw_text',side_effect=record),patch.object(s,'get_version_name',side_effect=lambda v:{10000:'CHUNITHM OLD',21000:'CHUNITHM AIR',23000:'CHUNITHM SUN',24000:'CHUNITHM NEW'}[int(v)]):
-    image=s.render_song_image(display,display,None)
+with patch.object(s,'draw_text',side_effect=record),patch.object(s,'get_version_name',side_effect=lambda v,_:{10000:'CHUNITHM OLD',21000:'CHUNITHM AIR',23000:'CHUNITHM SUN',24000:'CHUNITHM NEW'}[int(v)]):
+    image=s.render_song_image(display,None)
 assert image.startswith(b'\xff\xd8')
 assert sum(text.startswith("WORLD'S END") for text in labels)==2
 assert "WORLD'S END 半 ★★★" in labels and "WORLD'S END 狂 ★★★★★" in labels
@@ -94,9 +107,51 @@ from nonebot.adapters.onebot.v11 import PrivateMessageEvent
 event=PrivateMessageEvent(time=0,self_id=1,post_type='message',sub_type='friend',user_id=7,
     message_type='private',message_id=8,message=[],raw_message='',font=0,sender={'user_id':7})
 async def run():
-    with patch.object(s,'fetch_song_detail',AsyncMock(return_value=None)), patch.object(s,'download_jacket',AsyncMock(return_value=None)),patch.object(s,'render_song_image',return_value=b'same-renderer'):
+    prepared = await query.prepare('local alias')
+    updated = copy.deepcopy(FIXTURE)
+    first = updated['songs'][0]
+    first.update(title='New title', artist='New artist', genre='东方Project', release_date='2020-11-01')
+    first['difficulties'][0].update(level_value=14.7, notes={'tap': 1200, 'total': 1800})
+    first['difficulties'][1]['disabled'] = True
+    updated['songs'][1]['disabled'] = True
+    updated['songs'] = [row for row in updated['songs'] if row['id'] != 8003]
+    updated['songs'].append(dict(id=12, title='Added', genre='fixture genre', difficulties=[dict(difficulty=3, level_value=13)]))
+    updated['versions'][0]['title'] = 'New version label'
+    counts = update.commit_lxns_songlist(updated, {'aliases': []})
+    assert (counts['songs_added'], counts['songs_changed'], counts['songs_removed'], counts['songs_disabled'])==(1,2,1,1),counts
+    assert (counts['charts_added'], counts['charts_changed'], counts['charts_removed'], counts['charts_disabled'])==(1,2,1,2),counts
+    current = Catalog(read_catalog(target/'songlist.json'))
+    new_match = s.find_song_matches('local alias')[0]['song']
+    assert new_match['title']=='New title' and new_match['artist']=='New artist'
+    assert new_match['difficulties'][0]['notes']=={'tap':1200,'total':1800}
+    assert new_match['_versions'][0]['title']=='New version label'
+    assert prepared['song']['title']=='Same title'
+    assert prepared['song']['_versions'][0]['title']=='CHUNITHM OLD'
+    assert {(c['song_id'], c['level_value']) for c in op.get_target_charts('车万',current)}=={('10',14.7)}
+    scores = NS(scores=[dict(id=i, level_index=d, score=1009000, rating=15, over_power=80)
+                       for i,d in ((10,3),(10,4),(11,3))])
+    assert [row['level_value'] for row in select(scores,current)[0]]==[14.7]
+    assert (await player.song_scores(scores,current,'local alias'))['data']['song_id']==10
+    jacket_dir = target/'jacket'
+    jacket_dir.mkdir(exist_ok=True)
+    with Image.new('RGBA',(16,16),'red') as sample:
+        sample.save(jacket_dir/'10.png')
+    (jacket_dir/'12.png').write_bytes(b'invalid')
+    assert chuguess.pick_random_song_and_jacket()[2] == '10'
+    with Image.new('RGBA',(8,8)) as tiny:
+        assert chuguess.crop_jacket(tiny, 8)[0].size == (8,8)
+    with patch.object(s,'download_jacket',AsyncMock(return_value=None)),patch.object(s,'render_song_image',return_value=b'same-renderer'):
         output=await query.search('10')
     assert output['status']=='ok' and len(output['data']['charts'])==4
+    broken = copy.deepcopy(updated)
+    broken['songs'][0]['aliases'] = ['recovered alias']
+    del broken['songs'][0]['difficulties'][0]['level_value']
+    previous = json.dumps(broken).encode()
+    update.SONGLIST_FILE.write_bytes(previous)
+    counts = update.commit_lxns_songlist(updated, {'aliases': []})
+    assert counts['backup_created'] and not counts['changes_available']
+    assert any(p.read_bytes()==previous for p in (target/'catalog_backups').glob('*.json'))
+    assert s.find_song_matches('recovered alias')[0]['song']['id']==10
     # Cached retired invocations cannot write or resubmit old imports.
     for method in [llm_api.prepare_capability,llm_api.invoke_capability]:
         for name in ['player.bind','score.submit','score.sync','score.import_file']:

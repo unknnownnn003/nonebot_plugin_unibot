@@ -172,7 +172,7 @@ async def prepare_capability(name, arguments, context):
         if not native_superuser(bot, event):
             return outcome("PERMISSION_DENIED", "资源维护仅SUPERUSER可用。", status="denied")
         if normalized["full_refresh"] and normalized["resource"] != "jackets":
-            return outcome("INVALID_ARGUMENT", "完整重下仅适用于曲绘。", status="needs_input")
+            return outcome("INVALID_ARGUMENT", "强制刷新仅适用于曲绘。", status="needs_input")
         constraints["scope"] = "global"
     if name in {"song.alias_add", "song.alias_delete"}:
         try:

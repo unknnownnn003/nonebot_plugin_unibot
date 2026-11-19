@@ -4,6 +4,7 @@ import hashlib
 import json
 
 from .results import outcome
+from . import group_policy
 from .permissions import native_superuser
 
 RESOURCES = {"songlist": "落雪曲库", "jackets": "曲绘",
@@ -42,6 +43,9 @@ class RunContext:
     def permission(self):
         if not native_superuser(self.bot, self.event):
             raise Stopped("PERMISSION_DENIED", "维护权限已失效，本次停止执行。")
+
+        if not group_policy.enabled(self.event, "maintenance.refresh"):
+            raise Stopped("FEATURE_DISABLED", "本群资源维护已关闭，本次停止执行。")
 
     async def check(self, step=None):
         self.permission()
@@ -131,7 +135,7 @@ async def submit(bot, event, resource, full_refresh=False, *, origin="agent"):
     if resource in {"chunirec", "chunirec_file"}:
         return retired_source()
     if resource not in RESOURCES or (full_refresh and resource != "jackets"):
-        return outcome("INVALID_ARGUMENT", "请指定已支持的资源；完整重下仅适用于曲绘。", status="needs_input")
+        return outcome("INVALID_ARGUMENT", "请指定已支持的资源；强制刷新仅适用于曲绘。", status="needs_input")
     args = dict(resource=resource, full_refresh=full_refresh)
     digest = hashlib.sha256(json.dumps(args, sort_keys=True).encode()).hexdigest()
     return await submit_operation(bot, event, "maintenance.refresh", f"maintenance:{digest}",

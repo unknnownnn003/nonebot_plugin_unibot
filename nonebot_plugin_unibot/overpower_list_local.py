@@ -14,9 +14,7 @@ from nonebot.params import CommandArg
 from nonebot.log import logger
 
 
-from .services.paths import DATA_DIR as _DATA_DIR
-DATA_DIR = str(_DATA_DIR)
-JACKET_DIR = os.path.join(DATA_DIR, "jacket")
+from .services.resources import local_jacket
 
 chulist_cmd = on_command("chulist", priority=5, block=True)
 
@@ -88,7 +86,6 @@ def get_target_charts(query_text: str, catalog):
 
     for song in songs:
         song_id = str(song["id"])
-        origin_id = song.get("origin_id", song_id)
         
         s_genre_raw = song.get("genre", "").lower()
         s_genre_search = s_genre_raw
@@ -127,11 +124,10 @@ def get_target_charts(query_text: str, catalog):
                     break
             
             if diff_passes:
-                target_id = str(origin_id) if d == 4 else song_id
                 key = f"{song_id}_{d}"
                 charts[key] = {
                     "song_id": song_id,
-                    "jacket_id": target_id,
+                    "jacket_id": song_id,
                     "level_index": int(d),
                     "level_value": float(c),
                     "theoretical_op": (float(c) + 3) * 5,
@@ -301,7 +297,6 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
             x = margin_side + c * (block_w + spacing_x)
             y = y_cursor + r * (block_h + spacing_y)
             
-            jacket_path = os.path.join(JACKET_DIR, f"{item['jacket_id']}.png")
             jacket_size = 120
             j_x = x + (block_w - jacket_size) // 2
             j_y = y + 20
@@ -321,12 +316,11 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
             draw.rectangle([j_x - 6, j_y - 6, j_x + jacket_size + 5, j_y + jacket_size + 5], fill=idx_color)
             
             draw.rectangle([j_x, j_y, j_x + jacket_size - 1, j_y + jacket_size - 1], fill=(50, 50, 50))
-            if os.path.exists(jacket_path):
-                try:
-                    j_img = Image.open(jacket_path).convert("RGBA")
-                    j_img = j_img.resize((jacket_size, jacket_size), Image.Resampling.LANCZOS)
+            jacket = local_jacket(item["jacket_id"])
+            if jacket is not None:
+                with jacket:
+                    j_img = jacket.resize((jacket_size, jacket_size), Image.Resampling.LANCZOS)
                     img.paste(j_img, (j_x, j_y), mask=j_img)
-                except: pass
                 
             t_y = j_y + jacket_size + 10
             
@@ -364,7 +358,7 @@ def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, pl
     img.save(buf, format="PNG")
     return buf.getvalue()
 
-async def query_progress(snapshot, query_text, catalog):
+async def query_progress(snapshot, query_text, catalog, *, fetch_jackets=None):
     no_cat = False
     if '--nocat' in query_text:
         no_cat = True
@@ -396,6 +390,8 @@ async def query_progress(snapshot, query_text, catalog):
             fc = ''
         percent = op / theoretical_op * 100 if theoretical_op > 0 else 0.0
         draw_items.append({'song_name': c.get('song_name', 'Unknown'), 'song_id': c['song_id'], 'jacket_id': c.get('jacket_id', c['song_id']), 'level_index': int(c['level_index']), 'level_value': c['level_value'], 'score': score, 'over_power': op, 'percent': percent, 'full_combo': fc, 'theoretical_op': theoretical_op})
+    if fetch_jackets is not None:
+        await fetch_jackets(dict.fromkeys(item["jacket_id"] for item in draw_items if item["score"] > 0))
     total_op = sum(item['over_power'] for item in draw_items)
     total_theoretical_op = sum(item['theoretical_op'] for item in draw_items)
     try:

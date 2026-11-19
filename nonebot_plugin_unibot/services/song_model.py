@@ -5,6 +5,7 @@ Legacy mixed files are projected in memory; their original bytes remain intact.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 import json
@@ -132,10 +133,12 @@ def read_catalog(path):
 
 
 def jacket_id(song):
-    for chart in song.get("difficulties", []):
-        if chart.get("difficulty") == 5 and chart.get("origin_id") is not None:
-            return numeric_id(chart["origin_id"])
-    return numeric_id(song["id"])
+    identity = numeric_id(song["id"])
+    owned = [chart for chart in song.get("difficulties", []) if chart.get("song_id", identity) == identity]
+    for chart in owned:
+        if chart["difficulty"] != 5:
+            return identity
+    return Chart(identity, 0, owned[0]).jacket_id if owned else identity
 
 
 def chart_owner(view, chart):
@@ -144,3 +147,60 @@ def chart_owner(view, chart):
         if numeric_id(song["id"]) == sid:
             return song
     raise ValueError("Chart owner is absent from query view")
+
+
+def catalog_changes(old, new):
+    """Count changes by song ID and by chart identity, including repeated WE rows."""
+    counts = {f"{kind}_{action}": 0 for kind in ("songs", "charts")
+              for action in ("added", "changed", "removed", "disabled")}
+
+    def chart_groups(song):
+        groups = defaultdict(list)
+        for chart in song.charts if song is not None else ():
+            attrs = chart.attributes
+            key = (chart.difficulty,)
+            if chart.difficulty == 5:
+                key += (attrs.get("origin_id"), str(attrs.get("kanji")), str(attrs.get("star")))
+            groups[key].append(attrs)
+        return groups
+
+    for sid in old.songs.keys() | new.songs.keys():
+        before, after = old.songs.get(sid), new.songs.get(sid)
+        before_disabled = bool(before and before.attributes.get("disabled"))
+        after_disabled = bool(after and after.attributes.get("disabled"))
+        old_charts, new_charts = chart_groups(before), chart_groups(after)
+        changed = False
+
+        def newly_disabled(old_attrs, new_attrs):
+            return (not (before_disabled or old_attrs.get("disabled"))
+                    and bool(after_disabled or new_attrs.get("disabled")))
+
+        for key in old_charts.keys() | new_charts.keys():
+            previous = old_charts[key]
+            current = new_charts[key]
+            # Match unchanged rows first so changes in upstream order do not count.
+            previous, current = previous.copy(), current.copy()
+            for attrs in previous.copy():
+                if attrs in current:
+                    previous.remove(attrs)
+                    current.remove(attrs)
+                    counts["charts_disabled"] += after_disabled and not before_disabled and not attrs.get("disabled")
+            paired = min(len(previous), len(current))
+            counts["charts_added"] += len(current) - paired
+            counts["charts_removed"] += len(previous) - paired
+            counts["charts_changed"] += paired
+            counts["charts_disabled"] += sum(
+                bool(after_disabled or new_chart.get("disabled")) and not (before_disabled or old_chart.get("disabled"))
+                for old_chart, new_chart in zip(previous, current))
+            changed |= bool(previous or current)
+        if before is None:
+            counts["songs_added"] += 1
+        elif after is None:
+            counts["songs_removed"] += 1
+        else:
+            counts["songs_disabled"] += after_disabled and not before_disabled
+            ignored = {"id", "aliases", "data_source"}
+            changed |= ({k: v for k, v in before.attributes.items() if k not in ignored}
+                        != {k: v for k, v in after.attributes.items() if k not in ignored})
+            counts["songs_changed"] += changed
+    return counts

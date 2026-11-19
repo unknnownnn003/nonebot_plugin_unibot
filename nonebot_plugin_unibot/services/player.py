@@ -24,7 +24,8 @@ async def query(bot, event, capability, arguments, *, expected=None, checkpoint=
             output = await query_player_profile(snapshot)
         elif capability == "player.progress":
             from ..overpower_list_local import query_progress
-            output = await query_progress(snapshot, arguments["query"], catalog)
+            from .resources import prefetch_jackets
+            output = await query_progress(snapshot, arguments["query"], catalog, fetch_jackets=prefetch_jackets)
         elif capability == "player.recommend":
             from ..recommendation import recommend_chart
             output = await recommend_chart(snapshot, "推什么 " + arguments.get("filter", ""), catalog)
@@ -95,7 +96,7 @@ def split_query(query, level_index=None):
 async def song_scores(snapshot, catalog, query, level_index=None):
     from .song import prepare
     query, level_index = split_query(query, level_index)
-    prepared = await prepare(query)
+    prepared = await prepare(query, catalog=catalog)
     if not prepared["song"]:
         choices = [{"id": row["song"]["id"], "title": row["song"].get("title")} for row in prepared["ambiguous"][:8]]
         text = "同名曲目有多个候选，请指定原始歌曲ID：" + "、".join(f"{r['id']} {r['title']}" for r in choices) if choices else "未找到歌曲，请使用歌名、别名或原始ID。"

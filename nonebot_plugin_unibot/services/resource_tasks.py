@@ -2,29 +2,17 @@
 import asyncio
 from datetime import datetime
 import json
-import os
 from pathlib import Path
 import re
-import time
 from urllib.parse import quote
-from uuid import uuid4
 
 import httpx
 
 from .results import outcome
+from .resources import asset_bytes, public_images
+from .storage import atomic_bytes as write_bytes
 from .maintenance import Stopped, observed_io
 from . import http_safety
-
-MAX_ASSET_BYTES = 30 * 1024 * 1024
-def write_bytes(path, content):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    try:
-        temporary.write_bytes(content)
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def write_json(path, data):
@@ -36,18 +24,6 @@ def local_path(root, relative):
     target = (root / relative.lstrip("/\\")).resolve()
     target.relative_to(root)
     return target
-
-
-async def asset_bytes(client, url):
-    async with client.stream("GET", url, timeout=30, follow_redirects=True) as response:
-        if response.status_code != 200:
-            return response.status_code, b"", dict(response.headers)
-        content = bytearray()
-        async for chunk in response.aiter_bytes(65536):
-            content.extend(chunk)
-            if len(content) > MAX_ASSET_BYTES:
-                raise ValueError("asset exceeds resource byte limit")
-        return 200, bytes(content), dict(response.headers)
 
 
 async def refresh_songlist(context):
@@ -70,88 +46,51 @@ async def refresh_songlist(context):
             raise ValueError("CN version absent from catalog")
         payload["rating_version"] = version
     counts = await context.write("committing_songlist", s.commit_lxns_songlist, payload, aliases)
-    return outcome(hint=("更新成功！songlist.json 及歌曲别名已成功获取并覆盖。\n"
-                         f"曲目数：{counts['song_count']}，别名数：{counts['alias_count']}\n文件修改时间：{counts['mtime']}"), data=counts)
+    summary = [
+        f"{label}：新增 {counts[kind + '_added']}，变更 {counts[kind + '_changed']}，"
+        f"移除 {counts[kind + '_removed']}，新停用 {counts[kind + '_disabled']}"
+        for kind, label in (("songs", "歌曲"), ("charts", "谱面"))
+    ] if counts["changes_available"] else ["旧曲库元信息异常，已保留备份，无法可靠计算差异。"]
+    hint = f"国服曲库已更新，共 {counts['song_count']} 首，保留及合并别名 {counts['alias_count']} 条。"
+    return outcome(hint=hint + "\n" + "\n".join(summary), data=counts)
 
 
 async def refresh_jackets(context, full_refresh=False):
-    from .. import get_resource as s
-    def read():
-        from .song_model import read_catalog
-        songs = read_catalog(Path(s.DATA_DIR) / "songlist.json").get("songs")
-        if not isinstance(songs, list) or not songs:
-            raise ValueError("missing songlist")
-        return songs, s.load_jacket_status()
-    songs, cache = await observed_io(read)
-    targets = {}
-    for song in songs:
-        from .song_model import jacket_id
-        identity = jacket_id(song)
-        if identity is not None and s.should_use_lxns_jacket(str(identity)):
-            targets[str(identity)] = song
-    purged = 0
-    if full_refresh:
-        ids = set(targets)
-        purged = await context.write("purging_jacket_cache", s.purge_cached_jackets, ids)
-        for identity in ids:
-            cache.pop(identity, None)
-    counts = dict(success=0, skipped=0, missing=0, failed=0, deferred=0, requests=0, rate_limited=0, purged=purged)
-    items, now, last_request = sorted(targets, key=int), time.time(), 0.0
+    from .paths import SONGLIST_PATH
+    from .song_model import Catalog, read_catalog
+
+    catalog = Catalog(await observed_io(read_catalog, SONGLIST_PATH))
+    if not catalog.songs:
+        raise ValueError("missing songlist")
+    targets = sorted({identity for song in catalog.songs.values()
+                      for identity in ({chart.jacket_id for chart in song.charts} or {song.id})})
+    counts = dict(total=len(targets), existing=0, success=0, failed=0, missing=0,
+                  not_found=0, rate_limited=0, deferred=0, skipped=0)
     async with http_safety.client() as client:
-        for index, identity in enumerate(items):
-            await context.check(f"checking_jackets:{index}/{len(items)}")
-            path = local_path(s.JACKET_DIR, identity + ".png")
-            if await observed_io(s.is_existing_jacket_valid, str(path)):
-                counts["skipped"] += 1
-                cache.pop(identity, None)
-                continue
-            if not full_refresh and s.should_defer_jacket(cache, identity, now):
+        for index, identity in enumerate(targets, start=1):
+            await context.check(f"checking_jackets:{index}/{len(targets)}")
+            limited = counts["rate_limited"] > 0
+            result = await public_images.get("jacket", identity, force=full_refresh,
+                                             context=context, client=client, local_only=limited)
+            counts["existing"] += result.had_local
+            counts["missing"] += result.content is None
+            if limited and (full_refresh or result.content is None):
                 counts["deferred"] += 1
-                continue
-            if not full_refresh and counts["requests"] >= s.MAX_INCREMENTAL_REQUESTS:
-                counts["deferred"] += len(items) - index
-                break
-            counts["requests"] += 1
-            for attempt in range(s.MAX_RATE_LIMIT_RETRIES + 1):
-                try:
-                    delay = s.LXNS_REQUEST_INTERVAL - (time.monotonic() - last_request)
-                    if delay > 0:
-                        await context.network(asyncio.sleep(delay), "waiting_jacket_request_interval")
-                    status, content, headers = await context.network(
-                        asset_bytes(client, s.LXNS_JACKET_URL.format(song_id=identity)), f"downloading_jacket:{identity}")
-                    last_request = time.monotonic()
-                    if status == 429:
-                        counts["rate_limited"] += 1
-                        if attempt < s.MAX_RATE_LIMIT_RETRIES:
-                            delay = s.parse_retry_after(httpx.Response(status, headers=headers))
-                            await context.network(asyncio.sleep(delay), "waiting_jacket_rate_limit")
-                            continue
-                        s.mark_jacket_status(cache, identity, "rate_limited", status)
-                    elif status == 200 and s.looks_like_png(content):
-                        await context.write(f"saving_jacket:{identity}", write_bytes, path, content)
-                        cache.pop(identity, None)
-                        counts["success"] += 1
-                    else:
-                        key = "missing" if status == 404 else "failed"
-                        counts[key] += 1
-                        s.mark_jacket_status(cache, identity, key, status)
-                    break
-                except Stopped:
-                    raise
-                except (httpx.HTTPError, ValueError):
-                    counts["failed"] += 1
-                    s.mark_jacket_status(cache, identity, "failed", 0)
-                    break
-            if cache.get(identity, {}).get("state") == "rate_limited":
-                counts["deferred"] += len(items) - index - 1
-                break
-    await context.write("saving_jacket_status", s.write_jacket_status, cache)
-    mode = "完整重下" if full_refresh else "增量更新"
-    hint = (f"曲绘更新任务完成！（{mode}）\n成功下载：{counts['success']}\n跳过已有：{counts['skipped']}\n"
-            f"本次请求：{counts['requests']}\n暂缓跳过：{counts['deferred']}\n删除旧缓存：{counts['purged']}\n"
-            f"落雪缺失：{counts['missing']}\n下载失败：{counts['failed']}\n触发限流：{counts['rate_limited']}")
-    return outcome("PARTIAL_MAINTENANCE" if counts["failed"] else "OK", hint,
-                   status="partial" if counts["failed"] else "ok", data=counts)
+            elif result.status == "existing":
+                counts["skipped"] += 1
+            elif result.status == "downloaded":
+                counts["success"] += 1
+            else:
+                counts["failed"] += 1
+                if result.status in {"not_found", "rate_limited"}:
+                    counts[result.status] += 1
+    mode = "校验后刷新" if full_refresh else "补齐缺失和损坏"
+    hint = (f"曲绘维护（{mode}）\n总数：{counts['total']}，原有可用：{counts['existing']}，"
+            f"下载成功：{counts['success']}，失败：{counts['failed']}，仍缺：{counts['missing']}\n"
+            f"其中 CDN 无图：{counts['not_found']}，限流失败：{counts['rate_limited']}，暂缓：{counts['deferred']}")
+    partial = counts["failed"] or counts["deferred"]
+    return outcome("PARTIAL_MAINTENANCE" if partial else "OK", hint,
+                   status="partial" if partial else "ok", data=counts)
 
 
 async def refresh_collections(context):
@@ -159,20 +98,20 @@ async def refresh_collections(context):
     versions = await observed_io(s.load_versions)
     summary, details, incomplete = [], {}, False
     async with http_safety.client() as client:
-        for kind, info in s.COLLECTIONS.items():
+        for kind, key in s.COLLECTIONS.items():
             items, api_failures = {}, 0
             for version in versions:
                 try:
                     response = await context.network(client.get(f"{s.API_BASE_URL}/{kind}/list?version={version}", timeout=30),
                                                      f"fetching_collection:{kind}:{version}")
                     response.raise_for_status()
-                    rows = response.json().get(info["key"], [])
+                    rows = response.json().get(key, [])
                     if not isinstance(rows, list):
                         raise ValueError("invalid collection list")
                     for row in rows:
                         if isinstance(row, dict) and row.get("id") is not None:
                             identity = str(row["id"])
-                            if not identity.isdigit():
+                            if not identity.isascii() or not identity.isdigit() or len(identity) > 18:
                                 raise ValueError("invalid collection id")
                             items[identity] = row
                 except Stopped:
@@ -183,41 +122,21 @@ async def refresh_collections(context):
                 incomplete = True
                 summary.append(f"{kind}: 未获取到有效数据，保留本地旧文件")
                 continue
-            await context.write(f"saving_collection_list:{kind}", write_json, s.DATA_DIR / f"{kind}.json", {info["key"]: list(items.values())})
+            if api_failures == 0:
+                await context.write(f"saving_collection_list:{kind}", write_json,
+                                    s.DATA_DIR / f"{kind}.json", {key: list(items.values())})
             counts = dict(success=0, skip=0, failed=0, missing=0, api_failures=api_failures)
-            semaphore = asyncio.Semaphore(15)
-            async def fetch(identity):
-                async with semaphore:
-                    await context.check(f"checking_collection_asset:{kind}:{identity}")
-                    path = local_path(s.DATA_DIR / kind, identity + ".png")
-                    if await observed_io(lambda: path.exists() and path.stat().st_size > 8):
-                        counts["skip"] += 1
-                        return
-                    try:
-                        status, content, _ = await context.network(asset_bytes(client,
-                            s.ASSETS_BASE_URL + s.COLLECTIONS[kind]["path"].format(id=identity)), f"downloading_collection:{kind}:{identity}")
-                        if status == 404:
-                            counts["missing"] += 1
-                        elif status == 200 and s.looks_like_png(content):
-                            await context.write(f"saving_collection_asset:{kind}:{identity}", write_bytes, path, content)
-                            counts["success"] += 1
-                        else:
-                            counts["failed"] += 1
-                    except Stopped:
-                        raise
-                    except (httpx.HTTPError, ValueError):
-                        counts["failed"] += 1
-            tasks = [asyncio.create_task(fetch(identity)) for identity in items]
-            try:
-                await asyncio.gather(*tasks)
-            finally:
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
-            incomplete |= bool(counts["failed"] or api_failures)
+            for identity in items:
+                await context.check(f"checking_collection_asset:{kind}:{identity}")
+                result = await public_images.get(kind, identity, client=client, context=context)
+                key = {"existing": "skip", "downloaded": "success", "not_found": "missing"}.get(result.status, "failed")
+                counts[key] += 1
+                if result.status == "rate_limited":
+                    break
+            counts["deferred"] = len(items) - sum(counts[key] for key in ("skip", "success", "missing", "failed"))
+            incomplete |= bool(counts["failed"] or counts["missing"] or api_failures)
             details[kind] = counts
-            summary.append(f"{kind}: 数据 {len(items)}，下载 {counts['success']}，跳过 {counts['skip']}，404 {counts['missing']}，失败 {counts['failed']}，接口失败 {api_failures}")
+            summary.append(f"{kind}: 数据 {len(items)}，下载 {counts['success']}，跳过 {counts['skip']}，404 {counts['missing']}，失败 {counts['failed']}，接口失败 {api_failures}，暂缓 {counts['deferred']}")
     hint = "所有收藏品列表及资源已更新处理完毕！\n" + "\n".join(summary) + f"\n完成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     return outcome("PARTIAL_MAINTENANCE" if incomplete else "OK", hint, status="partial" if incomplete else "ok", data=details)
 

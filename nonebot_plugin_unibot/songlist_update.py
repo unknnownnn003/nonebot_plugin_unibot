@@ -16,7 +16,7 @@ BASE_URL = "https://maimai.lxns.net"
 API_PATH = "/api/v0/chunithm/song/list"
 SONGLIST_FILE = DATA_DIR / "songlist.json"
 SONGLIST_LOCK = RLock()
-update_songlist = on_command("更新songlist", permission=SUPERUSER, priority=10, block=True)
+update_songlist = on_command("更新songlist", aliases={"更新曲库"}, permission=SUPERUSER, priority=10, block=True)
 
 
 def load_local_songlist():
@@ -35,8 +35,19 @@ def write_songlist_atomic(data):
 
 
 def build_local_alias_map(data):
-    return {str(s["id"]): s.get("aliases", []) for s in data.get("songs", [])
-            if isinstance(s, dict) and "id" in s and s.get("data_source") in (None, "lx", "lxns", "lxns_cn")}
+    from .services.song_model import numeric_id
+
+    result = {}
+    for row in data.get("songs", []):
+        if (not isinstance(row, dict) or row.get("data_source") not in (None, "lx", "lxns", "lxns_cn")
+                or not isinstance(row.get("aliases"), list)):
+            continue
+        try:
+            sid = str(numeric_id(row.get("id")))
+        except ValueError:
+            continue
+        result.setdefault(sid, []).extend(alias for alias in row["aliases"] if isinstance(alias, str))
+    return result
 
 
 def commit_lxns_songlist(songlist_data, alias_data):
@@ -56,6 +67,14 @@ def commit_lxns_songlist(songlist_data, alias_data):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with SONGLIST_LOCK:
         old = load_local_songlist()
+        from .services.song_model import catalog_changes
+
+        try:
+            baseline = dict(old, songs=[dict(row, difficulties=row.get("difficulties", [])) for row in old["songs"]])
+            changes = catalog_changes(Catalog(baseline, legacy=True), catalog)
+        except (ValueError, TypeError, AttributeError):
+            # A valid refresh can repair old metadata. The backup remains exact.
+            changes = None
         local = build_local_alias_map(old)
         data = catalog.as_dict()
         for song in data["songs"]:
@@ -75,7 +94,7 @@ def commit_lxns_songlist(songlist_data, alias_data):
                 raise OSError("Catalog backup verification failed")
         write_songlist_atomic(data)
     return dict(song_count=len(data["songs"]), alias_count=sum(len(s["aliases"]) for s in data["songs"]),
-                backup_created=backup is not None,
+                **(changes or {}), changes_available=changes is not None, backup_created=backup is not None,
                 mtime=datetime.fromtimestamp(SONGLIST_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"))
 
 

@@ -1,8 +1,19 @@
-"""Atomic JSON replacement for public catalog and alias data only."""
+"""Atomic JSON replacement for public resources."""
 import json
 import os
 from pathlib import Path
 from uuid import uuid4
+
+
+def atomic_bytes(path, content):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        temporary.write_bytes(content)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def atomic_json(path, value):

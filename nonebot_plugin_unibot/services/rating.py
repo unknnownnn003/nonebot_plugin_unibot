@@ -16,6 +16,7 @@ def released(attributes, now=None):
 
 def eligible(song, chart, now=None):
     return (chart.difficulty < 5 and not song.attributes.get("disabled", False)
+            and not chart.attributes.get("disabled", False)
             and released(song.attributes, now) and released(chart.attributes, now))
 
 

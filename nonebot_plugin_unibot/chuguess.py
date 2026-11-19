@@ -23,7 +23,8 @@ from .song import (
 from .services.paths import DATA_DIR as _DATA_DIR
 DATA_DIR = str(_DATA_DIR)
 SONGLIST_PATH = os.path.join(DATA_DIR, "songlist.json")
-JACKET_DIR = os.path.join(DATA_DIR, "jacket")
+from .services.resources import local_jacket
+from .services.paths import JACKET_DIR
 SCORE_FILE = os.path.join(DATA_DIR, "chuguess_scores.json")
 
 GAME_TIMEOUT = 300
@@ -90,7 +91,9 @@ def load_songlist() -> List[Dict[str, Any]]:
         with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
         from .services.song_model import active_catalog
-        return active_catalog(data)["songs"]
+        catalog = active_catalog(data)
+        versions = catalog.get("versions", [])
+        return [dict(song, _versions=versions) for song in catalog["songs"]]
     except Exception as e:
         logger.error(f"读取 songlist 失败: {e}")
         return []
@@ -124,8 +127,8 @@ def crop_jacket(img: Image.Image, ratio: int) -> Tuple[Image.Image, int, int, in
     w, h = img.size
     target_area = w * h / ratio
 
-    min_dim = max(15, int(math.sqrt(target_area)) // 3)
     max_dim = min(w, h)
+    min_dim = min(max_dim, max(15, int(math.sqrt(target_area)) // 3))
 
     crop_w = random.randint(min_dim, max_dim)
     crop_h = max(15, int(target_area / crop_w))
@@ -181,15 +184,12 @@ def pick_random_song_and_jacket() -> Optional[Tuple[Dict[str, Any], Image.Image,
     if not candidates:
         return None
 
-    song, jacket_id = random.choice(candidates)
-    jacket_path = os.path.join(JACKET_DIR, f"{jacket_id}.png")
-    try:
-        jacket = Image.open(jacket_path).convert("RGBA")
-    except Exception as e:
-        logger.error(f"读取曲绘失败 {jacket_id}: {e}")
-        return None
-
-    return song, jacket, jacket_id
+    random.shuffle(candidates)
+    for song, jacket_id in candidates:
+        jacket = local_jacket(jacket_id)
+        if jacket is not None:
+            return song, jacket, jacket_id
+    return None
 
 
 def make_game_result_image(
@@ -303,7 +303,7 @@ async def get_hint_text(game: Dict[str, Any]) -> Optional[Tuple[str, Any]]:
     elif hint_type == "version":
         game["hints_used"].add("version")
         version_raw = song.get("version", "-")
-        version_name = get_version_name(version_raw)
+        version_name = get_version_name(version_raw, song.get("_versions", []))
         return ("text", f"[提示] 收录版本: {version_name}")
 
     elif hint_type == "location":

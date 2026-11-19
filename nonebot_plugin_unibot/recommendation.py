@@ -57,7 +57,7 @@ def render_recommendation_image(song: dict, diff: dict, user_score: int, user_op
     bpm = song.get("bpm", 0)
     genre = song.get("genre", "-")
     version_raw = song.get("version", "-")
-    version = get_version_name(version_raw)
+    version = get_version_name(version_raw, song.get("_versions", []))
 
     title_wrapped, _, t_h = wrap_text_with_height(title, font_title, card_width - info_x - 40, draw)
     draw_text(draw, (info_x, current_y), title_wrapped, font_title, TEXT_MAIN)
@@ -159,10 +159,8 @@ async def recommend_chart(snapshot, query_text, catalog):
         return
     chosen_song, chosen_diff, user_score, user_op, max_op = random.choice(candidates)
     song_id = int(chosen_song.get('id', 0))
-    jacket_id = song_id
-    if chosen_diff.get('difficulty') == 4:
-        jacket_id = chosen_song.get('origin_id', song_id)
-    jacket_img = await download_jacket(jacket_id)
+    chosen_song["_versions"] = catalog.metadata.get("versions", [])
+    jacket_img = await download_jacket(song_id)
     has_score = f"{song_id}_{chosen_diff['difficulty']}" in score_dict
     img_bytes = await async_call(render_recommendation_image, chosen_song, chosen_diff, user_score, user_op, max_op, jacket_img, has_score)
     return outcome(data={'song_id': song_id, 'title': chosen_song.get('title'), 'score': user_score, 'current_op': user_op, 'theoretical_op': max_op}, artifacts=[image(img_bytes)])

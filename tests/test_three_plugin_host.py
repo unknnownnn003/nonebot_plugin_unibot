@@ -101,7 +101,7 @@ async def run():
         assert duplicate['code']=='JOB_EXISTS' and transport.await_count==3
         from nonebot_plugin_unibot import song as native_song
         search_event=g.model_copy(update={'message_id':906})
-        with patch.object(native_song,'fetch_song_detail',AsyncMock(return_value=None)),patch.object(native_song,'download_jacket',AsyncMock(return_value=None)):
+        with patch.object(native_song,'download_jacket',AsyncMock(return_value=None)):
             search=await media_jobs.submit(bot,search_event,'song.search',{'query':'10'},origin='command')
             await terminal(search['data']['job_id'])
         assert transport.await_count==4 # Song lookup sends its image, no generation receipt.
