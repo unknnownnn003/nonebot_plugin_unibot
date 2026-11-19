@@ -229,7 +229,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "chulist",
-        "line": 19,
+        "line": 20,
         "matcher": "chulist_cmd",
         "module": "overpower_list_local",
         "registration": "on_command"

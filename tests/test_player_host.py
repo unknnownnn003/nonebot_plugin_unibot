@@ -13,12 +13,15 @@ class PlayerHostTests(unittest.TestCase):
     def test_oauth_consumers_jobs_retirement_and_authorized_replay(self):
         script=r'''
 import asyncio, copy, importlib.util, json, shutil, sys, time
+from decimal import Decimal
+from threading import Event as ThreadEvent
 from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import patch, AsyncMock
 from cryptography.fernet import Fernet
+from PIL import Image, ImageColor
 import httpx, nonebot
 root=Path.cwd()
 shutil.copytree(SOURCE/'nonebot_plugin_unibot',root/'nonebot_plugin_unibot',ignore=shutil.ignore_patterns('data','__pycache__'))
@@ -32,6 +35,7 @@ from nonebot_plugin_unibot.services import image_components,oauth_runtime,paths,
 from nonebot_plugin_unibot.services.oauth import OAuthService,Settings
 from nonebot_plugin_unibot.services.oauth_store import OAuthStore
 from nonebot_plugin_unibot.services.song_model import Catalog
+from nonebot_plugin_unibot.services import chart_progress as cp, progress_images as pi
 from nonebot.adapters.onebot.v11 import Bot,MessageSegment
 from nonebot_plugin_unibot.services.presentation_store import scope
 catalog=fixture();catalog['rating_version']=24000
@@ -81,15 +85,117 @@ async def wait(job_id):
         if job.status not in {'queued','running','cancel_requested'}:return job
         await asyncio.sleep(.01)
     raise AssertionError('queue did not finish')
+
+async def check_progress(snapshot):
+    def chart(difficulty=3, constant=14.9, level='14+', **attrs):
+        return dict(difficulty=difficulty, level_value=constant, level=level, **attrs)
+
+    base = Catalog(dict(
+        versions=[dict(title='CHUNITHM SUN', version=21000),
+                  dict(title='CHUNITHM SUN PLUS', version=21500)],
+        songs=[
+            dict(id=1, title='霜降り Ω', genre='东方Project', version=21000, difficulties=[
+                chart(0), chart(1), chart(2), chart(), chart(4, 14.8, version=21500), chart(5)]),
+            dict(id=2, title='Zero', genre='原创', version=21000, difficulties=[chart()]),
+            dict(id=3, title='Unplayed', genre='原创', version=21000, difficulties=[chart()]),
+            dict(id=4, title='Precise', genre='原创', version=21000, difficulties=[chart(constant=14.899)]),
+            dict(id=5, title='Excluded', disabled=True, difficulties=[chart()]),
+            dict(id=6, title='Future', release_date='2199-01-01', difficulties=[chart()]),
+            dict(id=7, title='Disabled chart', difficulties=[chart(disabled=True)]),
+            dict(id=8, title='Level', difficulties=[chart(constant=14.9, level='14')]),
+        ]))
+    scores = [
+        dict(id=1, level_index=0, score=1009000, over_power=85, full_combo='alljusticecritical'),
+        dict(id=1, level_index=2, score=1009000, over_power=85, full_combo='alljusticecritical'),
+        dict(id=1, level_index=3, score=1008000, over_power=79, full_combo='alljustice'),
+        dict(id=1, level_index=4, score=1009000, over_power=82, full_combo='alljusticecritical'),
+        dict(id=2, level_index=3, score=0, over_power=0, clear='failed'),
+        dict(id=8, level_index=3, score=999000, over_power=60, full_combo='fullcombo'),
+    ]
+    rows = cp.eligible_charts(base, scores)
+    def matched(query):
+        return op.matching_charts(rows, op.parse_filters(query, base))
+    def keys(items):
+        return [(row.song.id, row.chart.difficulty) for row in items]
+    assert set(keys(matched('14+'))) == {(1,3), (1,4), (2,3), (3,3), (4,3)}
+    assert keys(matched('14.9')) == [(1,3), (8,3), (2,3), (3,3)]
+    assert keys(matched('14.899')) == [(4,3)]
+    assert keys(matched('14+ sun 车万')) == [(1,3)]
+    assert keys(matched('14+ sun plus touhou project')) == [(1,4)]
+    assert keys(matched('14+ sun+ ori')) == []
+    assert set(keys(matched('１４＋，ori'))) == {(2,3), (3,3), (4,3)}
+    assert set(keys(matched('14+ --nocat'))) == set(keys(matched('14+')))
+    assert cp.summarize(matched('14+ --nocat')) == cp.summarize(matched('14+'))
+    assert op.expert_leaders(rows, matched('14+')) == set()  # EXP ties BASIC
+    assert op.expert_leaders(cp.eligible_charts(base, scores[1:]), matched('14+')) == {(1,3)}
+
+    chosen = {'name':'試験 Ω ♪ ' * 15, 'level':1, 'rating':2.4,
+              'trophy':{'name':'称号・テスト ★ ' * 20}, 'class_emblem':{'base':1, 'medal':2},
+              'over_power':321, 'over_power_progress':0.32}
+    official, summary, levels = cp.profile_progress(chosen, rows)
+    assert official == {'total_op':321, 'op_percent':0.32, 'estimated_catalog_ceiling':None}
+    assert tuple(levels) == cp.LEVELS and len(levels) == 12
+    assert levels['12']['chart_count'] == 0 and levels['12']['op_percent'] is None
+    assert levels['14']['fc'] == 1
+    assert (summary['chart_count'], summary['played'], summary['fc'], summary['aj'], summary['ajc']) == (6,4,3,2,1)
+    assert summary['total_op'] == 221 and summary['theoretical_op'] == 536.495
+    segments = Image.new('RGB', (602, 6))
+    pi.achievement_track(segments, (0,0,602,6), summary)
+    assert segments.getpixel((51,2)) == pi.rainbow(100,4).getpixel((50,1))
+    for x,color in [(151,pi.BADGES['AJ'][0]), (251,pi.BADGES['FC'][0]), (451,'#d2dbdf')]:
+        assert segments.getpixel((x,2)) == ImageColor.getrgb(color)
+
+    small = replace(snapshot, player=chosen, scores=scores)
+    with patch.object(pi, 'label', wraps=pi.label) as labels:
+        result = await op.query_progress(small, '14+ ori', base)
+    assert result['data']['played'] == 1 and result['data']['chart_count'] == 3
+    assert any(call.args[2] == 0 for call in labels.call_args_list)
+    assert sum(call.args[2] == '未游玩' for call in labels.call_args_list) == 2
+    assert any(call.args[2] == 'D' for call in labels.call_args_list)
+    assert any(call.args[2] == '缺曲绘' for call in labels.call_args_list)
+    op.prefetch_jackets.assert_awaited_with({2:None, 3:None, 4:None})
+
+    large = Catalog(dict(songs=[dict(id=i, title=f'Chart {i}', difficulties=[
+        chart(constant=14.8 if i > 242 else 14.9)]) for i in range(1, 451)]))
+    for invalid in ('', ',， |', '14+ --noca', 'ori--nocat', '14+ su', '14+ sun+ 東方', '14 14+', 'sun sun+',
+                    'ori 车万', '14+ --page', '14+ --page -1', '14+ --page 0', '14+ --page 1 --page 2'):
+        assert (await op.query_progress(small, invalid, base))['code'] == 'INVALID_ARGUMENT', invalid
+    assert (await op.query_progress(small, '14.901', base))['code'] == 'NOT_FOUND'
+    assert (await op.query_progress(small, '14 14.8', base))['code'] == 'NOT_FOUND'
+    full = cp.eligible_charts(large, scores)
+    pages = pi.paginate(full, grouped=True)
+    assert [sum(len(group.rows) for group in page) for page in pages] == [200,200,50]
+    assert [row for page in pages for group in page for row in group.rows] == full
+    assert pages[0][0].stats == pages[1][0].stats
+    many_groups = [replace(full[i], constant=Decimal(f'14.{i:02d}')) for i in range(40)]
+    height_pages = pi.paginate(many_groups, grouped=True)
+    assert len(height_pages) > 1
+    assert [row for page in height_pages for group in page for row in group.rows] == many_groups
+    for page_number in (1,2,3):
+        with patch.object(op, 'draw_chulist_image', return_value=b'offline'):
+            result = await op.query_progress(small, f'14+ --page {page_number}', large)
+        assert result['data']['page'] == page_number and result['data']['page_count'] == 3
+        assert result['data']['page_chart_count'] == (50 if page_number == 3 else 200)
+        assert all(result['data'][key] == value for key,value in cp.summarize(full).items())
+    result = await op.query_progress(small, '14+ --page 4', large)
+    assert result['code']=='INVALID_ARGUMENT' and '1–3' in result['fallback_text']
+
 async def run():
     global allowed,mode,started,release
     bind();bind('8')
-    with patch.object(group_policy,'enabled',side_effect=lambda *a:allowed or getattr(a[0],'group_id',None) is None),patch.object(group_policy,'scope',side_effect=lambda *a:nullcontext()),patch.object(b,'prepare_jackets',AsyncMock(return_value={})),patch.object(rec,'download_jacket',AsyncMock(return_value=None)),patch.object(native_song,'download_jacket',AsyncMock(return_value=None)),patch.object(player,'player_images',AsyncMock(return_value={})):
+    with patch.object(group_policy,'enabled',side_effect=lambda *a:allowed or getattr(a[0],'group_id',None) is None),patch.object(group_policy,'scope',side_effect=lambda *a:nullcontext()),patch.object(b,'prepare_jackets',AsyncMock(return_value={})),patch.object(rec,'download_jacket',AsyncMock(return_value=None)),patch.object(native_song,'download_jacket',AsyncMock(return_value=None)),patch.object(player,'player_images',AsyncMock(return_value={})),patch.object(profiles,'player_images',AsyncMock(return_value={})),patch.object(op,'player_images',AsyncMock(return_value={})),patch.object(op,'prefetch_jackets',AsyncMock()):
         snapshot=await reader.get(bot,e,'player.best')
         for cap,args in [('player.best',{}),('player.b50',{}),('player.profile',{}),('player.progress',{'query':'new'}),('player.recommend',{'filter':''}),('player.song_scores',{'query':'family-alias'})]:
             result=await player.query(bot,e,cap,args)
             assert result['status']=='ok',(cap,result)
-            if cap!='player.profile':assert result['data']['unmatched_scores']==1
+            assert result['data']['unmatched_scores']==1
+            if cap=='player.profile':
+                assert result['data']['official_op']['op_percent']==12.5
+                assert result['data']['master_ultima']['chart_count']==3
+                assert result['artifacts'][0]['content'].startswith(b'\x89PNG')
+            if cap=='player.progress':
+                assert result['data']['page']==1
+                assert result['artifacts'][0]['content'].startswith(b'\x89PNG')
             if cap=='player.best':
                 assert result['data']['chart_count']==2
                 assert abs(result['data']['b30_average']-1.09)<1e-9
@@ -102,6 +208,12 @@ async def run():
                 assert {r['level_index'] for r in result['data']['scores']}=={3,4,5}
                 assert result['artifacts'][0]['content'].startswith(b'\x89PNG')
         assert len(api_calls)==2 # all consumers share one complete Player/Score[] snapshot.
+        await check_progress(snapshot)
+        with patch.object(paths, 'SONGLIST_PATH', root/'missing-catalog.json'):
+            result = await player.query(bot,e,'player.profile',{})
+            assert result['code']=='OK' and result['data']['master_ultima'] is None
+            assert result['data']['official_op']['op_percent']==12.5
+            assert result['artifacts'][0]['content'].startswith(b'\x89PNG')
         result=await player.query(bot,e,'player.song_scores',{'query':'8001 we'})
         assert [r['id'] for r in result['data']['scores']]==[8001]
         assert result['data']['song_id']==10
@@ -137,6 +249,10 @@ async def run():
                     player.query(bot,e,'player.song_scores',{'query':'10'}),
                     player.query(bot,event(8),'player.song_scores',{'query':'10'}))
                 assert left['artifacts'][0]['content']!=right['artifacts'][0]['content']
+                for cap,args in [('player.profile',{}),('player.progress',{'query':'old'})]:
+                    left,right=await asyncio.gather(player.query(bot,e,cap,args), player.query(bot,event(8),cap,args))
+                    assert all(result['status']=='ok' for result in (left,right))
+                    assert left['artifacts'][0]['content']!=right['artifacts'][0]['content']
                 reader.invalidate('1','8')
             finally:
                 image_components.ui.cache_clear()
@@ -253,6 +369,14 @@ async def run():
             revoked=await player.query(bot,e,'player.best',{})
         assert revoked['code']=='AUTHORIZATION_CHANGED' and not revoked['artifacts']
         bind()
+        original_progress=op.draw_chulist_image
+        def revoke_during_progress(*args):
+            store.unlink('1:7')
+            return original_progress(*args)
+        with patch.object(op,'draw_chulist_image',side_effect=revoke_during_progress):
+            revoked=await player.query(bot,e,'player.progress',{'query':'old'})
+        assert revoked['code']=='AUTHORIZATION_CHANGED' and not revoked['artifacts']
+        bind()
         # Cancel during a live network request; late response never enters cache or sends.
         reader.invalidate('1','7');mode='pause';started.clear();release.clear()
         e2=event().model_copy(update={'message_id':200})
@@ -264,6 +388,28 @@ async def run():
         assert job2.status in {'cancelled','failed'},job2
         assert not reader.cache and len(sent)==before
         mode='ok'
+        # Cancel a progress job after its renderer has begun in the worker thread.
+        entered=asyncio.Event()
+        unblock=ThreadEvent()
+        loop=asyncio.get_running_loop()
+        def paused_progress(*args):
+            loop.call_soon_threadsafe(entered.set)
+            assert unblock.wait(5)
+            return original_progress(*args)
+        progress_event=event().model_copy(update={'message_id':203})
+        before=len(sent)
+        with patch.object(op,'draw_chulist_image',side_effect=paused_progress):
+            output=await media_jobs.submit(bot,progress_event,'player.progress',{'query':'old'},origin='command')
+            job_id=output['data']['job_id']
+            try:
+                await asyncio.wait_for(entered.wait(),5)
+                cancel=await sync.query(bot,progress_event,'cancel',job_id)
+                assert cancel['data']['status'] in {'cancelled','cancel_requested'}
+            finally:
+                unblock.set()
+            progress_job=await wait(job_id)
+        assert progress_job.status in {'cancelled','failed'} and progress_job.result['code']=='JOB_CANCELLED'
+        assert all(segment.type != 'image' for _,kwargs in sent[before:] for segment in kwargs['message'])
         # Original group policy must also guard old player result materials.
         group_job=replace(job,context_type='group',context_id='123')
         allowed=False

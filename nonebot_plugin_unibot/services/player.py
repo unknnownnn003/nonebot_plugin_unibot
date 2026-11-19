@@ -18,18 +18,24 @@ async def query(bot, event, capability, arguments, *, expected=None, checkpoint=
         snapshot = await get_reader().get(bot, event, capability, expected=expected, checkpoint=checkpoint)
         from .song_model import read_catalog, Catalog
         from .paths import SONGLIST_PATH
-        catalog = Catalog(await async_call(read_catalog, SONGLIST_PATH)) if capability != "player.profile" else Catalog({"songs": []})
-        known = {(str(song.id), chart.difficulty) for song in catalog.songs.values() for chart in song.charts}
-        unmatched = sum((str(row["id"]), row["level_index"]) not in known for row in snapshot.scores) if capability != "player.profile" else 0
+        try:
+            catalog = Catalog(await async_call(read_catalog, SONGLIST_PATH))
+        except (ValueError, OSError):
+            if capability != "player.profile":
+                raise
+            catalog = None
+        unmatched = 0
+        if catalog is not None:
+            known = {(song.id, chart.difficulty) for song in catalog.songs.values() for chart in song.charts}
+            unmatched = sum((row["id"], row["level_index"]) not in known for row in snapshot.scores)
         if capability in {"player.best", "player.b50"}:
             output = await best(snapshot, catalog, b50=capability == "player.b50")
         elif capability == "player.profile":
             from ..get_player_songlist import query_player_profile
-            output = await query_player_profile(snapshot)
+            output = await query_player_profile(snapshot, catalog)
         elif capability == "player.progress":
             from ..overpower_list_local import query_progress
-            from .resources import prefetch_jackets
-            output = await query_progress(snapshot, arguments["query"], catalog, fetch_jackets=prefetch_jackets)
+            output = await query_progress(snapshot, arguments["query"], catalog)
         elif capability == "player.recommend":
             from ..recommendation import recommend_chart
             output = await recommend_chart(snapshot, "推什么 " + arguments.get("filter", ""), catalog)

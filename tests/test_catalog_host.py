@@ -53,10 +53,13 @@ assert any(row.get('pattern') == '^(.+)是什么歌$' for row in NATIVE_CATALOG[
 
 assert len(chuguess.load_songlist())==5
 from nonebot_plugin_unibot.services.song_model import Catalog,read_catalog
+from nonebot_plugin_unibot.services.chart_progress import eligible_charts
 catalog=Catalog(read_catalog(target/'songlist.json'))
 assert len(catalog.songs)==5
-assert {(c['song_id'],c['level_index']) for c in op.get_target_charts('new',catalog)}=={('10',4)}
-assert {(c['song_id'],c['level_index']) for c in op.get_target_charts('old',catalog)}=={('10',3)}
+def progress_matches(query, catalog):
+    return op.matching_charts(eligible_charts(catalog, []), op.parse_filters(query, catalog))
+assert {(c.song.id,c.chart.difficulty) for c in progress_matches('new',catalog)}=={(10,4)}
+assert {(c.song.id,c.chart.difficulty) for c in progress_matches('old',catalog)}=={(10,3)}
 assert s.find_song_matches('foreign-only')==[]
 matches=s.find_song_matches('Same title')
 assert len([row for row in matches if row['score']>=1])==3
@@ -160,7 +163,7 @@ async def run():
     assert new_match['_versions'][0]['title']=='New version label'
     assert prepared['song']['title']=='Same title'
     assert prepared['song']['_versions'][0]['title']=='CHUNITHM OLD'
-    assert {(c['song_id'], c['level_value']) for c in op.get_target_charts('车万',current)}=={('10',14.7)}
+    assert {(c.song.id, float(c.constant)) for c in progress_matches('车万',current)}=={(10,14.7)}
     scores = NS(player={'name': 'Fixture', 'level': 10, 'rating': 15},
                 scores=[dict(id=i, level_index=d, score=1009000, rating=15, over_power=80)
                        for i,d in ((10,3),(10,4),(11,3))])

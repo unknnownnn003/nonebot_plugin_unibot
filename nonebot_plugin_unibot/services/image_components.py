@@ -329,7 +329,13 @@ def playerbar(player, images):
         strip = ui("title-board", color) if color in ("normal", "silver", "gold", "platina", "rainbow", "ultima") else None
         if not contain(canvas, strip, trophy_box):
             rounded(canvas, trophy_box, 7, "#f3f6f8", "#c7dce0")
-        label(canvas, (150, 40, 546, 88), trophy["name"], 28, "#182d43", "center", fit=True)
+        name = " ".join(trophy["name"].split())
+        if measure(name, 20) <= 396:
+            label(canvas, (150, 40, 546, 88), name, 28, "#182d43", "center", fit=True)
+        else:
+            first = wrap(name[:128], 20, 396)[0]
+            label(canvas, (150, 41, 546, 63), first, 20, "#182d43", "center")
+            label(canvas, (150, 64, 546, 86), name[len(first):len(first) + 128], 20, "#182d43", "center")
     avatar = resources.decode_png(images.get("character"))
     if avatar is not None:
         contain(canvas, ui("playerbar", "avatar-frame"), (465, 84, 553, 172))

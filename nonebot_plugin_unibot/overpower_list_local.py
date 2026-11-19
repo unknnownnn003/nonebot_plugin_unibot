@@ -1,411 +1,195 @@
-from nonebot.adapters.onebot.v11 import Bot
-from .services.job_store import async_call
-from .services.results import outcome, image
-import os
-import math
-import io
-import platform
-from PIL import Image, ImageDraw, ImageFont
+"""Native chulist command and exact catalog filters."""
+import asyncio
+from dataclasses import dataclass
+from decimal import Decimal
+import re
+import unicodedata
 
 from nonebot import on_command
-from nonebot.adapters import Event
-from nonebot.adapters.onebot.v11 import MessageSegment, Message
-from nonebot.params import CommandArg
+from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message
 from nonebot.log import logger
+from nonebot.params import CommandArg
 
-
-from .services.resources import local_jacket
+from .services.chart_progress import eligible_charts, master_ultima, summarize
+from .services.image_components import player_images
+from .services.job_store import async_call
+from .services.progress_images import draw_chulist_image, paginate
+from .services.resources import prefetch_jackets
+from .services.results import outcome, image
 
 chulist_cmd = on_command("chulist", priority=5, block=True)
 
-def parse_term_to_difficulty(term: str):
-    is_exact = False
-    exact_level = 0.0
-    try:
-        exact_level = float(term)
-        if "." in term:
-            is_exact = True
-    except:
-        pass
-    return exact_level, is_exact
-
-def get_target_charts(query_text: str, catalog):
-    from .services.rating import eligible
-    allowed = {(s.id, c.difficulty) for s in catalog.songs.values() for c in s.charts if eligible(s, c)}
-    raw = catalog.as_dict()
-    songs, versions, genres = raw["songs"], raw.get("versions", []), raw.get("genres", [])
-    
-    # Normalize query for space-separated multi-word terms
-    query = query_text.lower()
-    replacements = {
-        "origin plus": "originplus", "origin+": "originplus",
-        "air plus": "airplus", "air+": "airplus",
-        "star plus": "starplus", "star+": "starplus",
-        "amazon plus": "amazonplus", "amazon+": "amazonplus",
-        "crystal plus": "crystalplus", "crystal+": "crystalplus",
-        "paradise lost": "paradiselost", "paradiser lost": "paradiselost",
-        "new plus": "newplus", "new+": "newplus",
-        "sun plus": "sunplus", "sun+": "sunplus",
-        "luminous plus": "luminousplus", "luminous+": "luminousplus",
-        "pops & anime": "pops_anime", "pops&animes": "pops_anime", "pops&anime": "pops_anime", "流行 & 动漫": "pops_anime", "流行动漫": "pops_anime",
-        "touhou project": "touhou", "东方project": "touhou",
-        "chunithm original": "original", "gekishu & maimai": "gekimai"
-    }
-    for k, v in replacements.items():
-        query = query.replace(k, v)
-        
-    terms = [t for t in query.replace(',', ' ').replace('，', ' ').replace('|', ' ').split() if t]
-
-    version_map = {}
-    for v in versions:
-        title = v['title'].lower()
-        if title == "chunithm":
-            mapped = "origin"
-        elif title == "chunithm plus":
-            mapped = "originplus"
-        else:
-            mapped = title.replace('chunithm', '').strip()
-        version_map[v['version']] = mapped
-
-    for k, v in version_map.items():
-        for r_k, r_v in replacements.items():
-            if r_k in v:
-                v = v.replace(r_k, r_v)
-        version_map[k] = v.replace(' ', '')
-
-    # Build genre aliases dictionary
-    genre_aliases = {
-        "其他游戏": ["variety", "其他", "其它"],
-        "东方project": ["touhou", "东方", "车万"],
-        "原创": ["original", "ori"],
-        "音击舞萌": ["gekimai", "音击", "舞萌"],
-        "流行 & 动漫": ["pops_anime", "流行", "动漫", "pops", "anime"]
-    }
-
-    charts = {}
-
-    for song in songs:
-        song_id = str(song["id"])
-        
-        s_genre_raw = song.get("genre", "").lower()
-        s_genre_search = s_genre_raw
-        for base_genre, aliases in genre_aliases.items():
-            if base_genre in s_genre_raw or s_genre_raw in base_genre:
-                s_genre_search += " " + " ".join(aliases)
-
-        # Find the highest difficulty that is 3 or 4
-        # difficulties usually ordered by level_index in the JSON or we can max it
-        valid_diffs = [diff for diff in song.get("difficulties", []) if diff.get("difficulty") in (3, 4) and (song["id"], diff["difficulty"]) in allowed]
-
-        for diff in valid_diffs:
-            s_version = version_map.get(diff.get("version", song.get("version")), "")
-            d = diff.get("difficulty")
-            c = diff["level_value"]
-            l = diff.get("level", "")
-
-            diff_passes = True
-            for term in terms:
-                # Check if term matches difficulty
-                exact_level, is_exact = parse_term_to_difficulty(term)
-                diff_match = False
-                if is_exact:
-                    if abs(float(c) - exact_level) < 0.01: diff_match = True
-                else:
-                    if l.lower() == term.lower(): diff_match = True
-                
-                # Check if term matches version or genre
-                version_genre_match = False
-                if term == s_version or term in s_genre_search.split() or term in s_genre_search:
-                    version_genre_match = True
-                
-                # If neither matched, this term fails for this difficulty
-                if not (diff_match or version_genre_match):
-                    diff_passes = False
-                    break
-            
-            if diff_passes:
-                key = f"{song_id}_{d}"
-                charts[key] = {
-                    "song_id": song_id,
-                    "jacket_id": song_id,
-                    "level_index": int(d),
-                    "level_value": float(c),
-                    "theoretical_op": (float(c) + 3) * 5,
-                    "song_name": song.get("title", "Unknown")
-                }
-
-    return list(charts.values())
+GENRES = {
+    "其他游戏": ("variety", "其他", "其它"),
+    "东方project": ("touhou", "东方", "车万", "touhou project"),
+    "原创": ("original", "ori", "chunithm original"),
+    "音击舞萌": ("gekimai", "音击", "舞萌", "gekishu & maimai"),
+    "流行 & 动漫": ("pops_anime", "流行", "动漫", "pops", "anime",
+                  "pops & anime", "pops&anime", "pops&animes", "流行动漫", "流行&动漫"),
+    "niconico": ("nico",),
+}
+GENRE_ALIASES = {alias: name for name, aliases in GENRES.items() for alias in (name, *aliases)}
+USAGE = "例如 /chulist 14+ sun 车万、/chulist 14.9 或 /chulist 14+ --nocat --page 2。"
 
 
-def get_font(size, weight="Normal"):
-    weight = "Regular" if weight == "Normal" else weight
-    try:
-        if platform.system() == "Windows":
-            return ImageFont.truetype("msyh.ttc", size)
-        else:
-            font_paths = [
-                f"/usr/share/fonts/opentype/SourceHanSans/SourceHanSansSC-{weight}.otf",
-                f"/usr/share/fonts/truetype/custom/SourceHanSansSC-{weight}.otf",
-                f"/usr/share/fonts/opentype/noto/NotoSansCJK-{weight}.ttc",
-                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-                "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc"
-            ]
-            for p in font_paths:
-                if os.path.exists(p): return ImageFont.truetype(p, size)
-            return ImageFont.load_default()
-    except: return ImageFont.load_default()
+def normalize(text):
+    return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
 
-def get_w(text, f, draw):
-    if hasattr(draw, 'textbbox'): return draw.textbbox((0, 0), text, font=f)[2]
-    return draw.textsize(text, font=f)[0]
 
-def draw_chulist_image(draw_items, total_op, total_theoretical_op, req_level, player_info, upload_date, no_cat=False):
-    groups = {}
-    if no_cat:
-        groups["综合排序"] = list(draw_items)
-    else:
-        for item in draw_items:
-            lv = item["level_value"]
-            lv_str = f"{lv:.1f}"
-            if lv_str not in groups: groups[lv_str] = []
-            groups[lv_str].append(item)
+def version_aliases(title):
+    title = normalize(title)
+    short = title.removeprefix("chunithm ")
+    if title == "chunithm":
+        short = "origin"
+    elif title == "chunithm plus":
+        short = "origin plus"
+    aliases = {title, short, short.replace(" ", "")}
+    if short.endswith(" plus"):
+        aliases.add(short.removesuffix(" plus") + "+")
+    if short == "paradise lost":
+        aliases.add("paradiser lost")
+    return aliases
 
-    sorted_lvs = sorted(groups.keys(), key=lambda x: float(x) if x != "综合排序" else 999.0, reverse=True)
-    for lv_str in sorted_lvs:
-        groups[lv_str].sort(key=lambda x: x["score"], reverse=True)
 
-    block_w = 160
-    block_h = 250
-    spacing_x = 20
-    spacing_y = 10
-    
-    margin_top = 310
-    margin_bottom = 60
-    margin_side = 40
-    
-    num_cols = 10
-    
-    y_cursor = margin_top
-    for lv_str in sorted_lvs:
-        valid_items = [x for x in groups[lv_str] if x["score"] > 0]
-        if not valid_items: continue
-        y_cursor += 100 # header space
-        num_rows = math.ceil(len(valid_items) / num_cols)
-        y_cursor += num_rows * (block_h + spacing_y)
-        
-    height = y_cursor + margin_bottom
-    
-    actual_cols = num_cols
-    width = margin_side * 2 + actual_cols * block_w + (actual_cols - 1) * spacing_x
-    if width < 800: width = 800
-        
-    img = Image.new("RGB", (width, height), (30, 30, 46))
-    draw = ImageDraw.Draw(img)
-    
-    font_xl = get_font(40, "Bold")
-    font_large = get_font(36, "Bold")
-    font_medium = get_font(24, "Medium")
-    font_normal = get_font(20, "Normal")
-    font_small = get_font(16, "Light")
-    font_tiny = get_font(14, "Light")
-    
-    color_text = (248, 248, 242)
-    color_sub = (191, 191, 191)
-    
-    avatar_bytes = player_info.get("char_bytes")
-    if avatar_bytes:
-        try:
-            char_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
-            char_img = char_img.resize((100, 100), Image.Resampling.LANCZOS)
-            img.paste(char_img, (margin_side, 20), mask=char_img)
-        except: pass
-            
-    name = player_info.get("name", "Unknown")
-    rating = player_info.get("rating", 0.0)
-    from .services.player_data import player_level
-    level = player_level(player_info)
-    title = player_info.get("title", "")
-    
-    text_x = margin_side + 120
-    draw.text((text_x, 20), name, font=font_xl, fill=color_text)
-    draw.text((text_x, 75), f"Lv.{level} | {title}", font=font_normal, fill=(139, 233, 253))
-    rating_str = f"Player Rating (Lxns): {rating:.2f}"
-    draw.text((text_x, 105), rating_str, font=font_medium, fill=(80, 250, 123))
-    
-    percent = total_op / total_theoretical_op * 100 if total_theoretical_op > 0 else 0
-    t_text = f"Filter: {req_level}  Chart OP sum: {total_op:.2f} / {total_theoretical_op:.2f} ({percent:.2f}%)"
-    wt = get_w(t_text, font_large, draw)
-    draw.text(((width - wt) / 2, 140), t_text, font=font_large, fill=(255, 121, 198))
-    
-    tot_ajc = sum(1 for item in draw_items if item["full_combo"].lower() == "alljusticecritical")
-    tot_aj = sum(1 for item in draw_items if item["full_combo"].lower() in ("alljusticecritical", "alljustice"))
-    tot_fc = sum(1 for item in draw_items if item["full_combo"].lower() in ("alljusticecritical", "alljustice", "fullcombo"))
-    
-    tot_sss_plus = sum(1 for item in draw_items if item["score"] >= 1009000)
-    tot_sss = sum(1 for item in draw_items if item["score"] >= 1007500)
-    tot_ss = sum(1 for item in draw_items if item["score"] >= 1000000)
-    
-    tot_count = len(draw_items)
-    t_text2 = f"AJC: {tot_ajc}/{tot_count}   AJ: {tot_aj}/{tot_count}   FC: {tot_fc}/{tot_count}"
-    wt2 = get_w(t_text2, font_large, draw)
-    draw.text(((width - wt2) / 2, 185), t_text2, font=font_large, fill=(139, 233, 253))
-    
-    t_text3 = f"SSS+: {tot_sss_plus}/{tot_count}   SSS: {tot_sss}/{tot_count}   SS: {tot_ss}/{tot_count}"
-    wt3 = get_w(t_text3, font_large, draw)
-    draw.text(((width - wt3) / 2, 230), t_text3, font=font_large, fill=(241, 250, 140))
-    
-    draw.line([(margin_side, 290), (width - margin_side, 290)], fill=(98, 114, 164), width=2)
-    
-    y_cursor = margin_top
-    for lv_str in sorted_lvs:
-        group_items = groups[lv_str]
-        valid_items = [x for x in group_items if x["score"] > 0]
-        if not valid_items:
+@dataclass(frozen=True)
+class Filters:
+    label: str
+    page: int
+    grouped: bool
+    level: str | None = None
+    constant: Decimal | None = None
+    version: frozenset[int] | None = None
+    genre: str | None = None
+
+    def matches(self, row):
+        version = row.chart.attributes.get("version", row.song.attributes.get("version"))
+        genre = normalize(row.song.attributes.get("genre") or "")
+        return (
+            (self.level is None or row.level == self.level)
+            and (self.constant is None or row.constant == self.constant)
+            and (self.version is None or version in self.version)
+            and (self.genre is None or GENRE_ALIASES.get(genre, genre) == self.genre)
+        )
+
+
+def parse_filters(query, catalog):
+    versions = {}
+    for row in catalog.metadata.get("versions", []):
+        for alias in version_aliases(row["title"]):
+            versions.setdefault(alias, set()).add(row["version"])
+    genres = dict(GENRE_ALIASES)
+    for row in catalog.metadata.get("genres", []):
+        name = normalize(row["genre"])
+        genres.setdefault(name, name)
+    phrases = sorted(((alias.split(), alias) for alias in versions.keys() | genres.keys()),
+                     key=lambda phrase: (-len(phrase[0]), phrase[1]))
+    tokens = re.sub(r"[,|]", " ", normalize(query)).split()
+    conditions, options, label = {}, set(), []
+    page = 1
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        index += 1
+        if token in {"--page", "--nocat"}:
+            if token in options:
+                raise ValueError(f"重复选项 {token}。")
+            options.add(token)
+            if token == "--page":
+                if index == len(tokens) or not re.fullmatch(r"[0-9]{1,8}", tokens[index]) or int(tokens[index]) == 0:
+                    raise ValueError("请在 --page 后填写正整数页码。")
+                page = int(tokens[index])
+                index += 1
             continue
-
-        g_op = sum(x["over_power"] for x in group_items)
-        g_th = sum(x["theoretical_op"] for x in group_items)
-        g_pct = g_op / g_th * 100 if g_th > 0 else 0.0
-        
-        g_ajc = sum(1 for x in group_items if x["full_combo"].lower() == "alljusticecritical")
-        g_aj = sum(1 for x in group_items if x["full_combo"].lower() in ("alljusticecritical", "alljustice"))
-        g_fc = sum(1 for x in group_items if x["full_combo"].lower() in ("alljusticecritical", "alljustice", "fullcombo"))
-        
-        g_sss_plus = sum(1 for x in group_items if x["score"] >= 1009000)
-        g_sss = sum(1 for x in group_items if x["score"] >= 1007500)
-        g_ss = sum(1 for x in group_items if x["score"] >= 1000000)
-        
-        g_total = len(group_items)
-        
-        y_cursor += 15
-        if lv_str == "综合排序":
-            h_text = f"{lv_str}   OP: {g_op:.2f} / {g_th:.2f} ({g_pct:.2f}%)   AJC: {g_ajc}/{g_total}  AJ: {g_aj}/{g_total}  FC: {g_fc}/{g_total}"
+        if re.fullmatch(r"[0-9]{1,2}\+?", token):
+            kind, value = "level", token
+        elif re.fullmatch(r"[0-9]+\.[0-9]+", token):
+            kind, value = "constant", Decimal(token)
         else:
-            h_text = f"定数 {lv_str}   OP: {g_op:.2f} / {g_th:.2f} ({g_pct:.2f}%)   AJC: {g_ajc}/{g_total}  AJ: {g_aj}/{g_total}  FC: {g_fc}/{g_total}"
-        draw.text((margin_side, y_cursor), h_text, font=font_large, fill=(189, 147, 249))
-        y_cursor += 45
-        
-        h_text2 = f"SSS+: {g_sss_plus}/{g_total}   SSS: {g_sss}/{g_total}   SS: {g_ss}/{g_total}"
-        draw.text((margin_side, y_cursor), h_text2, font=font_large, fill=(241, 250, 140))
-        y_cursor += 40
+            start = index - 1
+            match = next(((parts, alias) for parts, alias in phrases
+                          if parts == tokens[start:start + len(parts)]), None)
+            if match is None:
+                raise ValueError(f"无法识别的筛选参数「{token[:32]}」。")
+            parts, alias = match
+            if alias in versions and alias in genres:
+                raise ValueError(f"筛选参数「{alias}」同时对应版本和分类。")
+            kind, value = ("version", frozenset(versions[alias])) if alias in versions else ("genre", genres[alias])
+            token = alias
+            index = start + len(parts)
+        if kind in conditions and conditions[kind] != value:
+            raise ValueError("筛选条件冲突，同一类型只能指定一个值。")
+        if kind not in conditions:
+            conditions[kind] = value
+            label.append(token)
+    if not conditions:
+        raise ValueError("请输入显示等级、定数、版本或分类。")
+    return Filters("  ·  ".join(label), page, "--nocat" not in options, **conditions)
 
-        valid_items = [x for x in group_items if x["score"] > 0]
 
-        for i, item in enumerate(valid_items):
-            r = i // num_cols
-            c = i % num_cols
-            x = margin_side + c * (block_w + spacing_x)
-            y = y_cursor + r * (block_h + spacing_y)
-            
-            jacket_size = 120
-            j_x = x + (block_w - jacket_size) // 2
-            j_y = y + 20
-            
-            fc_str = item["full_combo"].lower()
-            if fc_str == "alljusticecritical":
-                draw.rectangle([j_x - 12, j_y - 12, j_x + jacket_size + 11, j_y + jacket_size + 11], fill=(255, 85, 85))
-                draw.rectangle([j_x - 9, j_y - 9, j_x + jacket_size + 8, j_y + jacket_size + 8], fill=(80, 250, 123))
-                draw.rectangle([j_x - 6, j_y - 6, j_x + jacket_size + 5, j_y + jacket_size + 5], fill=(139, 233, 253))
-                draw.rectangle([j_x - 3, j_y - 3, j_x + jacket_size + 2, j_y + jacket_size + 2], fill=(255, 121, 198))
-            elif fc_str == "alljustice":
-                draw.rectangle([j_x - 12, j_y - 12, j_x + jacket_size + 11, j_y + jacket_size + 11], fill=(241, 250, 140))
-            elif fc_str == "fullcombo":
-                draw.rectangle([j_x - 12, j_y - 12, j_x + jacket_size + 11, j_y + jacket_size + 11], fill=(80, 250, 123))
-                
-            idx_color = (180, 100, 255) if item["level_index"] == 3 else (0, 0, 0)
-            draw.rectangle([j_x - 6, j_y - 6, j_x + jacket_size + 5, j_y + jacket_size + 5], fill=idx_color)
-            
-            draw.rectangle([j_x, j_y, j_x + jacket_size - 1, j_y + jacket_size - 1], fill=(50, 50, 50))
-            jacket = local_jacket(item["jacket_id"])
-            if jacket is not None:
-                with jacket:
-                    j_img = jacket.resize((jacket_size, jacket_size), Image.Resampling.LANCZOS)
-                    img.paste(j_img, (j_x, j_y), mask=j_img)
-                
-            t_y = j_y + jacket_size + 10
-            
-            s_name = item['song_name']
-            name_font_size = 16
-            name_font = get_font(name_font_size, "Bold")
-                
-            while get_w(s_name, name_font, draw) > block_w - 5 and len(s_name) > 1:
-                s_name = s_name[:-2] + "…"
-            ws = get_w(s_name, name_font, draw)
-            draw.text((x + (block_w - ws)/2, t_y), s_name, font=name_font, fill=(255, 255, 255))
-            
-            score_str = f"{item['score']:,}" if item['score'] > 0 else "0"
-            wms = get_w(score_str, font_medium, draw)
-            draw.text((x + (block_w - wms)/2, t_y + 25), score_str, font=font_medium, fill=(241, 250, 140))
-            
-            op_s = f"{item['over_power']:.2f} / {item['theoretical_op']:.2f}"
-            wop = get_w(op_s, font_small, draw)
-            draw.text((x + (block_w - wop)/2, t_y + 55), op_s, font=font_small, fill=(255, 121, 198))
-            
-            pct_s = f"{item['percent']:.2f}%"
-            wpc = get_w(pct_s, font_small, draw)
-            draw.text((x + (block_w - wpc)/2, t_y + 75), pct_s, font=font_small, fill=(139, 233, 253))
+def matching_charts(rows, filters):
+    selected = [row for row in master_ultima(rows) if filters.matches(row)]
+    return sorted(selected, key=lambda row: (
+        -row.constant if filters.grouped else 0,
+        row.record is None, -(row.record or {}).get("score", 0), row.song.id, row.chart.difficulty,
+    ))
 
-        nr = math.ceil(len(valid_items) / num_cols)
-        y_cursor += nr * (block_h + spacing_y)
 
-    footer_y = height - margin_bottom + 15
-    draw.line([(margin_side, footer_y - 10), (width - margin_side, footer_y - 10)], fill=(98, 114, 164), width=2)
-    f_str = f"Lxns upload time: {upload_date} | generated by Robinbot | unibot"
-    wf = get_w(f_str, font_normal, draw)
-    draw.text(((width - wf) / 2, footer_y), f_str, font=font_normal, fill=(248, 248, 242))
-    
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
+def expert_leaders(rows, selected):
+    # EXP↑ denotes a strictly greater EXP OP than every other eligible chart
+    # of the song. One matching card carries the badge across the entire result.
+    by_song = {}
+    for row in rows:
+        if row.record is not None:
+            by_song.setdefault(row.song.id, []).append(row)
+    carriers = {}
+    for row in selected:
+        sid, diff = row.song.id, row.chart.difficulty
+        carriers[sid] = min(carriers.get(sid, diff), diff)
+    marks = set()
+    for sid, diff in carriers.items():
+        played = by_song.get(sid, [])
+        expert = next((row.op for row in played if row.chart.difficulty == 2), 0)
+        if expert > 0 and all(expert > row.op for row in played if row.chart.difficulty != 2):
+            marks.add((sid, diff))
+    return marks
 
-async def query_progress(snapshot, query_text, catalog, *, fetch_jackets=None):
-    no_cat = False
-    if '--nocat' in query_text:
-        no_cat = True
-        query_text = query_text.replace('--nocat', '').strip()
-    if not query_text:
-        return outcome('INVALID_ARGUMENT', '请提供查询条件（难度/定数/版本/分类等），例如: /chulist 13+ sun 车万', status='needs_input')
-        return
-    user_best = {f"{r['id']}_{r['level_index']}": r for r in snapshot.scores}
-    upload_date = snapshot.player.get("upload_time", "Unknown")
-    target_charts = await async_call(get_target_charts, query_text, catalog)
-    if not target_charts:
-        return outcome('NOT_FOUND', '未找到符合条件的谱面！', status='needs_input')
-        return
-    from .get_player_songlist import character_bytes
-    player_info = dict(snapshot.player, title=(snapshot.player.get("trophy") or {}).get("name", ""),
-                       char_bytes=await character_bytes(snapshot.player))
-    draw_items = []
-    for c in target_charts:
-        key = f"{c['song_id']}_{c['level_index']}"
-        theoretical_op = c['theoretical_op']
-        play = user_best.get(key)
-        if play:
-            score = play['score']
-            fc = play.get('full_combo') or ''
-            op = play['over_power']
-        else:
-            op = 0.0
-            score = 0
-            fc = ''
-        percent = op / theoretical_op * 100 if theoretical_op > 0 else 0.0
-        draw_items.append({'song_name': c.get('song_name', 'Unknown'), 'song_id': c['song_id'], 'jacket_id': c.get('jacket_id', c['song_id']), 'level_index': int(c['level_index']), 'level_value': c['level_value'], 'score': score, 'over_power': op, 'percent': percent, 'full_combo': fc, 'theoretical_op': theoretical_op})
-    if fetch_jackets is not None:
-        await fetch_jackets(dict.fromkeys(item["jacket_id"] for item in draw_items if item["score"] > 0))
-    total_op = sum(item['over_power'] for item in draw_items)
-    total_theoretical_op = sum(item['theoretical_op'] for item in draw_items)
+
+async def query_progress(snapshot, query_text, catalog):
     try:
-        img_bytes = await async_call(draw_chulist_image, draw_items, total_op, total_theoretical_op, query_text, player_info, upload_date, no_cat=no_cat)
-    except Exception as e:
-        logger.error('OAuth 进度图生成失败，未记录玩家数据。')
-        return outcome('RENDER_FAILED', '生成图片失败。', status='unavailable')
-        return
-    return outcome(hint='进度统计仅含筛选后的已配信 MASTER/ULTIMA，每张谱面计一次；未记录谱面按零计，OP合计不是游戏内按曲最高的玩家总OP；WORLD’S END不参与。', data={'op_aggregation': 'filtered_chart_sum', 'total_op': total_op, 'theoretical_op': total_theoretical_op, 'chart_count': len(draw_items), 'constant_source': 'lx'}, artifacts=[image(img_bytes)])
+        filters = parse_filters(query_text, catalog)
+    except ValueError as exc:
+        return outcome("INVALID_ARGUMENT", f"{exc} {USAGE}", status="needs_input")
+    all_rows = eligible_charts(catalog, snapshot.scores)
+    selected = matching_charts(all_rows, filters)
+    if not selected:
+        return outcome("NOT_FOUND", "未找到同时符合所有筛选条件的已配信 MASTER / ULTIMA 谱面。", status="needs_input")
+
+    stats = summarize(selected)
+    pages = paginate(selected, grouped=filters.grouped)
+    if filters.page > len(pages):
+        return outcome("INVALID_ARGUMENT", f"匹配 {len(selected)} 张谱面，页码范围为 1–{len(pages)}。",
+                       status="needs_input")
+    groups = pages[filters.page - 1]
+    visible = dict.fromkeys(row.chart.jacket_id for group in groups for row in group.rows)
+    assets, _ = await asyncio.gather(player_images(snapshot.player, portrait=True), prefetch_jackets(visible))
+    try:
+        content = await async_call(draw_chulist_image, snapshot.player, assets, filters.label, stats, groups,
+                                   filters.page, len(pages), expert_leaders(all_rows, selected))
+    except (OSError, ValueError):
+        logger.error("OAuth 进度图生成失败，未记录玩家数据。")
+        return outcome("RENDER_FAILED", "生成进度图片失败。", status="unavailable")
+    return outcome(
+        hint="进度统计覆盖所有符合条件的已配信 MASTER / ULTIMA，每张谱面独立计入，未游玩按零计。"
+             "筛选 OP 逐谱面累加，官方总 OP 按曲取最高。",
+        data=dict(stats, op_aggregation="filtered_chart_sum", constant_source="lx",
+                  page=filters.page, page_count=len(pages), page_chart_count=sum(len(g.rows) for g in groups)),
+        artifacts=[image(content)],
+    )
 
 
 @chulist_cmd.handle()
-async def _(bot: Bot, event: Event, msg: Message = CommandArg()):
+async def _(bot: Bot, event: MessageEvent, msg: Message = CommandArg()):
     from .services.media_jobs import submit
-    result = await submit(bot, event, "player.progress", {"query": msg.extract_plain_text().strip()}, origin="command")
     from .services.results import send_command_result
+    result = await submit(bot, event, "player.progress", {"query": msg.extract_plain_text().strip()}, origin="command")
     await send_command_result(chulist_cmd, result, finish=True)
