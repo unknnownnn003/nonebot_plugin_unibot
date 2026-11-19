@@ -10,6 +10,7 @@ from .services.image_components import (
     DIFFICULTY_ASSETS, DIFFICULTY_COLORS, LEVELS, RESAMPLE, badge, brand, contain,
     cover, label, playerbar, png, rating_number, rating_pair, rounded, ui,
 )
+from .services.job_store import check_render_cancelled
 
 best_rating_cmd = on_command("b30", priority=5, block=True)
 best_rating_50_cmd = on_command("b50", priority=5, block=True)
@@ -165,7 +166,7 @@ def _card(item, number, jacket):
     return card
 
 
-def _draw_ranking(player, player_assets, jacket_images, groups, heading, value):
+def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, stopped):
     width = WIDTH
     stride = CARD_HEIGHT + GAP
     height = 260 + sum(76 + math.ceil(limit / COLUMNS) * stride for _, limit, _, _, _ in groups)
@@ -186,22 +187,24 @@ def _draw_ranking(player, player_assets, jacket_images, groups, heading, value):
         label(canvas, (335, y + 5, width - 17, y + 66), f"均值 {mean:.4f}", 27, MUTED, "right")
         y += 76
         for i, item in enumerate(items):
+            check_render_cancelled(stopped)
             card = _card(item, i + 1, jacket_images.get(item["jacket_id"]))
             canvas.paste(card, (12 + i % COLUMNS * (CARD_WIDTH + GAP), y + i // COLUMNS * stride))
         y += math.ceil(limit / COLUMNS) * stride
+    check_render_cancelled(stopped)
     return png(canvas)
 
 
-def draw_b30_image(player, items, jacket_images, player_assets, average):
+def draw_b30_image(player, items, jacket_images, player_assets, average, stopped=None):
     groups = (("BEST30", 30, items, average, "#ffcc59"),)
-    return _draw_ranking(player, player_assets, jacket_images, groups, "B30", average)
+    return _draw_ranking(player, player_assets, jacket_images, groups, "B30", average, stopped)
 
 
-def draw_b50_image(player, best_items, new_items, jacket_images, player_assets, best_mean, new_mean, estimate):
+def draw_b50_image(player, best_items, new_items, jacket_images, player_assets, best_mean, new_mean, estimate, stopped=None):
     groups = (("BEST30", 30, best_items, best_mean, "#ffcc59"),
               ("NEW20", 20, new_items, new_mean, "#74d5cd"))
     heading = f"B50（{best_mean:.4f}(B30) + {new_mean:.4f}(N20)）"
-    return _draw_ranking(player, player_assets, jacket_images, groups, heading, estimate)
+    return _draw_ranking(player, player_assets, jacket_images, groups, heading, estimate, stopped)
 
 
 @best_rating_cmd.handle()

@@ -12,17 +12,20 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+from threading import Event
 import time
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
 
-async def _db_thread(function):
+async def _db_thread(function, *, on_cancel=None):
     """Cancellation must not abandon a thread still holding a SQLite connection."""
     work = asyncio.create_task(asyncio.to_thread(function))
     try:
         return await asyncio.shield(work)
     except asyncio.CancelledError:
+        if on_cancel is not None:
+            on_cancel()
         while not work.done():
             try:
                 await asyncio.shield(work)
@@ -37,6 +40,22 @@ async def _db_thread(function):
 
 async def async_call(function, *args, **kwargs):
     return await _db_thread(lambda: function(*args, **kwargs))
+
+
+def check_render_cancelled(stopped):
+    if stopped is not None and stopped.is_set():
+        raise asyncio.CancelledError
+
+
+async def async_render(function, *args):
+    """Stop drawing at the next checkpoint and observe the worker before returning."""
+    stopped = Event()
+
+    def render():
+        check_render_cancelled(stopped)
+        return function(*args, stopped)
+
+    return await _db_thread(render, on_cancel=stopped.set)
 
 
 TERMINAL = {"succeeded", "failed", "partial", "cancelled", "interrupted", "unknown"}

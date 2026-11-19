@@ -10,6 +10,7 @@ from PIL import Image, ImageColor, ImageDraw, ImageOps
 from . import resources
 from .chart_progress import ChartProgress, summarize
 from .image_components import RESAMPLE, brand, contain, cover, label, playerbar, png, rounded
+from .job_store import check_render_cancelled
 
 INK, MUTED = "#182d43", "#3f5568"
 BG, PAPER, LINE, TEAL = "#eaf4f4", "#ffffff", "#c7dce0", "#087970"
@@ -265,7 +266,7 @@ def card(canvas, x, y, row, marked):
           f"OP {row.op:.2f} / {row.maximum:.2f}", 14, MUTED, fit=True)
 
 
-def draw_chulist_image(player, images, query, stats, groups, page, page_count, marked):
+def draw_chulist_image(player, images, query, stats, groups, page, page_count, marked, stopped=None):
     height = HEADER + sum(GROUP_HEIGHT + ceil(len(group.rows) / COLS) * STRIDE for group in groups) + FOOTER
     if height > MAX_HEIGHT or sum(len(group.rows) for group in groups) > PAGE_CARDS:
         raise ValueError("Oversized chulist page")
@@ -321,6 +322,7 @@ def draw_chulist_image(player, images, query, stats, groups, page, page_count, m
         tally(canvas, 176, y + 78, 815, stats)
         extra_tally(canvas, y + 34, stats)
         for index, row in enumerate(group.rows):
+            check_render_cancelled(stopped)
             card(canvas, 24 + index % COLS * (CARD_WIDTH + CARD_GAP), y + 127 + index // COLS * STRIDE,
                  row, (row.song.id, row.chart.difficulty) in marked)
         y += GROUP_HEIGHT + ceil(len(group.rows) / COLS) * STRIDE
@@ -328,4 +330,5 @@ def draw_chulist_image(player, images, query, stats, groups, page, page_count, m
     label(canvas, (26, y, WIDTH - 26, y + 45),
           f"第 {page} / {page_count} 页     本页 {count} 张     共匹配 {total} 张",
           26, MUTED, "right", fit=True)
+    check_render_cancelled(stopped)
     return png(canvas)

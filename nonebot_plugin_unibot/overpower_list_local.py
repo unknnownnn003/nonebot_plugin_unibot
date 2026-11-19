@@ -12,7 +12,7 @@ from nonebot.params import CommandArg
 
 from .services.chart_progress import eligible_charts, master_ultima, summarize
 from .services.image_components import player_images
-from .services.job_store import async_call
+from .services.job_store import async_render
 from .services.progress_images import draw_chulist_image, paginate
 from .services.resources import prefetch_jackets
 from .services.results import outcome, image
@@ -173,8 +173,8 @@ async def query_progress(snapshot, query_text, catalog):
     visible = dict.fromkeys(row.chart.jacket_id for group in groups for row in group.rows)
     assets, _ = await asyncio.gather(player_images(snapshot.player, portrait=True), prefetch_jackets(visible))
     try:
-        content = await async_call(draw_chulist_image, snapshot.player, assets, filters.label, stats, groups,
-                                   filters.page, len(pages), expert_leaders(all_rows, selected))
+        content = await async_render(draw_chulist_image, snapshot.player, assets, filters.label, stats, groups,
+                                     filters.page, len(pages), expert_leaders(all_rows, selected))
     except (OSError, ValueError):
         logger.error("OAuth 进度图生成失败，未记录玩家数据。")
         return outcome("RENDER_FAILED", "生成进度图片失败。", status="unavailable")

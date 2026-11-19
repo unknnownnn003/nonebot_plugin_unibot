@@ -189,7 +189,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "b50",
-        "line": 15,
+        "line": 16,
         "matcher": "best_rating_50_cmd",
         "module": "best_rating",
         "registration": "on_command"
@@ -201,7 +201,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "b30",
-        "line": 14,
+        "line": 15,
         "matcher": "best_rating_cmd",
         "module": "best_rating",
         "registration": "on_command"

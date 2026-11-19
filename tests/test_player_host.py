@@ -14,7 +14,6 @@ class PlayerHostTests(unittest.TestCase):
         script=r'''
 import asyncio, copy, importlib.util, json, shutil, sys, time
 from decimal import Decimal
-from threading import Event as ThreadEvent
 from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
@@ -388,27 +387,31 @@ async def run():
         assert job2.status in {'cancelled','failed'},job2
         assert not reader.cache and len(sent)==before
         mode='ok'
-        # Cancel a progress job after its renderer has begun in the worker thread.
+        # Cancel during the first card; the remaining cards and PNG encoding must stop.
         entered=asyncio.Event()
-        unblock=ThreadEvent()
         loop=asyncio.get_running_loop()
+        original_card=pi.card
+        cards=[]
+        encoded=[]
         def paused_progress(*args):
-            loop.call_soon_threadsafe(entered.set)
-            assert unblock.wait(5)
-            return original_progress(*args)
+            def paused_card(*card_args):
+                cards.append(1)
+                loop.call_soon_threadsafe(entered.set)
+                assert args[-1].wait(5)
+                return original_card(*card_args)
+            with patch.object(pi,'card',side_effect=paused_card), patch.object(pi,'png',side_effect=lambda *_: encoded.append(True)):
+                return original_progress(*args)
         progress_event=event().model_copy(update={'message_id':203})
         before=len(sent)
         with patch.object(op,'draw_chulist_image',side_effect=paused_progress):
             output=await media_jobs.submit(bot,progress_event,'player.progress',{'query':'old'},origin='command')
             job_id=output['data']['job_id']
-            try:
-                await asyncio.wait_for(entered.wait(),5)
-                cancel=await sync.query(bot,progress_event,'cancel',job_id)
-                assert cancel['data']['status'] in {'cancelled','cancel_requested'}
-            finally:
-                unblock.set()
+            await asyncio.wait_for(entered.wait(),5)
+            cancel=await sync.query(bot,progress_event,'cancel',job_id)
+            assert cancel['data']['status'] in {'cancelled','cancel_requested'}
             progress_job=await wait(job_id)
         assert progress_job.status in {'cancelled','failed'} and progress_job.result['code']=='JOB_CANCELLED'
+        assert len(cards)==1 and not encoded
         assert all(segment.type != 'image' for _,kwargs in sent[before:] for segment in kwargs['message'])
         # Original group policy must also guard old player result materials.
         group_job=replace(job,context_type='group',context_id='123')

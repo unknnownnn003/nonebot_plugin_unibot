@@ -3,7 +3,7 @@ import asyncio
 from decimal import Decimal
 
 from .image_components import player_images
-from .job_store import async_call
+from .job_store import async_call, async_render
 from .results import outcome, image
 from .player_data import get_reader, failure, PlayerError
 from .oauth import OAuthError
@@ -83,14 +83,14 @@ async def best(snapshot, catalog, *, b50=False):
         data = {"rating_estimate": average(old + new, 50), "best30_average": average(old, 30),
                 "new20_average": average(new, 20), "best30_count": len(old), "new20_count": len(new),
                 "rating_version": version, "unclassified_scores": unknown}
-        content = await async_call(b.draw_b50_image, snapshot.player, old, new, jackets, assets,
-                                   data["best30_average"], data["new20_average"], data["rating_estimate"])
+        content = await async_render(b.draw_b50_image, snapshot.player, old, new, jackets, assets,
+                                     data["best30_average"], data["new20_average"], data["rating_estimate"])
         hint = "B50：旧版本 BEST 30 + 当前版本 NEW 20，缺位按零计，合计除以50；个人资料 Rating 为落雪返回值。"
         if unknown:
             hint += f" {unknown} 条歌曲版本未知或晚于当前版本的成绩未分区，请更新曲库核对。"
     else:
         data = {"b30_average": average(old, 30), "chart_count": len(old)}
-        content = await async_call(b.draw_b30_image, snapshot.player, old, jackets, assets, data["b30_average"])
+        content = await async_render(b.draw_b30_image, snapshot.player, old, jackets, assets, data["b30_average"])
         hint = "B30：所有版本普通谱面按落雪单谱面 Rating 排序取30，缺位按零计；此均值不是个人总 Rating。"
     return outcome(hint=hint, data=data, artifacts=[image(content)])
 
