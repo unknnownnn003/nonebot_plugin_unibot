@@ -35,7 +35,7 @@ OAuth **不作为 LLM 工具**。现有 API v1、能力版本4.1.0和25项公开
 LXNS_OAUTH_ENABLED=true
 LXNS_OAUTH_CLIENT_ID="<开发者面板创建的应用ID>"
 LXNS_OAUTH_CLIENT_SECRET="<应用密钥>"
-LXNS_OAUTH_REDIRECT_URI="https://152.175.241.96/oauth/lxns/callback"
+LXNS_OAUTH_REDIRECT_URI="https://bot.example.com/oauth/lxns/callback"
 LXNS_OAUTH_ENCRYPTION_KEY="<独立生成的Fernet密钥>"
 ```
 
