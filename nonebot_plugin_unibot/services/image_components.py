@@ -65,19 +65,22 @@ def _font(path, index, size):
 
 
 @lru_cache(maxsize=2048)
-def _face(cluster):
+def _face(cluster, cjk_first=False):
     codes = {ord(char) for char in cluster if unicodedata.category(char) != "Cf"
              and char not in "\ufe0e\ufe0f"}
-    for path, index, coverage in font_faces():
+    faces = font_faces()
+    if cjk_first:
+        faces = sorted(faces, key=lambda face: ord("中") not in face[2])
+    for path, index, coverage in faces:
         if codes <= coverage:
             return path, index, cluster
     return None, 0, cluster if cluster.isascii() else "?"
 
 
-def _line(value, size):
+def _line(value, size, cjk_first=False):
     spans = []
     for cluster in regex.findall(r"\X", value):
-        path, index, glyph = _face(cluster)
+        path, index, glyph = _face(cluster, cjk_first)
         font = _font(path, index, size)
         if spans and spans[-1][0] is font:
             spans[-1][1] += glyph
@@ -118,14 +121,14 @@ def wrap(value, size, width):
     return rows + [line.rstrip()]
 
 
-def label(canvas, box, value, size, color, align="left", fit=False):
+def label(canvas, box, value, size, color, align="left", fit=False, *, cjk_first=False):
     x, y, right, bottom = box
     if right <= x or bottom <= y:
         return
     value = " ".join(str(value).split())
     clusters = regex.findall(r"\X", value)
     while True:
-        parts, (l, t, r, b) = _line(value, size)
+        parts, (l, t, r, b) = _line(value, size, cjk_first)
         if r - l <= right - x and b - t <= bottom - y:
             break
         if not fit and r - l > right - x and clusters:
@@ -229,10 +232,34 @@ def rating_number(canvas, box, value, places, *, group="player-rating", align="c
         label(canvas, box, text, box[3] - box[1], RATING_INKS[frame - 1], align, fit=True)
 
 
-def rating_title(canvas, box, value):
+def _rating_part(picture, text, size, ink):
+    if picture is not None and (bounds := picture.getbbox()):
+        return picture.crop(bounds)
+    width = measure(text, size) + 4
+    height = size + 6
+    picture = Image.new("RGBA", (width, height))
+    label(picture, (0, 0, width, height), text, size, ink, "center", fit=True)
+    return picture.crop(picture.getbbox())
+
+
+def rating_pair(canvas, box, value, places, *, gap, group="player-rating", centered=False):
+    """Lay out the visible title and number as one group."""
     frame = rating_frame(value)
-    if not contain(canvas, ui("rating-title", str(frame)), box, trim=True):
-        label(canvas, box, "RATING", box[3] - box[1], RATING_INKS[frame - 1], "center", fit=True)
+    ink = RATING_INKS[frame - 1]
+    text = f"{value:.{places}f}"
+    title = _rating_part(ui("rating-title", str(frame)), "RATING", 15, ink)
+    number = _rating_part(digits(group, frame, text), text, 21, ink)
+    left, top, right, bottom = box
+    title_width = title.width * 17 / title.height
+    number_width = number.width * 22 / number.height
+    scale = min(1, (right - left - gap) / (title_width + number_width), (bottom - top) / 22)
+    title_width = round(title_width * scale)
+    number_width = round(number_width * scale)
+    if centered:
+        left += (right - left - title_width - gap - number_width) // 2
+    number_left = left + title_width + gap
+    contain(canvas, title, (left, top, left + title_width, bottom))
+    contain(canvas, number, (number_left, top, number_left + number_width, bottom))
 
 
 def score_digits(canvas, box, value):
@@ -308,7 +335,9 @@ def playerbar(player, images):
         contain(canvas, ui("playerbar", "avatar-frame"), (465, 84, 553, 172))
         contain(canvas, avatar, (468, 87, 550, 169))
     nickname_left = 229 if player.get("level") is not None else 148
-    label(canvas, (nickname_left, 89, 455, 142), player.get("name") or "—", 30, "#1a1e2c")
+    nickname = player.get("name") or "—"
+    mixed_script = bool(regex.search(r"[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]", nickname))
+    label(canvas, (nickname_left, 96, 455, 142), nickname, 30, "#1a1e2c", cjk_first=mixed_script)
     reborn = player.get("reborn_count") or 0
     if reborn:
         contain(canvas, ui("playerbar", "star"), (142, 86, 182, 126))
@@ -321,8 +350,7 @@ def playerbar(player, images):
             label(canvas, (171, 100, 226, 136), player["level"], 27, "#182d43", fit=True)
     rating = player.get("rating")
     if rating is not None:
-        rating_title(canvas, (148, 143, 216, 172), rating)
-        rating_number(canvas, (215, 142, 296, 169), rating, 2)
+        rating_pair(canvas, (148, 142, 313, 172), rating, 2, gap=18)
     emblem = player.get("class_emblem") or {}
     base_drawn = False
     for key, kind, box in (("base", "ribbon", (317, 140, 415, 172)), ("medal", "medal", (334, 131, 400, 181))):

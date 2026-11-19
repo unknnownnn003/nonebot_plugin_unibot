@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Tuple
 from .song import download_jacket
 from .services.image_components import (
     DIFFICULTY_ASSETS, DIFFICULTY_COLORS, LEVELS, RESAMPLE, badge, brand, contain,
-    cover, label, playerbar, png, rating_number, rating_title, rounded, ui,
+    cover, label, playerbar, png, rating_number, rating_pair, rounded, ui,
 )
 
 best_rating_cmd = on_command("b30", priority=5, block=True)
@@ -151,18 +151,17 @@ def _card(item, number, jacket):
     else:
         band = band.resize((side, 31), RESAMPLE)
         card.paste(band, (6, side + 6), band)
-    rounded(card, (9, side + 7, 121, side + 33), 10, INK)
+    rounded(card, (9, side + 6, 121, side + 32), 10, INK)
     label(card, (10, side + 4, 120, side + 30), LEVELS[difficulty], 19, PAPER, "center")
-    rounded(card, (width - 64, side + 7, width - 10, side + 33), 9, INK)
+    rounded(card, (width - 64, side + 6, width - 10, side + 32), 9, INK)
     label(card, (width - 64, side + 4, width - 10, side + 30), f"{item['level_value']:.1f}", 20, PAPER, "center")
     label(card, (11, 247, width - 10, 278), item["song_name"], 25, INK)
     label(card, (10, 280, width - 10, 322), f"{item['score']:,}", 39, INK, fit=True)
     badge(card, (7, 324, width // 2 - 2, 350), "clear", item["clear"])
     badge(card, (width // 2 + 2, 324, width - 7, 350), "combo", item["full_combo"])
     rounded(card, (7, 353, width - 8, height - 6), 10, "#e7f1f4")
-    value = item["rating"]
-    rating_title(card, (12, 354, 85, height - 8), value)
-    rating_number(card, (84, 354, width - 14, height - 8), value, 4, group="chart-rating")
+    rating_pair(card, (7, 353, width - 7, height - 5), item["rating"], 4,
+                gap=8, group="chart-rating", centered=True)
     return card
 
 
@@ -178,14 +177,13 @@ def _draw_ranking(player, player_assets, jacket_images, groups, heading, value):
     draw.line((0, 246, width, 246), fill=LINE, width=2)
     contain(canvas, playerbar(player, player_assets), (15, 8, 683, 238))
     brand(canvas, width - 162, 3, INK)
-    label(canvas, (width - 320, 55, width - 20, 89), heading, 24, MUTED, "right")
+    label(canvas, (685, 55, width - 20, 89), heading, 24, MUTED, "right", fit=True)
     rating_number(canvas, (width - 267, 95, width - 19, 151), value, 4)
     y = 250
     for title, limit, items, mean, color in groups:
         rounded(canvas, (15, y + 15, 23, y + 57), 4, color)
         label(canvas, (36, y + 5, 330, y + 66), title, 39, INK)
-        label(canvas, (335, y + 5, width - 17, y + 66),
-              f"{len(items)}/{limit}     均值 {mean:.4f}", 27, MUTED, "right")
+        label(canvas, (335, y + 5, width - 17, y + 66), f"均值 {mean:.4f}", 27, MUTED, "right")
         y += 76
         for i, item in enumerate(items):
             card = _card(item, i + 1, jacket_images.get(item["jacket_id"]))
@@ -196,13 +194,14 @@ def _draw_ranking(player, player_assets, jacket_images, groups, heading, value):
 
 def draw_b30_image(player, items, jacket_images, player_assets, average):
     groups = (("BEST30", 30, items, average, "#ffcc59"),)
-    return _draw_ranking(player, player_assets, jacket_images, groups, "B30 均值", average)
+    return _draw_ranking(player, player_assets, jacket_images, groups, "B30", average)
 
 
 def draw_b50_image(player, best_items, new_items, jacket_images, player_assets, best_mean, new_mean, estimate):
     groups = (("BEST30", 30, best_items, best_mean, "#ffcc59"),
               ("NEW20", 20, new_items, new_mean, "#74d5cd"))
-    return _draw_ranking(player, player_assets, jacket_images, groups, "B50 估算", estimate)
+    heading = f"B50（{best_mean:.4f}(B30) + {new_mean:.4f}(N20)）"
+    return _draw_ranking(player, player_assets, jacket_images, groups, heading, estimate)
 
 
 @best_rating_cmd.handle()
