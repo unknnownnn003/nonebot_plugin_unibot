@@ -90,10 +90,11 @@ def load_songlist() -> List[Dict[str, Any]]:
     try:
         with open(SONGLIST_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-        from .services.song_model import active_catalog
-        catalog = active_catalog(data)
-        versions = catalog.get("versions", [])
-        return [dict(song, _versions=versions) for song in catalog["songs"]]
+        from .services.song_model import Catalog
+        catalog = Catalog(data, legacy=True)
+        versions = catalog.metadata.get("versions", [])
+        return [dict(song.as_dict(), _versions=versions, parent_song_id=catalog.parent_id(song.id))
+                for song in catalog.songs.values()]
     except Exception as e:
         logger.error(f"读取 songlist 失败: {e}")
         return []
@@ -175,8 +176,11 @@ def pick_random_song_and_jacket() -> Optional[Tuple[Dict[str, Any], Image.Image,
         return None
 
     candidates = []
+    from .services.song_model import jacket_id as resource_id
     for song in songs:
-        from .services.song_model import jacket_id as resource_id
+        # Associated WE charts use the same question jacket as their ordinary song.
+        if song.get("parent_song_id", song["id"]) != song["id"]:
+            continue
         jacket_id = str(resource_id(song))
         if jacket_id in available_ids:
             candidates.append((song, jacket_id))

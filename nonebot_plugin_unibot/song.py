@@ -2,13 +2,15 @@ from .services.error_notices import error_call as _error_call
 from nonebot.adapters.onebot.v11 import Bot
 import json
 import os
-import difflib
+import re
+from difflib import SequenceMatcher
+from functools import lru_cache
 import platform
 import unicodedata
 from io import BytesIO
-from typing import Optional, Dict, Any, List, Tuple, Set
+from typing import Optional, Dict, Any, List, Tuple
 
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont
 
 from nonebot import on_regex
 from nonebot.adapters.onebot.v11 import MessageEvent, MessageSegment, Message
@@ -18,6 +20,7 @@ from .songlist_update import SONGLIST_LOCK
 
 from .services.paths import SONGLIST_PATH as _SONGLIST_PATH
 from .services.resources import jacket_image as download_jacket
+from .services.song_images import render_song_image
 
 SONGLIST_PATH = str(_SONGLIST_PATH)
 
@@ -38,65 +41,49 @@ from nonebot import on_command
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 
-def normalize_str(s: str) -> str:
-    s = str(s).strip().lower()
-    s = unicodedata.normalize("NFKC", s)
-    if zhconv:
-        try:
-            s = zhconv.convert(s, "zh-cn")
-        except Exception:
-            pass
-    if jaconv:
-        try:
-            s = jaconv.kana2alphabet(jaconv.kata2hira(s))
-        except Exception:
-            pass
-    s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
-    return "".join(c for c in s if c.isalnum())
+def _raw_term(value):
+    return " ".join(value.casefold().split())
 
-def _string_variants(s: str) -> Set[str]:
-    raw = str(s or "").strip().lower()
-    variants = {raw, unicodedata.normalize("NFKC", raw)}
-    if zhconv:
-        try:
-            variants.add(zhconv.convert(raw, "zh-cn"))
-            variants.add(zhconv.convert(raw, "zh-tw"))
-        except Exception:
-            pass
-    if jaconv:
-        try:
-            kana = jaconv.kata2hira(raw)
-            variants.add(kana)
-            variants.add(jaconv.kana2alphabet(kana))
-        except Exception:
-            pass
-    normalized = {normalize_str(v) for v in variants}
-    return {v for v in normalized if v}
 
-def _song_search_terms(song: Dict[str, Any]) -> List[Tuple[str, str]]:
-    terms = [("曲名", str(song.get("title", "")))]
-    for alias in song.get("aliases", []) or []:
-        terms.append(("别名", str(alias)))
-    return [(source, value) for source, value in terms if value.strip()]
+def _compact(value):
+    return "".join(char for char in value if char.isalnum())
 
-def _score_term(query_variants: Set[str], term_variants: Set[str]) -> float:
-    best = 0.0
-    for q in query_variants:
-        for term in term_variants:
-            if not q or not term:
-                continue
-            if q == term:
-                best = max(best, 1.0)
-                continue
-            ratio = difflib.SequenceMatcher(None, q, term).ratio()
-            if q in term:
-                coverage = len(q) / max(len(term), 1)
-                ratio = max(ratio, 0.72 + min(coverage, 0.25))
-            elif term in q:
-                coverage = len(term) / max(len(q), 1)
-                ratio = max(ratio, 0.68 + min(coverage, 0.2))
-            best = max(best, ratio)
-    return best
+
+@lru_cache(maxsize=8192)
+def _term_forms(raw):
+    """Cache conversions of literal terms, independent of any Catalog revision."""
+    form = unicodedata.normalize("NFKC", raw)
+    if zhconv is not None:
+        form = zhconv.convert(form, "zh-cn")
+    # Fold katakana and hiragana without stripping Japanese voicing marks.
+    kana = "".join(chr(ord(c) - 0x60) if "ァ" <= c <= "ヶ" else c for c in form)
+    forms = {_compact(kana)}
+    if jaconv is not None and any("ぁ" <= char <= "ゖ" for char in kana):
+        roman = jaconv.kana2alphabet(kana)
+        forms.add(_compact(roman))
+        forms.add(_compact(re.sub(r"([aeiou])ー|([aeiou])-", lambda m: (m[1] or m[2]) * 2, roman)))
+        forms.add(_compact(re.sub(r"ou|oo|uu", lambda m: m[0][0], roman)))
+    # Romanized spellings may use circumflexes or macrons for long vowels.
+    folded = "".join(c for c in unicodedata.normalize("NFD", kana) if c not in "\u0302\u0304")
+    forms.add(_compact(unicodedata.normalize("NFC", folded)))
+    return tuple(sorted(forms - {""}))
+
+
+def _partial_score(queries, terms):
+    score = 0.0
+    for query in queries:
+        for term in terms:
+            if query in term:
+                score = max(score, 0.70 + 0.25 * len(query) / len(term))
+            elif len(query) >= 4 and min(len(query), len(term)) >= 3:
+                minimum = 0.75 if len(query) < 6 else 0.70
+                matcher = SequenceMatcher(None, query, term, autojunk=False)
+                if matcher.real_quick_ratio() >= minimum and matcher.quick_ratio() >= minimum:
+                    similarity = matcher.ratio()
+                    if similarity >= minimum:
+                        score = max(score, similarity * 0.72)
+    return score
+
 
 def _read_songlist_data() -> Optional[Dict[str, Any]]:
     if not os.path.exists(SONGLIST_PATH):
@@ -171,7 +158,9 @@ def remove_song_alias(song_id: str, alias_name: str) -> Tuple[bool, bool]:
                 return True, True
     return False, False
 
-def find_song_matches(query: str, limit: int = 8, *, catalog=None) -> List[Dict[str, Any]]:
+def find_song_matches(query: str, limit: int = 8, *, catalog=None, exact_only=False) -> List[Dict[str, Any]]:
+    if limit <= 0 or not query.strip():
+        return []
     if catalog is None:
         from .services.song_model import Catalog
         with SONGLIST_LOCK:
@@ -179,73 +168,80 @@ def find_song_matches(query: str, limit: int = 8, *, catalog=None) -> List[Dict[
         if not data:
             return []
         catalog = Catalog(data, legacy=True)
-    songs = [song.as_dict() for song in catalog.songs.values()]
-    query_exact = query.strip().lower()
-    query_variants = _string_variants(query)
-    if not query_exact and not query_variants:
-        return []
 
-    matches: Dict[str, Dict[str, Any]] = {}
+    raw = _raw_term(query)
+    numeric = unicodedata.normalize("NFKC", raw)
+    is_id = numeric.isascii() and numeric.isdecimal()
+    versions = catalog.metadata.get("versions", [])
 
-    for song in songs:
-        song_id = str(song.get("id", ""))
-        best_score = 0.0
-        best_source = ""
-        best_value = ""
+    def build_match(sid, score, source, value):
+        view = catalog.query_song(sid)
+        view["_versions"] = versions
+        return {"song": view, "score": score, "source": source, "matched": value}
 
-        if song_id and song_id == query_exact:
-            best_score = 1.2
-            best_source = "ID"
-            best_value = song_id
-        elif song_id and query_exact and song_id.startswith(query_exact):
-            best_score = 0.78
-            best_source = "ID"
-            best_value = song_id
+    if is_id:
+        try:
+            sid = int(numeric)
+        except ValueError:
+            return []
+        if sid in catalog.songs:
+            return [build_match(sid, 1.2, "ID", str(sid))]
 
-        for source, value in _song_search_terms(song):
-            value_exact = value.strip().lower()
-            score = 1.05 if query_exact and query_exact == value_exact else _score_term(query_variants, _string_variants(value))
-            if source == "别名" and score >= 0.72:
-                score += 0.03
-            if score > best_score:
-                best_score = score
-                best_source = source
-                best_value = value
-
-        if best_score >= 0.64:
-            group_id = int(song_id) if query_exact.isdigit() else catalog.parent_id(int(song_id))
-            key = str(group_id)
-            if key in matches and matches[key]["score"] >= best_score:
+    query_forms = set(_term_forms(raw))
+    exact, searchable = {}, []
+    for sid, song in catalog.songs.items():
+        attrs = song.attributes
+        title = attrs["title"]
+        aliases = attrs.get("aliases")
+        terms = [("曲名", title)]
+        if isinstance(aliases, list):
+            terms.extend(("别名", alias) for alias in aliases if isinstance(alias, str))
+        group_id = sid if is_id else catalog.parent_id(sid)
+        for source, value in terms:
+            term = _raw_term(value)
+            if not term:
                 continue
-            view = catalog.query_song(group_id)
-            view["_versions"] = catalog.metadata.get("versions", [])
-            matches[key] = {
-                "song": view,
-                "score": best_score,
-                "source": best_source,
-                "matched": best_value,
-            }
+            forms = _term_forms(term)
+            if term == raw:
+                score = 1.05
+            elif query_forms.intersection(forms):
+                score = 1.0
+            elif not exact_only and not is_id:
+                searchable.append((group_id, sid, source, value, forms))
+                continue
+            else:
+                continue
+            key = (-score, source != "曲名", group_id, sid, value)
+            if group_id not in exact or key < exact[group_id][0]:
+                exact[group_id] = (key, source)
 
-    ranked = sorted(matches.values(), key=lambda item: (item["score"], -len(str(item["song"].get("title", "")))), reverse=True)
-    return ranked[:limit]
+    if exact:
+        ranked = sorted(exact.values())
+        # Keep collisions at the strongest exact tier. Never let the display
+        # limit turn a collision into an automatic selection.
+        ranked = [row for row in ranked if row[0][0] == ranked[0][0][0]]
+        return [build_match(key[2], -key[0], source, key[4]) for key, source in ranked[:max(2, limit)]]
+    if exact_only:
+        return []
+    if is_id:
+        ids = sorted(sid for sid in catalog.songs if str(sid).startswith(numeric))
+        return [build_match(sid, 0.75, "ID", str(sid)) for sid in ids[:limit]]
+    matches = {}
+    for group_id, sid, source, value, forms in searchable:
+        score = _partial_score(query_forms, forms)
+        if score:
+            key = (-score, source != "曲名", group_id, sid, value)
+            if group_id not in matches or key < matches[group_id][0]:
+                matches[group_id] = (key, source)
+    return [build_match(key[2], -key[0], source, key[4])
+            for key, source in sorted(matches.values())[:limit]]
+
 
 def pick_song_match(matches: List[Dict[str, Any]]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
-    if not matches:
-        return None, []
-
-    exact_matches = [m for m in matches if m["score"] >= 1.0]
-    if len(exact_matches) == 1:
-        return exact_matches[0]["song"], []
-    if len(exact_matches) > 1:
-        return None, exact_matches
-
-    top = matches[0]
-    close_matches = [m for m in matches if top["score"] - m["score"] <= 0.08]
-    if len(close_matches) >= 2:
-        return None, close_matches
-    if top["score"] >= 0.74:
-        return top["song"], []
+    if len(matches) == 1 and matches[0]["score"] >= 1:
+        return matches[0]["song"], []
     return None, matches
+
 
 def get_font(size: int, weight: str = "Normal") -> ImageFont.FreeTypeFont:
     # Noto 使用 Regular 而非 Normal；常见发行版只安装 Regular/Bold。
@@ -321,164 +317,12 @@ def clamp_wrapped_text(text: str, font: ImageFont.FreeTypeFont, max_width: int, 
     return "\n".join(lines)
 
 def match_song_by_query(query: str) -> Optional[Dict[str, Any]]:
-    match, _ = pick_song_match(find_song_matches(query, limit=8))
+    match, _ = pick_song_match(find_song_matches(query, limit=8, exact_only=True))
     return match
 
 def make_empty_jacket(size: int = 200) -> Image.Image:
     return Image.new("RGBA", (size, size), (0, 0, 0, 0))
 
-
-def render_song_image(local_song: Dict[str, Any], jacket_img: Optional[Image.Image]) -> bytes:
-    # 颜色常数
-    BG_COLOR = (30, 30, 35, 255)
-    PANEL_COLOR = (45, 45, 52, 255)
-    TEXT_MAIN = (245, 245, 245, 255)
-    TEXT_SUB = (180, 180, 180, 255)
-
-    DIFF_COLORS = [
-        (46, 204, 113),   # BASIC
-        (241, 196, 15),   # ADVANCED
-        (231, 76, 60),    # EXPERT
-        (155, 89, 182),   # MASTER
-        (30, 30, 30),     # ULTIMA
-        (243, 156, 18)    # WORLD'S END
-    ]
-    DIFF_NAMES = ["BASIC", "ADVANCED", "EXPERT", "MASTER", "ULTIMA", "WORLD'S END"]
-
-    font_title = get_font(36, "Bold")
-    font_head = get_font(24, "Medium")
-    font_body = get_font(20, "Normal")
-    font_small = get_font(16, "Normal")
-    font_diff = get_font(22, "Bold")
-
-    song_id = local_song["id"]
-    title = local_song.get("title", "Unknown")
-    artist = local_song.get("artist") or "-"
-    genre = local_song.get("genre") or "-"
-    bpm = local_song.get("bpm", 0)
-    version_raw = local_song.get("version", "-")
-    versions = local_song.get("_versions", [])
-    version = get_version_name(version_raw, versions)
-
-    local_diffs = sorted(local_song.get("difficulties", []), key=lambda d: (d["difficulty"], d.get("song_id", song_id)))
-
-    card_width = 800
-    
-    # 动态布局准备：先画在一张极长的大画布上，以便处理换行
-    temp_img = Image.new("RGBA", (card_width, max(4000, 600 + len(local_diffs) * 300)), BG_COLOR)
-    draw = ImageDraw.Draw(temp_img)
-
-    jacket_size = 200
-    jacket_img = jacket_img or make_empty_jacket(jacket_size)
-    jacket_img = jacket_img.resize((jacket_size, jacket_size), Image.Resampling.LANCZOS)
-    temp_img.paste(jacket_img, (40, 40), jacket_img if jacket_img.mode == "RGBA" else None)
-
-    info_x = 40 + jacket_size + 30
-    max_text_width = card_width - info_x - 40
-
-    current_y = 40
-    
-    title_wrapped, _, t_h = wrap_text_with_height(title, font_title, max_text_width, draw)
-    draw_text(draw, (info_x, current_y), title_wrapped, font_title, TEXT_MAIN)
-    current_y += t_h + 15
-    
-    artist_wrapped, _, a_h = wrap_text_with_height(f"Artist: {artist}", font_head, max_text_width, draw)
-    draw_text(draw, (info_x, current_y), artist_wrapped, font_head, TEXT_SUB)
-    current_y += a_h + 20
-
-    draw_text(draw, (info_x, current_y), f"BPM: {bpm}", font_body, TEXT_SUB)
-    current_y += 30
-    
-    locked_str = "Yes" if local_song.get("locked") else "No"
-    
-    genre_wrapped, _, g_h = wrap_text_with_height(f"Genre: {genre}   Locked: {locked_str}", font_body, max_text_width, draw)
-    draw_text(draw, (info_x, current_y), genre_wrapped, font_body, TEXT_SUB)
-    current_y += g_h + 10
-    
-    ver_wrapped, _, v_h = wrap_text_with_height(f"Version: {version}", font_body, max_text_width, draw)
-    draw_text(draw, (info_x, current_y), ver_wrapped, font_body, TEXT_SUB)
-    current_y += v_h + 30
-
-    start_y = max(current_y, 40 + jacket_size + 30)
-
-    for ld in local_diffs:
-        diff_idx = ld["difficulty"]
-
-        color = DIFF_COLORS[diff_idx] if diff_idx < len(DIFF_COLORS) else (100, 100, 100)
-        diff_name = DIFF_NAMES[diff_idx] if diff_idx < len(DIFF_NAMES) else f"DIFF {diff_idx}"
-        
-        designer = ld.get("note_designer", "-")
-        if str(designer) == "0": designer = "-"
-        designer_str = f"Designer: {designer}"
-        if diff_idx in (4, 5):
-            designer_str += f" | Version: {get_version_name(ld.get('version', version_raw), versions)}"
-        
-        des_w, _, d_h = wrap_text_with_height(designer_str, font_small, card_width - 120, draw)
-        
-        notes = ld.get("notes")
-        if not isinstance(notes, dict):
-            notes = {}
-        total = notes.get("total", ld.get("total", "?"))
-        tap = notes.get("tap", ld.get("tap", "?"))
-        hold = notes.get("hold", ld.get("hold", "?"))
-        slide = notes.get("slide", ld.get("slide", "?"))
-        air = notes.get("air", ld.get("air", "?"))
-        flick = notes.get("flick", ld.get("flick", "?"))
-        
-        notes_str = f"Total: {total} | Tap: {tap} | Hold: {hold} | Slide: {slide} | Air: {air} | Flick: {flick}"
-
-        notes_w, _, n_h = wrap_text_with_height(notes_str, font_small, card_width - 120, draw)
-        
-        content_h = 40 + d_h + n_h
-        box_h = max(95, content_h + 30)
-        diff_item_height = box_h + 15
-        
-        margin_top = (box_h - content_h) / 2
-
-        draw.rounded_rectangle([40, start_y, card_width - 40, start_y + box_h], radius=8, fill=PANEL_COLOR)
-
-        if diff_idx == 4:
-            stripe_color = (20, 20, 20)
-            text_color = (255, 255, 255)
-        else:
-            stripe_color = color
-            text_color = color
-
-        draw.rounded_rectangle([40, start_y, 55, start_y + box_h], radius=8, fill=stripe_color)
-        draw.rectangle([48, start_y, 55, start_y + box_h], fill=stripe_color)
-
-        if diff_idx == 4:
-            draw.rounded_rectangle([40, start_y, card_width - 40, start_y + box_h], radius=8, fill=None, outline=(220, 50, 50), width=2)
-
-        level_val = ld.get("level_value", ld.get("level", "?"))
-        # 未提供标准定数时保留标级；WORLD'S END 属性另行展示
-        if diff_idx == 5:
-            stars = ld.get("star")
-            star_label = "★" * stars if type(stars) is int and 1 <= stars <= 5 else "星级未知"
-            level_str = f"{ld.get('kanji', '')} {star_label}".strip()
-        elif level_val is None or (isinstance(level_val, (int, float)) and float(level_val) == 0):
-            level_str = str(ld.get("level") or "?")
-        else:
-            try:
-                level_str = f"{float(level_val):.1f}"
-            except:
-                level_str = str(level_val)
-        
-        draw_text(draw, (70, start_y + margin_top), f"{diff_name} {level_str}", font_diff, text_color)
-
-        draw_text(draw, (70, start_y + margin_top + 30), des_w, font_small, TEXT_SUB)
-        draw_text(draw, (70, start_y + margin_top + 30 + d_h + 10), notes_w, font_small, TEXT_SUB)
-
-        start_y += diff_item_height
-
-    draw.line([(40, start_y), (card_width - 40, start_y)], fill=(98, 114, 164), width=2)
-    draw_text(draw, (40, start_y + 15), "Generated by Robinbot | unibot", font_small, TEXT_SUB)
-
-    final_img = temp_img.crop((0, 0, card_width, int(start_y + 60)))
-    buf = BytesIO()
-    final_img = final_img.convert("RGB")
-    final_img.save(buf, format="JPEG", quality=90)
-    return buf.getvalue()
 
 def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jacket_imgs: List[Optional[Image.Image]]) -> bytes:
     BG_COLOR = (30, 30, 35, 255)
@@ -500,7 +344,7 @@ def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jack
     font_body = get_font(18, "Normal")
     font_small = get_font(15, "Normal")
 
-    draw_text(draw, (40, 32), "匹配到多首可能的歌曲", font_title, TEXT_MAIN)
+    draw_text(draw, (40, 32), "歌曲候选", font_title, TEXT_MAIN)
     query_wrapped = clamp_wrapped_text(f"查询：{query}", font_body, card_width - 80, 1, draw)
     draw_text(draw, (40, 72), query_wrapped, font_body, TEXT_SUB)
 
@@ -512,7 +356,6 @@ def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jack
         song_id = song.get("id", "-")
         source = match.get("source") or "匹配"
         matched = str(match.get("matched") or "")
-        score = int(round(min(match.get("score", 0.0), 1.0) * 100))
 
         draw.rounded_rectangle([32, y + 8, card_width - 32, y + row_h - 8], radius=8, fill=PANEL_COLOR)
         draw.rounded_rectangle([32, y + 8, 42, y + row_h - 8], radius=8, fill=ACCENT)
@@ -533,7 +376,6 @@ def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jack
         matched_text = f"{source}: {matched}" if matched else source
         matched_wrapped = clamp_wrapped_text(matched_text, font_small, 180, 2, draw)
         draw_text(draw, (card_width - 230, y + 28), matched_wrapped, font_small, TEXT_SUB)
-        draw_text(draw, (card_width - 230, y + 70), f"相似度 {score}%", font_small, ACCENT)
         y += row_h
 
     draw.line([(40, height - 44), (card_width - 40, height - 44)], fill=ACCENT, width=2)
@@ -618,14 +460,15 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
     if not query:
         await _error_call(view_alias_cmd.finish, "格式错误。请使用: /查看别名 <模糊搜索/名字/ID/别名>")
         
-    matches = find_song_matches(query, limit=8)
+    from .services.job_store import async_call
+    matches = await async_call(find_song_matches, query, limit=8)
     local_song, ambiguous_matches = pick_song_match(matches)
     if ambiguous_matches:
         lines = []
         for item in ambiguous_matches[:8]:
             song = item["song"]
             lines.append(f"{song.get('id')} - {song.get('title')}（{item.get('source')}: {item.get('matched')}）")
-        await view_alias_cmd.finish("匹配到多首曲目，请使用更精确的名称或 ID：\n" + "\n".join(lines))
+        await view_alias_cmd.finish("请使用更精确的名称或候选 ID：\n" + "\n".join(lines))
 
     if not local_song:
         await _error_call(view_alias_cmd.finish, "未找到匹配的曲目。")

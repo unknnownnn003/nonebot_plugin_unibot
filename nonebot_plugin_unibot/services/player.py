@@ -1,4 +1,8 @@
 """All player queries consume the same authorized personal-API snapshot."""
+import asyncio
+from decimal import Decimal
+
+from .image_components import player_images
 from .job_store import async_call
 from .results import outcome, image
 from .player_data import get_reader, failure, PlayerError
@@ -66,18 +70,21 @@ async def best(snapshot, catalog, *, b50=False):
         return outcome("RATING_VERSION_UNCLASSIFIED", f"{unknown} 条成绩的歌曲版本未知或晚于当前国服版本，无法构成B50；请更新曲库核对。", status="unavailable", data={"unclassified_scores": unknown})
     if not old and not new:
         return outcome("NO_MATCHED_SCORES", "没有可纳入统计的国服普通谱面成绩；WORLD'S END、禁用和尚未配信谱面不参与。", status="needs_input")
+    # Prioritize the player bar ahead of the larger batch on a cold CDN cache.
+    assets = await player_images(snapshot.player)
     jackets = await b.prepare_jackets(old + new)
     if b50:
-        content = await async_call(b.draw_b50_image, snapshot.player, old, new, jackets, version)
         data = {"rating_estimate": average(old + new, 50), "best30_average": average(old, 30),
                 "new20_average": average(new, 20), "best30_count": len(old), "new20_count": len(new),
                 "rating_version": version, "unclassified_scores": unknown}
+        content = await async_call(b.draw_b50_image, snapshot.player, old, new, jackets, assets,
+                                   data["best30_average"], data["new20_average"], data["rating_estimate"])
         hint = "B50：旧版本 BEST 30 + 当前版本 NEW 20，缺位按零计，合计除以50；个人资料 Rating 为落雪返回值。"
         if unknown:
             hint += f" {unknown} 条歌曲版本未知或晚于当前版本的成绩未分区，请更新曲库核对。"
     else:
-        content = await async_call(b.draw_b30_image, snapshot.player, old, jackets)
         data = {"b30_average": average(old, 30), "chart_count": len(old)}
+        content = await async_call(b.draw_b30_image, snapshot.player, old, jackets, assets, data["b30_average"])
         hint = "B30：所有版本普通谱面按落雪单谱面 Rating 排序取30，缺位按零计；此均值不是个人总 Rating。"
     return outcome(hint=hint, data=data, artifacts=[image(content)])
 
@@ -95,21 +102,28 @@ def split_query(query, level_index=None):
 
 async def song_scores(snapshot, catalog, query, level_index=None):
     from .song import prepare
+    from .rating import eligible
+    from .song_model import jacket_id
+    from .song_images import render_song_scores
+    from .. import song as native_song
+
     query, level_index = split_query(query, level_index)
     prepared = await prepare(query, catalog=catalog)
     if not prepared["song"]:
         choices = [{"id": row["song"]["id"], "title": row["song"].get("title")} for row in prepared["ambiguous"][:8]]
-        text = "同名曲目有多个候选，请指定原始歌曲ID：" + "、".join(f"{r['id']} {r['title']}" for r in choices) if choices else "未找到歌曲，请使用歌名、别名或原始ID。"
+        text = "请用候选歌曲 ID 选择：" + "、".join(f"{r['id']} {r['title']}" for r in choices) if choices else "未找到歌曲，请使用歌名、别名或原始ID。"
         return outcome("AMBIGUOUS_TARGET" if choices else "NOT_FOUND", text, status="needs_input", data={"candidates": choices})
     song_id = prepared["song"]["id"]
     if song_id not in catalog.songs:
         raise PlayerError("INVALID_DATA")
-    family = catalog.query_song(catalog.parent_id(song_id))
+    family_id = catalog.parent_id(song_id)
+    selected = prepared["song"]
+    family = selected if song_id == family_id else catalog.query_song(family_id)
     charts = {}
-    for difficulty in family["difficulties"]:
-        charts.setdefault((str(difficulty["song_id"]), difficulty["difficulty"]), []).append(difficulty)
-    rows = [dict(r, charts=charts[(str(r["id"]), r["level_index"])]) for r in snapshot.scores
-            if (str(r["id"]), r["level_index"]) in charts and (level_index is None or r["level_index"] == level_index)]
+    for difficulty in selected["difficulties"]:
+        charts.setdefault((difficulty["song_id"], difficulty["difficulty"]), []).append(difficulty)
+    rows = [dict(r, charts=charts[(r["id"], r["level_index"])]) for r in snapshot.scores
+            if (r["id"], r["level_index"]) in charts and (level_index is None or r["level_index"] == level_index)]
     rows.sort(key=lambda row: (row["level_index"], row["id"]))
     lines = [f"{family.get('title', '')}（原曲ID {family['id']}）"]
     for row in rows:
@@ -129,5 +143,23 @@ async def song_scores(snapshot, catalog, query, level_index=None):
                      + f"{row.get('clear') or '-'} / {row.get('full_combo') or '-'} / {row.get('full_chain') or '-'}")
     if not rows:
         lines.append("落雪没有返回该曲所选难度的个人成绩；未将缺失记录当作零分。")
+
+    # Use eligible ordinary charts for the 4A song-wide OP strip, independent
+    # of the selected difficulty. The API supplies all earned values.
+    maxima = {}
+    for sid in {sid for sid, _ in charts}:
+        owner = catalog.songs[sid]
+        for chart in owner.charts:
+            key = (sid, chart.difficulty)
+            if key in charts and eligible(owner, chart):
+                maxima[key] = (Decimal(str(chart.attributes["level_value"])) + 3) * 5
+    song_op = None
+    if maxima:
+        actual = max((Decimal(str(r["over_power"])) for r in snapshot.scores
+                      if (r["id"], r["level_index"]) in maxima), default=None)
+        song_op = actual, max(maxima.values())
+    jacket, assets = await asyncio.gather(native_song.download_jacket(jacket_id(selected)),
+                                          player_images(snapshot.player, portrait=True))
+    content = await async_call(render_song_scores, selected, jacket, snapshot.player, assets, rows, song_op, maxima)
     return outcome("OK" if rows else "NO_SONG_SCORES", "\n".join(lines), status="ok" if rows else "needs_input",
-                   data={"song_id": family["id"], "scores": rows})
+                   data={"song_id": family["id"], "scores": rows}, artifacts=[image(content)])

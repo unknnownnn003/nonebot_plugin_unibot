@@ -65,7 +65,7 @@ async def _submit(bot, event, capability, arguments, key, *, origin):
 def attach_candidates(output, prepared):
     if output["code"] in {"JOB_ACCEPTED", "JOB_EXISTS"} and prepared and prepared["ambiguous"]:
         output["code"] = "AMBIGUOUS_TARGET"
-        output["public_hint"] = output["fallback_text"] = "有多个候选，请用歌曲ID选择。"
+        output["public_hint"] = output["fallback_text"] = "请用候选歌曲 ID 选择。"
         output.setdefault("data", {})["candidates"] = [
             {"id": match["song"].get("id"), "title": match["song"].get("title")} for match in prepared["ambiguous"][:8]]
     return output
@@ -124,17 +124,17 @@ async def execute(bot, event, job, store, presentations):
         if output is None:
             raise PlayerError("JOB_CANCELLED")
         await checkpoint()
-        # Failed queries are presented once by the task notifier, never cached
-        # as successful media or followed by a misleading delivery receipt.
-        if output.get("status") != "ok" and output.get("code") != "AMBIGUOUS_TARGET":
+        # A resolved song can produce a dedicated no-records image.
+        code = output.get("code")
+        empty_song_image = code == "NO_SONG_SCORES" and bool(output.get("artifacts"))
+        if output.get("status") != "ok" and code != "AMBIGUOUS_TARGET" and not empty_song_image:
             return output
         artifacts = output.pop("artifacts", [])
         contents = [MessageSegment.image(a["content"]) for a in artifacts if a["kind"] == "image"]
         if len(contents) != len(artifacts):
             return outcome("UNSUPPORTED_MEDIA_PLAN", "媒体类型尚不支持。", status="failed")
         text = output.get("public_hint") or output.get("fallback_text")
-        # An image is the complete native presentation. Text-only single-song
-        # results remain content; explanatory metadata stays in the job result.
+        # The single-song candidate prompt and text-mode progress can be sent as text.
         if not contents and job.capability_id in {"player.song_scores", "player.progress"} and text:
             contents.append(MessageSegment.text(text))
         if not contents:
@@ -158,6 +158,8 @@ async def execute(bot, event, job, store, presentations):
             if output["code"] == "AMBIGUOUS_TARGET":
                 output.update(status="ok", current_step="awaiting_choice")
                 output.setdefault("data", {})["selection_status"] = "needs_input"
+            elif empty_song_image:
+                output["status"] = "ok"
             output["public_hint"] = "查询结果已发送。"
         output.setdefault("data", {}).update(media_cached=True, artifact_delivery="sent" if sent == len(rows) else "partial" if sent else "unknown" if started else "not_sent")
         output["side_effect_state"] = "committed" if sent == len(rows) else "unknown" if started else "none"

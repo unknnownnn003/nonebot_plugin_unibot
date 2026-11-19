@@ -189,7 +189,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "b50",
-        "line": 14,
+        "line": 15,
         "matcher": "best_rating_50_cmd",
         "module": "best_rating",
         "registration": "on_command"
@@ -201,7 +201,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "b30",
-        "line": 13,
+        "line": 14,
         "matcher": "best_rating_cmd",
         "module": "best_rating",
         "registration": "on_command"
@@ -265,7 +265,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "添加别名",
-        "line": 567,
+        "line": 409,
         "matcher": "add_alias_cmd",
         "module": "song",
         "registration": "on_command"
@@ -277,7 +277,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "删除别名",
-        "line": 568,
+        "line": 410,
         "matcher": "del_alias_cmd",
         "module": "song",
         "permission_source": "SUPERUSER",
@@ -290,7 +290,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "查看别名",
-        "line": 569,
+        "line": 411,
         "matcher": "view_alias_cmd",
         "module": "song",
         "registration": "on_command"
@@ -301,7 +301,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
-        "line": 24,
+        "line": 27,
         "matcher": "song_query",
         "module": "song",
         "pattern": "^(.+)是什么歌$",
@@ -313,7 +313,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
-        "line": 24,
+        "line": 27,
         "matcher": "song_query",
         "module": "song",
         "pattern": "^(.+)是什么歌$",

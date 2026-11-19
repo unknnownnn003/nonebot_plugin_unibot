@@ -36,7 +36,7 @@ async def search(query, *, prepared=None):
     if ambiguous:
         jackets = await asyncio.gather(*(s.download_match_jacket(m) for m in ambiguous[:8]))
         content = await async_call(s.render_song_candidates_image, query, ambiguous[:8], list(jackets))
-        return outcome("AMBIGUOUS_TARGET", "有多个候选，请用歌曲 ID 选择。", status="needs_input",
+        return outcome("AMBIGUOUS_TARGET", "请用候选歌曲 ID 选择。", status="needs_input",
                        data={"candidates": [{"id": m["song"].get("id"), "title": m["song"].get("title")} for m in ambiguous[:8]]},
                        artifacts=[image(content)])
     if not local_song:

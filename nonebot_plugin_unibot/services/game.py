@@ -147,7 +147,10 @@ async def guess(group_id, query, user_id, *, guesser_name=None, expected_round=N
         matched = await asyncio.to_thread(c.match_song_by_query, query)
         if not matched:
             return outcome("NOT_FOUND", "没有匹配到歌曲，再猜猜看？", status="needs_input")
-        if str(matched.get("id")) != str(game["song"].get("id")):
+        answer = game["song"]
+        entered_id = matched.get("parent_song_id") or matched.get("id")
+        answer_id = answer.get("parent_song_id") or answer.get("id")
+        if str(entered_id) != str(answer_id):
             return outcome("WRONG_GUESS", "不对哦，再猜猜看～", status="needs_input")
         score = c.calc_actual_score(game["score"], game["hints_used"])
         content = await _result_image(c, game, score, guessed=True, guesser_name=guesser_name or str(user_id))

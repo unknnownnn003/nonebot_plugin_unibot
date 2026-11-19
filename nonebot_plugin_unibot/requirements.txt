@@ -2,7 +2,9 @@ nonebot2>=2.0.0
 nonebot-adapter-onebot
 nonebot-plugin-htmlrender
 fastapi
-Pillow
+Pillow>=10.1
+fonttools
+regex
 httpx
 aiofiles
 jaconv

@@ -36,7 +36,7 @@ target=root/'data/nonebot_plugin_unibot';m.migrate(legacy,target)
 original=m.inventory(legacy)
 plugin=nonebot.load_plugin('nonebot_plugin_unibot');assert plugin is not None
 from nonebot_plugin_unibot import song as s, songlist_update as update, best_rating as b, chuguess, overpower_list_local as op
-from nonebot_plugin_unibot.services import player, song as query, maintenance
+from nonebot_plugin_unibot.services import player, song as query, maintenance, song_images
 from nonebot_plugin_unibot import llm_api, get_resource
 from nonebot_plugin_unibot.services.rating import select
 from PIL import Image
@@ -65,6 +65,37 @@ base=s.find_song_matches('10')[0]['song']
 assert base['id']==10 and len(base['difficulties'])==4
 we=s.find_song_matches('8001')[0]['song']
 assert we['id']==8001 and we['parent_song_id']==10
+
+# Representative public titles and aliases, including an ID/alias collision.
+search_rows = [
+    dict(id=3, title='B.B.K.K.B.K.K.', aliases=['bk', 'bbkkbkk', '共享']),
+    dict(id=24, title='ドーナツホール', aliases=['甜甜圈洞']),
+    dict(id=38, title='天ノ弱', aliases=['共享']),
+    dict(id=210, title='アスノヨゾラ哨戒班', aliases=['明日的夜空哨戒班']),
+    dict(id=2439, title='夢と幻想の終点にて'),
+    dict(id=2651, title='Acid God', aliases=['酸神', '3']),
+]
+search_catalog = Catalog({'songs': [dict(row, difficulties=[]) for row in reversed(search_rows)]})
+for query_text, sid in [
+    ('３', 3), ('B B K K B K K', 3), ('ＢＫ', 3), ('甜甜圈洞', 24), ('どーなつほーる', 24),
+    ('dōnatsuhōru', 24), ('doonatsuhooru', 24), ('天の弱', 38), ('明日的夜空哨戒班', 210),
+    ('梦と幻想の终点にて', 2439), ('Acid God', 2651), ('酸神', 2651),
+]:
+    selected, candidates = s.pick_song_match(s.find_song_matches(query_text, catalog=search_catalog))
+    assert selected and selected['id']==sid and not candidates, (query_text, selected, candidates)
+for query_text, first in [('2', 24), ('b', 3), ('acid', 2651), ('Acid Gdo', 2651), ('Aicd Gdo', 2651), ('アスノヨゾラ', 210)]:
+    selected, candidates = s.pick_song_match(s.find_song_matches(query_text, catalog=search_catalog))
+    assert selected is None and candidates[0]['song']['id']==first, (query_text, candidates)
+    assert not s.find_song_matches(query_text, catalog=search_catalog, exact_only=True)
+for rows in (search_rows, reversed(search_rows)):
+    alternate = Catalog({'songs': [dict(row, difficulties=[]) for row in rows]})
+    selected, candidates = s.pick_song_match(s.find_song_matches('共享', limit=1, catalog=alternate))
+    assert not selected and [row['song']['id'] for row in candidates]==[3, 38]
+with patch.object(s, '_read_songlist_data', return_value=search_catalog.as_dict()):
+    assert chuguess.match_song_by_query('bk')['id']==3
+    assert chuguess.match_song_by_query('Acid Gdo') is None
+    assert chuguess.match_song_by_query('共享') is None
+
 assert s.add_song_alias('11','isolated alias')==(True,True)
 assert not s.add_song_alias('foreign-hash','forbidden')[0]
 before=update.SONGLIST_FILE.read_bytes()
@@ -85,19 +116,18 @@ for bad in ({'songs':[]},{'songs':[{'id':10,'title':'bad','difficulties':[{'diff
 meta=b.build_chart_meta(saved['songs'])
 assert meta[('10',3)]['level_value']==14.2
 assert meta[('10',4)]['version']==24000 and ('8001',5) not in meta
-# Preserve metadata identities internally while presenting WE attributes/names.
-labels=[]; original_draw=s.draw_text
+# Preserve metadata identities while presenting WE attributes and explicit IDs.
+labels=[]; original_draw=song_images.label
 display=copy.deepcopy(base)
 next(d for d in display['difficulties'] if d['song_id']==8001).update(kanji='半',star=3)
-def record(draw,pos,text,*args,**kwargs):
-    labels.append(str(text));return original_draw(draw,pos,text,*args,**kwargs)
-with patch.object(s,'draw_text',side_effect=record),patch.object(s,'get_version_name',side_effect=lambda v,_:{10000:'CHUNITHM OLD',21000:'CHUNITHM AIR',23000:'CHUNITHM SUN',24000:'CHUNITHM NEW'}[int(v)]):
+def record(canvas,box,text,*args,**kwargs):
+    labels.append(str(text));return original_draw(canvas,box,text,*args,**kwargs)
+with patch.object(song_images,'label',side_effect=record),patch.object(song_images,'ui',return_value=None):
     image=s.render_song_image(display,None)
-assert image.startswith(b'\xff\xd8')
-assert sum(text.startswith("WORLD'S END") for text in labels)==2
-assert "WORLD'S END 半 ★★★" in labels and "WORLD'S END 狂 ★★★★★" in labels
-assert any('CHUNITHM AIR' in text for text in labels) and any('CHUNITHM SUN' in text for text in labels)
-assert not any('ID:' in text or 'Origin:' in text or '21000' in text for text in labels)
+assert image.startswith(b'\x89PNG')
+assert labels.count("WORLD’S END")==2
+assert "半  ★3" in labels and "狂  ★5" in labels
+assert "ID  10" in labels and "WE ID  8001" in labels and "WE ID  8002" in labels
 assert {d['song_id'] for d in base['difficulties']}=={10,8001,8002}
 assert llm_api.CAPABILITY_VERSION=='4.1.0'
 specs=llm_api.describe_capabilities()
@@ -111,7 +141,7 @@ async def run():
     updated = copy.deepcopy(FIXTURE)
     first = updated['songs'][0]
     first.update(title='New title', artist='New artist', genre='东方Project', release_date='2020-11-01')
-    first['difficulties'][0].update(level_value=14.7, notes={'tap': 1200, 'total': 1800})
+    first['difficulties'][0].update(level_value=14.7, note_designer='New designer', notes={'tap': 1200, 'total': 1800})
     first['difficulties'][1]['disabled'] = True
     updated['songs'][1]['disabled'] = True
     updated['songs'] = [row for row in updated['songs'] if row['id'] != 8003]
@@ -124,20 +154,27 @@ async def run():
     new_match = s.find_song_matches('local alias')[0]['song']
     assert new_match['title']=='New title' and new_match['artist']=='New artist'
     assert new_match['difficulties'][0]['notes']=={'tap':1200,'total':1800}
+    assert new_match['difficulties'][0]['level_value']==14.7
+    assert new_match['difficulties'][0]['note_designer']=='New designer'
+    assert s.pick_song_match(s.find_song_matches('New title'))[0]['id']==10
     assert new_match['_versions'][0]['title']=='New version label'
     assert prepared['song']['title']=='Same title'
     assert prepared['song']['_versions'][0]['title']=='CHUNITHM OLD'
     assert {(c['song_id'], c['level_value']) for c in op.get_target_charts('车万',current)}=={('10',14.7)}
-    scores = NS(scores=[dict(id=i, level_index=d, score=1009000, rating=15, over_power=80)
+    scores = NS(player={'name': 'Fixture', 'level': 10, 'rating': 15},
+                scores=[dict(id=i, level_index=d, score=1009000, rating=15, over_power=80)
                        for i,d in ((10,3),(10,4),(11,3))])
     assert [row['level_value'] for row in select(scores,current)[0]]==[14.7]
-    assert (await player.song_scores(scores,current,'local alias'))['data']['song_id']==10
+    with patch.object(s,'download_jacket',AsyncMock(return_value=None)):
+        assert (await player.song_scores(scores,current,'local alias'))['data']['song_id']==10
     jacket_dir = target/'jacket'
     jacket_dir.mkdir(exist_ok=True)
     with Image.new('RGBA',(16,16),'red') as sample:
         sample.save(jacket_dir/'10.png')
     (jacket_dir/'12.png').write_bytes(b'invalid')
-    assert chuguess.pick_random_song_and_jacket()[2] == '10'
+    with patch.object(chuguess.random, 'shuffle', side_effect=lambda rows: rows.reverse()):
+        picked = chuguess.pick_random_song_and_jacket()
+    assert picked[2] == '10' and picked[0]['id'] == 10
     with Image.new('RGBA',(8,8)) as tiny:
         assert chuguess.crop_jacket(tiny, 8)[0].size == (8,8)
     with patch.object(s,'download_jacket',AsyncMock(return_value=None)),patch.object(s,'render_song_image',return_value=b'same-renderer'):

@@ -14,6 +14,7 @@ class PlayerHostTests(unittest.TestCase):
         script=r'''
 import asyncio, copy, importlib.util, json, shutil, sys, time
 from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import patch, AsyncMock
@@ -27,9 +28,10 @@ from test_player_data import personal, event
 nonebot.init(driver='~none', localstore_data_dir=str(root/'data'),localstore_cache_dir=str(root/'cache'),localstore_config_dir=str(root/'config'))
 assert nonebot.load_plugin('nonebot_plugin_unibot') is not None
 from nonebot_plugin_unibot import llm_api,best_rating as b,get_player_songlist as profiles,overpower_list_local as op,recommendation as rec,song as native_song
-from nonebot_plugin_unibot.services import oauth_runtime,paths,player,player_data as pd,sync,media_jobs,group_policy
+from nonebot_plugin_unibot.services import image_components,oauth_runtime,paths,player,player_data as pd,sync,media_jobs,group_policy,song_images
 from nonebot_plugin_unibot.services.oauth import OAuthService,Settings
 from nonebot_plugin_unibot.services.oauth_store import OAuthStore
+from nonebot_plugin_unibot.services.song_model import Catalog
 from nonebot.adapters.onebot.v11 import Bot,MessageSegment
 from nonebot_plugin_unibot.services.presentation_store import scope
 catalog=fixture();catalog['rating_version']=24000
@@ -82,7 +84,7 @@ async def wait(job_id):
 async def run():
     global allowed,mode,started,release
     bind();bind('8')
-    with patch.object(group_policy,'enabled',side_effect=lambda *a:allowed or getattr(a[0],'group_id',None) is None),patch.object(group_policy,'scope',side_effect=lambda *a:nullcontext()),patch.object(b,'prepare_jackets',AsyncMock(return_value={})),patch.object(rec,'download_jacket',AsyncMock(return_value=None)):
+    with patch.object(group_policy,'enabled',side_effect=lambda *a:allowed or getattr(a[0],'group_id',None) is None),patch.object(group_policy,'scope',side_effect=lambda *a:nullcontext()),patch.object(b,'prepare_jackets',AsyncMock(return_value={})),patch.object(rec,'download_jacket',AsyncMock(return_value=None)),patch.object(native_song,'download_jacket',AsyncMock(return_value=None)),patch.object(player,'player_images',AsyncMock(return_value={})):
         snapshot=await reader.get(bot,e,'player.best')
         for cap,args in [('player.best',{}),('player.b50',{}),('player.profile',{}),('player.progress',{'query':'new'}),('player.recommend',{'filter':''}),('player.song_scores',{'query':'family-alias'})]:
             result=await player.query(bot,e,cap,args)
@@ -98,6 +100,7 @@ async def run():
             if cap=='player.song_scores':
                 assert {r['id'] for r in result['data']['scores']}=={10,8001}
                 assert {r['level_index'] for r in result['data']['scores']}=={3,4,5}
+                assert result['artifacts'][0]['content'].startswith(b'\x89PNG')
         assert len(api_calls)==2 # all consumers share one complete Player/Score[] snapshot.
         result=await player.query(bot,e,'player.song_scores',{'query':'8001 we'})
         assert [r['id'] for r in result['data']['scores']]==[8001]
@@ -105,6 +108,40 @@ async def run():
         assert '不计普通 Rating / OP' in result['public_hint']
         assert 'rating' not in result['data']['scores'][0] and result['data']['scores'][0]['standard_op_applicable'] is False
         assert 'over_power' not in result['data']['scores'][0]['upstream_metrics']
+        assert [r['id'] for r in (await player.query(bot,e,'player.song_scores',{'query':'8001'}))['data']['scores']]==[8001]
+        with patch.object(song_images, 'score_digits', wraps=song_images.score_digits) as digits:
+            result=await player.query(bot,e,'player.song_scores',{'query':'10 basic'})
+            digits.assert_not_called()
+        assert result['code']=='NO_SONG_SCORES' and not result['data']['scores']
+        assert result['artifacts'][0]['content'].startswith(b'\x89PNG')
+        empty_event=e.model_copy(update={'message_id': 204})
+        empty_job=await media_jobs.submit(bot,empty_event,'player.song_scores',{'query':'10 basic'},origin='command')
+        empty_job=await wait(empty_job['data']['job_id'])
+        assert empty_job.result['code']=='NO_SONG_SCORES'
+        assert empty_job.result['data']['artifact_delivery']=='sent'
+
+        # Empty assets and system fonts still preserve score 0, badge slots,
+        # and the identities of simultaneously rendered OAuth players.
+        with patch.object(paths, 'ASSETS_DIR', root/'absent-assets'), patch.object(image_components,'font_faces',return_value=()):
+            image_components.ui.cache_clear()
+            image_components._spacing.cache_clear()
+            image_components._face.cache_clear()
+            try:
+                low = dict(snapshot.scores[0], score=0, rank='d', clear='failed', rating=0, over_power=0, full_combo=None)
+                snapshot_low=replace(snapshot,scores=[low])
+                with patch.object(song_images, 'score_digits', wraps=song_images.score_digits) as digits:
+                    rendered = await player.song_scores(snapshot_low, Catalog(catalog), '10')
+                    assert digits.call_args.args[-1]==0
+                assert rendered['data']['scores'][0]['score']==0
+                left,right=await asyncio.gather(
+                    player.query(bot,e,'player.song_scores',{'query':'10'}),
+                    player.query(bot,event(8),'player.song_scores',{'query':'10'}))
+                assert left['artifacts'][0]['content']!=right['artifacts'][0]['content']
+                reader.invalidate('1','8')
+            finally:
+                image_components.ui.cache_clear()
+                image_components._spacing.cache_clear()
+                image_components._face.cache_clear()
         # Same-ID WE metadata remains a list, never last-write-wins by difficulty.
         saved_catalog=paths.SONGLIST_PATH.read_bytes()
         multiple=json.loads(saved_catalog)
@@ -132,14 +169,14 @@ async def run():
         assert 'score.sync' not in context
         assert not (SOURCE/'nonebot_plugin_unibot/get_player_score.py').exists()
         assert not hasattr(sync,'_run_sync')
-        # A real query job sends images/text under its captured binding.
+        # A real query job sends a score image under its captured binding.
         output=await media_jobs.submit(bot,e,'player.song_scores',{'query':'10'},origin='command')
         job=await wait(output['data']['job_id'])
         assert job.status=='succeeded',job.result
-        assert sent and 'WORLD' in str(sent[-1][1])
+        assert sent and sent[-1][1]['message'][0].type=='image'
+        assert job.result['data']['artifact_delivery']=='sent'
         # A failed query is never staged as successful text media. Its original
         # failure is sent exactly once by the native task notifier.
-        from dataclasses import replace
         failure=pd.failure(pd.PlayerError('INVALID_DATA'))
         staged=AsyncMock();before=len(sent)
         with patch.object(media_jobs,'render',AsyncMock(return_value=failure)):
@@ -152,7 +189,6 @@ async def run():
         assert len(sent)==before+1 and '查询结果已发送' not in str(sent[-1][1])
         assert await sync.private_job_allowed(job)
         # Notifiers may wait in another plugin; they must not retain raw player data.
-        from dataclasses import replace
         original_callback=llm_api._job_notifier
         notices=[]
         async def notice(row):
@@ -229,7 +265,6 @@ async def run():
         assert not reader.cache and len(sent)==before
         mode='ok'
         # Original group policy must also guard old player result materials.
-        from dataclasses import replace
         group_job=replace(job,context_type='group',context_id='123')
         allowed=False
         assert not await pd.job_authorized(group_job)
