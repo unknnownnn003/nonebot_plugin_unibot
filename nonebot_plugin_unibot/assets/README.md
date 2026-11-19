@@ -6,4 +6,6 @@
 - 2.40.00 的 `CHU_UI_Result_01_v10.srd` 提供 Normal、Bronze、Silver、Gold、Platinum 五组结算数字及逗号。
 - 新版本缺少对应标识时可显示曲库版本文本。游戏字体原件没有纳入素材包。玩家名牌、图片称号和头像按当前公开 ID 从落雪获取，文字称号可直接显示。公开资源接口未提供单独的高清立绘入口，本地经过核验的立绘可放在 LocalStore 数据目录 `portrait/<character_id>.png`。
 
-运行 `python tools/check_ui_assets.py` 核对清单内的 PNG、尺寸和 SHA-256。缺少私有贴图时，六类图片仍可生成，版本、难度、评级和徽章会使用文字或色块。个人资料、单曲成绩和谱面进度缺少高清立绘时可使用公开头像。字体使用系统字体及逐字回退，Linux 建议保留 Noto Sans CJK。
+运行 `python tools/check_ui_assets.py` 核对清单内的 PNG、尺寸和 SHA-256。缺少私有贴图时，六类图片仍可生成，版本、难度、评级和徽章会使用文字或色块。单曲成绩优先显示等比缩放的完整立绘，缺少有效立绘时回退到公开头像。
+
+六类图片的普通数字和文字统一使用仓库内的 [DejaVu Sans 2.37](https://dejavu-fonts.github.io/) 和 [Noto Sans CJK SC 2.004](https://github.com/notofonts/noto-cjk/releases/tag/Sans2.004)。部署时必须保留 `assets/fonts/`，不依赖 Windows 或 Ubuntu 系统字体。开放字体许可见 [DejaVu License](fonts/DejaVu-LICENSE.txt) 和 [SIL OFL 1.1](fonts/OFL.txt)，不属于私有 `assets/ui/`；游戏结算数字等贴图保持不变。

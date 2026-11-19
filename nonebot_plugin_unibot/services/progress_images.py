@@ -162,28 +162,26 @@ def portrait_asset(images):
 
 
 def draw_player_info(player, images, official, summary, levels):
-    canvas = Image.new("RGB", (840, 1792), BG)
+    canvas = Image.new("RGB", (840, 1740), BG)
     draw = ImageDraw.Draw(canvas)
-    draw.rectangle((0, 0, 840, 359), fill="#fff7dc")
-    draw.polygon(((487, 0), (840, 0), (840, 359), (319, 359)), fill="#e6f4f5")
-    draw.polygon(((722, 0), (840, 0), (840, 359), (554, 359)), fill="#f4e8f6")
-    brand(canvas, 30, 12, INK)
-    label(canvas, (32, 61, 438, 112), "个人资料", 45, INK)
-    contain(canvas, playerbar(player, images), (25, 119, 507, 345))
+    draw.rectangle((0, 0, 840, 307), fill="#fff7dc")
+    draw.polygon(((487, 0), (840, 0), (840, 307), (319, 307)), fill="#e6f4f5")
+    draw.polygon(((722, 0), (840, 0), (840, 307), (554, 307)), fill="#f4e8f6")
+    brand(canvas, 672, 12, INK)
+    label(canvas, (32, 9, 438, 60), "个人资料", 45, INK)
+    contain(canvas, playerbar(player, images), (25, 67, 507, 293))
     portrait, _ = portrait_asset(images)
     if portrait is not None:
         with portrait:
-            contain(canvas, portrait, (505, 6, 826, 319), trim=True)
+            contain(canvas, portrait, (505, 58, 826, 293), trim=True)
 
-    y = 372
+    y = 320
     rounded(canvas, (16, y, 824, y + 136), 18, PAPER, LINE)
     label(canvas, (30, y + 10, 128, y + 62), "总 OP", 30, INK)
     actual, maximum = official["total_op"], official["estimated_catalog_ceiling"]
     value = fmt(actual) if maximum is None else op_pair(actual, maximum)
     label(canvas, (139, y + 8, 636, y + 61), value, 38, INK, fit=True)
     label(canvas, (644, y + 10, 801, y + 62), percent(official["op_percent"]), 33, TEAL, "right", fit=True)
-    if maximum is not None:
-        label(canvas, (28, y + 53, 130, y + 74), "上限为估算", 14, MUTED, fit=True)
     op_track(canvas, (139, y + 63, 799, y + 68), official["op_percent"])
     if summary is None:
         label(canvas, (139, y + 81, 799, y + 126), "国服曲库不可用 · 暂无谱面统计", 25, MUTED)
@@ -192,9 +190,9 @@ def draw_player_info(player, images, official, summary, levels):
         achievement_track(canvas, (139, y + 76, 799, y + 95), summary)
         tally(canvas, 139, y + 101, 801, summary, profile=True)
 
-    label(canvas, (29, 518, 812, 573), "MASTER / ULTIMA OP", 40, INK)
+    label(canvas, (29, 466, 812, 521), "MASTER / ULTIMA OP", 40, INK)
     for index, (level, stats) in enumerate(levels.items()):
-        y = 585 + index * 99
+        y = 533 + index * 99
         rounded(canvas, (16, y, 824, y + 94), 18, PAPER, LINE)
         rounded(canvas, (29, y + 11, 116, y + 83), 15, "#eaf0fb")
         label(canvas, (29, y + 11, 116, y + 83), level, 34, INK, "center")
@@ -296,13 +294,10 @@ def draw_chulist_image(player, images, query, stats, groups, page, page_count, m
     label(canvas, (39, 263, 660, 309), f"OP   {op_pair(stats['total_op'], stats['theoretical_op'])}",
           39, INK, fit=True)
     label(canvas, (663, 266, 830, 307), percent(stats["op_percent"]), 36, TEAL, "right", fit=True)
-    op_track(canvas, (40, 312, 832, 320), stats["op_percent"])
     achievement_track(canvas, (40, 329, 832, 356), stats)
     tally(canvas, 40, 368, 832, stats)
     label(canvas, (862, 256, 1050, 296), f"ALL  {stats['chart_count']}", 29, INK)
-    label(canvas, (1055, 256, 1396, 296), "筛选谱面 OP 合计", 23, MUTED, "right")
     extra_tally(canvas, 314, stats)
-    label(canvas, (857, 366, 1396, 397), "这里逐谱面累加 · 官方总 OP 按曲取最高", 21, MUTED, fit=True)
 
     total = stats["chart_count"]
     y = HEADER
@@ -317,7 +312,6 @@ def draw_chulist_image(player, images, query, stats, groups, page, page_count, m
         label(canvas, (176, y + 6, 673, y + 40), f"OP   {op_pair(stats['total_op'], stats['theoretical_op'])}",
               26, INK, fit=True)
         label(canvas, (680, y + 6, 815, y + 40), percent(stats["op_percent"]), 26, TEAL, "right", fit=True)
-        op_track(canvas, (176, y + 41, 815, y + 46), stats["op_percent"])
         achievement_track(canvas, (176, y + 50, 815, y + 71), stats)
         tally(canvas, 176, y + 78, 815, stats)
         extra_tally(canvas, y + 34, stats)

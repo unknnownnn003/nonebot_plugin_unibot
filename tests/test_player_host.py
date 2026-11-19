@@ -16,11 +16,12 @@ import asyncio, copy, importlib.util, json, shutil, sys, time
 from decimal import Decimal
 from contextlib import nullcontext
 from dataclasses import replace
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import patch, AsyncMock
 from cryptography.fernet import Fernet
-from PIL import Image, ImageColor
+from PIL import Image, ImageColor, ImageFont
 import httpx, nonebot
 root=Path.cwd()
 shutil.copytree(SOURCE/'nonebot_plugin_unibot',root/'nonebot_plugin_unibot',ignore=shutil.ignore_patterns('data','__pycache__'))
@@ -179,8 +180,75 @@ async def check_progress(snapshot):
     result = await op.query_progress(small, '14+ --page 4', large)
     assert result['code']=='INVALID_ARGUMENT' and '1–3' in result['fallback_text']
 
+def check_image_polish():
+    for filename, sample in [
+        ("DejaVuSans.ttf", "0.98%✪ǂχρόνοςΩ★—"),
+        ("NotoSansCJKsc-Regular.otf", "谱面进度鳥の詩"),
+    ]:
+        bundled = paths.ASSETS_DIR / "fonts" / filename
+        for glyph in sample:
+            assert image_components._face(glyph) == (str(bundled), 0, glyph)
+        assert image_components._font(str(bundled), 0, 24).layout_engine == ImageFont.Layout.BASIC
+    unicode_font = root / "字体" / bundled.name
+    unicode_font.parent.mkdir()
+    shutil.copyfile(bundled, unicode_font)
+    for size in range(20, 32):
+        assert image_components._font(str(unicode_font), 0, size).getlength("谱面") > 0
+    assert image_components._fonts.large.cache_info().currsize <= 4
+    image_components._fonts.large.cache_clear()
+    image_components.font_faces.cache_clear()
+    with patch.object(paths, 'ASSETS_DIR', root / 'absent-assets'):
+        try:
+            image_components.font_faces()
+        except image_components.RenderFontError as error:
+            assert "Missing or invalid UniBot render font" in str(error)
+        else:
+            raise AssertionError("Rendering must not silently accept missing fonts")
+
+    def solid(size, color):
+        with Image.new("RGB", size, color) as canvas:
+            return image_components.png(canvas)
+
+    portrait_color, avatar_color = "#123456", "#c45123"
+    avatar = solid((64, 64), avatar_color)
+    with Image.new("RGB", (512, 768), "#56829a") as canvas:
+        canvas.paste(portrait_color, (0, 384, 512, 768))
+        portrait = image_components.png(canvas)
+    song = Catalog(catalog).query_song(10)
+    row = dict(id=8001, level_index=5, score=1009345, charts=[song["difficulties"][-1]],
+               standard_rating_applicable=False, standard_op_applicable=False)
+    with patch.object(song_images, 'label', wraps=song_images.label) as labels:
+        content = song_images.render_song_scores(song, None, {}, dict(character=avatar, portrait=portrait),
+                                                 [row], None, {})
+        assert not any("ID 8001" in str(call.args[2]) for call in labels.call_args_list)
+    with Image.open(BytesIO(content)) as rendered:
+        assert rendered.getpixel((815, 20)) == ImageColor.getrgb("#56829a")
+        assert rendered.getpixel((815, 145)) == ImageColor.getrgb(portrait_color)
+    for missing in (None, avatar):
+        content = song_images.render_song_scores(song, None, {}, dict(character=avatar, portrait=missing),
+                                                 [row], None, {})
+        with Image.open(BytesIO(content)) as rendered:
+            assert rendered.getpixel((815, 145)) == ImageColor.getrgb(avatar_color)
+
+    rows = cp.master_ultima(cp.eligible_charts(Catalog(catalog), []))
+    stats = cp.summarize(rows)
+    with patch.object(pi, 'label', wraps=pi.label) as labels, patch.object(pi, 'op_track') as track:
+        pi.draw_chulist_image({}, {}, "14+", stats, pi.paginate(rows, grouped=True)[0], 1, 1, set())
+        track.assert_not_called()
+        assert not any(str(call.args[2]).startswith(("这里逐", "筛选谱面 OP 合计"))
+                       for call in labels.call_args_list)
+    official, summary, levels = cp.profile_progress({"over_power": 100}, rows)
+    with patch.object(pi, 'label', wraps=pi.label) as labels, patch.object(pi, 'brand', wraps=pi.brand) as brand:
+        content = pi.draw_player_info({}, {}, official, summary, levels)
+        assert brand.call_args.args[1] > 420
+        assert not any(call.args[2] == "上限为估算" for call in labels.call_args_list)
+    with Image.open(BytesIO(content)) as rendered:
+        assert rendered.size == (840, 1740)
+
+
 async def run():
     global allowed,mode,started,release
+    check_image_polish()
     bind();bind('8')
     with patch.object(group_policy,'enabled',side_effect=lambda *a:allowed or getattr(a[0],'group_id',None) is None),patch.object(group_policy,'scope',side_effect=lambda *a:nullcontext()),patch.object(b,'prepare_jackets',AsyncMock(return_value={})),patch.object(rec,'download_jacket',AsyncMock(return_value=None)),patch.object(native_song,'download_jacket',AsyncMock(return_value=None)),patch.object(player,'player_images',AsyncMock(return_value={})),patch.object(profiles,'player_images',AsyncMock(return_value={})),patch.object(op,'player_images',AsyncMock(return_value={})),patch.object(op,'prefetch_jackets',AsyncMock()):
         snapshot=await reader.get(bot,e,'player.best')
@@ -231,12 +299,10 @@ async def run():
         assert empty_job.result['code']=='NO_SONG_SCORES'
         assert empty_job.result['data']['artifact_delivery']=='sent'
 
-        # Empty assets and system fonts still preserve score 0, badge slots,
+        # Missing private artwork still preserves score 0, badge slots,
         # and the identities of simultaneously rendered OAuth players.
-        with patch.object(paths, 'ASSETS_DIR', root/'absent-assets'), patch.object(image_components,'font_faces',return_value=()):
+        with patch.object(image_components.resources, 'load_static_asset', return_value=None):
             image_components.ui.cache_clear()
-            image_components._spacing.cache_clear()
-            image_components._face.cache_clear()
             try:
                 low = dict(snapshot.scores[0], score=0, rank='d', clear='failed', rating=0, over_power=0, full_combo=None)
                 snapshot_low=replace(snapshot,scores=[low])
@@ -252,11 +318,9 @@ async def run():
                     left,right=await asyncio.gather(player.query(bot,e,cap,args), player.query(bot,event(8),cap,args))
                     assert all(result['status']=='ok' for result in (left,right))
                     assert left['artifacts'][0]['content']!=right['artifacts'][0]['content']
-                reader.invalidate('1','8')
             finally:
                 image_components.ui.cache_clear()
-                image_components._spacing.cache_clear()
-                image_components._face.cache_clear()
+                reader.invalidate('1','8')
         # Same-ID WE metadata remains a list, never last-write-wins by difficulty.
         saved_catalog=paths.SONGLIST_PATH.read_bytes()
         multiple=json.loads(saved_catalog)
@@ -297,6 +361,9 @@ async def run():
         with patch.object(media_jobs,'render',AsyncMock(return_value=failure)):
             failed=await media_jobs.execute(bot,e,job,sync._store,NS(stage=staged))
         assert failed['code']=='INVALID_DATA' and 'artifact_delivery' not in failed['data']
+        with patch.object(media_jobs,'render',AsyncMock(side_effect=image_components.RenderFontError("missing"))):
+            font_failure=await media_jobs.execute(bot,e,job,sync._store,NS(stage=staged))
+        assert font_failure['code']=='RENDER_FAILED' and 'assets/fonts' in font_failure['public_hint']
         staged.assert_not_awaited()
         assert len(sent)==before
         with patch('nonebot.get_bot',return_value=bot):

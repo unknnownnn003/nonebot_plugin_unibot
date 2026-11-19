@@ -4,8 +4,6 @@ from bisect import bisect_right
 from functools import lru_cache
 from io import BytesIO
 import json
-import os
-from pathlib import Path
 from threading import local
 import unicodedata
 
@@ -32,55 +30,57 @@ BADGES = {
 _fonts = local()
 
 
+class RenderFontError(RuntimeError):
+    pass
+
+
 @lru_cache(maxsize=1)
 def font_faces():
-    windows = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
-    roots = (windows,) if os.name == "nt" else (Path("/usr/share/fonts"), Path("/usr/local/share/fonts"))
-    names = ("bahnschrift.ttf", "msyhbd.ttc", "msgothic.ttc", "simsun.ttc") if os.name == "nt" else (
-        "DejaVuSans.ttf", "SourceHanSansSC-Bold.otf", "NotoSansCJK-Bold.ttc",
-        "NotoSansCJK-Regular.ttc", "SourceHanSansJP-Regular.otf", "wqy-microhei.ttc")
     faces = []
-    for name in names:
-        path = next((path for root in roots for path in sorted(root.rglob(name))), None)
-        if path is None:
-            continue
-        indices = (2, 0) if name.startswith("NotoSansCJK") else (0,)
-        for index in indices:
-            try:
-                with TTFont(path, fontNumber=index, lazy=True) as font:
-                    faces.append((str(path), index, frozenset(font.getBestCmap() or ())))
-            except (OSError, TTLibError):
-                continue
+    for name in ("DejaVuSans.ttf", "NotoSansCJKsc-Regular.otf"):
+        path = resources.paths.ASSETS_DIR / "fonts" / name
+        try:
+            with TTFont(path, lazy=True) as font:
+                coverage = frozenset(font.getBestCmap() or ())
+                if not coverage:
+                    raise TTLibError("No Unicode glyph map")
+        except (OSError, TTLibError) as error:
+            raise RenderFontError(f"Missing or invalid UniBot render font: {name}") from error
+        faces.append((str(path), 0, coverage))
     return tuple(faces)
 
 
 def _load_font(path, index, size):
-    return ImageFont.truetype(path, size, index=index) if path else ImageFont.load_default(size=size)
+    try:
+        return ImageFont.truetype(path, size, index=index, layout_engine=ImageFont.Layout.BASIC)
+    except OSError as error:
+        raise RenderFontError("Unable to load a bundled UniBot render font") from error
 
 
 def _font(path, index, size):
-    if not hasattr(_fonts, "get"):
-        _fonts.get = lru_cache(maxsize=128)(_load_font)
-    return _fonts.get(path, index, size)
+    if not hasattr(_fonts, "large"):
+        _fonts.large = lru_cache(maxsize=4)(_load_font)
+        _fonts.small = lru_cache(maxsize=32)(_load_font)
+    cache = _fonts.large if path.endswith(".otf") else _fonts.small
+    return cache(path, index, size)
 
 
 @lru_cache(maxsize=2048)
-def _face(cluster, cjk_first=False):
+def _face(cluster):
     codes = {ord(char) for char in cluster if unicodedata.category(char) != "Cf"
              and char not in "\ufe0e\ufe0f"}
     faces = font_faces()
-    if cjk_first:
-        faces = sorted(faces, key=lambda face: ord("中") not in face[2])
     for path, index, coverage in faces:
         if codes <= coverage:
             return path, index, cluster
-    return None, 0, cluster if cluster.isascii() else "?"
+    path, index, _ = faces[0]
+    return path, index, "?"
 
 
-def _line(value, size, cjk_first=False):
+def _line(value, size):
     spans = []
     for cluster in regex.findall(r"\X", value):
-        path, index, glyph = _face(cluster, cjk_first)
+        path, index, glyph = _face(cluster)
         font = _font(path, index, size)
         if spans and spans[-1][0] is font:
             spans[-1][1] += glyph
@@ -121,21 +121,22 @@ def wrap(value, size, width):
     return rows + [line.rstrip()]
 
 
-def label(canvas, box, value, size, color, align="left", fit=False, *, cjk_first=False):
+def label(canvas, box, value, size, color, align="left", fit=False):
     x, y, right, bottom = box
     if right <= x or bottom <= y:
         return
     value = " ".join(str(value).split())
     clusters = regex.findall(r"\X", value)
     while True:
-        parts, (l, t, r, b) = _line(value, size, cjk_first)
+        parts, (l, t, r, b) = _line(value, size)
         if r - l <= right - x and b - t <= bottom - y:
             break
         if not fit and r - l > right - x and clusters:
             clusters.pop()
             value = "".join(clusters) + "..."
         elif size > 1:
-            size -= 1
+            scale = max((r - l) / (right - x), (b - t) / (bottom - y))
+            size = max(1, min(size - 1, int(size / scale)))
         else:
             return
     left = {"left": x, "right": right - (r - l), "center": x + (right - x - r + l) // 2}[align] - l
@@ -342,8 +343,7 @@ def playerbar(player, images):
         contain(canvas, avatar, (468, 87, 550, 169))
     nickname_left = 229 if player.get("level") is not None else 148
     nickname = player.get("name") or "—"
-    mixed_script = bool(regex.search(r"[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]", nickname))
-    label(canvas, (nickname_left, 96, 455, 142), nickname, 30, "#1a1e2c", cjk_first=mixed_script)
+    label(canvas, (nickname_left, 96, 455, 142), nickname, 30, "#1a1e2c")
     reborn = player.get("reborn_count") or 0
     if reborn:
         contain(canvas, ui("playerbar", "star"), (142, 86, 182, 126))

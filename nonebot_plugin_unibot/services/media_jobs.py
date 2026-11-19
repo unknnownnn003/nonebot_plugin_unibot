@@ -89,6 +89,7 @@ async def render(bot, event, job, checkpoint=None):
 
 async def execute(bot, event, job, store, presentations):
     from nonebot.adapters.onebot.v11 import MessageSegment
+    from .image_components import RenderFontError
     from .presentation_store import scope
     from .player_data import job_authorized, PLAYER_CAPABILITIES, PlayerError, failure
     from . import group_policy
@@ -168,6 +169,9 @@ async def execute(bot, event, job, store, presentations):
         return failure(error)
     except asyncio.CancelledError:
         raise
+    except RenderFontError:
+        return outcome("RENDER_FAILED", "图片字体缺失或损坏，请管理员检查插件的 assets/fonts 目录。",
+                       status="unavailable")
     except Exception:
         result = outcome("MEDIA_DELIVERY_UNKNOWN" if started else "QUERY_FAILED",
             "媒体投递结果需要核对。" if started else "查询或图片生成失败。",

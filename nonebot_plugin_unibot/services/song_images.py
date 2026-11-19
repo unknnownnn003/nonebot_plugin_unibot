@@ -263,18 +263,14 @@ def render_song_scores(song, jacket, player, images, rows, song_op, maxima):
     start = 162 + banner.height + summary_height + (tags.height if tags else 0)
     canvas = Image.new("RGB", (WIDTH, start + max(1, len(rows)) * 202 + 12), BG)
     contain(canvas, playerbar(player, images), (23, 2, 465, 159))
-    portrait = decode_png(images.get("portrait"))
-    bounds = portrait.getbbox() if portrait is not None else None
-    if bounds:
-        left, top, right, bottom = bounds
-        height = max(1, round((bottom - top) * .45))
-        width = max(1, round(height * 462 / 237))
-        x = (left + right - width) // 2
-        bust = portrait.crop((x, top, x + width, top + height))
-        display_width = round(162 * width / height)
-        contain(canvas, bust, (940 - display_width, 0, 940, 162))
-    else:
-        contain(canvas, decode_png(images.get("character")), (790, 0, 940, 162), trim=True)
+    character_box = (790, 0, 940, 162)
+    portrait = decode_png(images.get("portrait"), minimum_side=512)
+    drawn = False
+    if portrait is not None:
+        with portrait:
+            drawn = contain(canvas, portrait, character_box, trim=True)
+    if not drawn:
+        contain(canvas, decode_png(images.get("character")), character_box, trim=True)
     canvas.paste(banner, (0, 162))
     y = 162 + banner.height
     if song_op is not None:
@@ -322,8 +318,4 @@ def render_song_scores(song, jacket, player, images, rows, song_op, maxima):
             op = row.get("over_power")
             actual = Decimal(str(op)) if op is not None else None
             label(canvas, box, f"OP   {_op(actual, maximum, detail=True)}", 23, INK, "center", fit=True)
-        if index == 5:
-            label(canvas, (32, y + 142, 920, y + 178),
-                  f"WORLD’S END  ·  ID {row['id']}" + ("  ·  同 ID 多谱面" if len(charts) > 1 else ""),
-                  23, MUTED, fit=True)
     return png(canvas)

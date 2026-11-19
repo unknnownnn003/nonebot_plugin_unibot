@@ -21,6 +21,8 @@ root=Path.cwd()
 for name in ['nonebot_plugin_unibot','nonebot_plugin_unknnownnn','nonebot_plugin_llmchat']:
     source=SOURCE.parent/name/(name if name!='nonebot_plugin_llmchat' else '')
     shutil.copytree(source,root/name,ignore=shutil.ignore_patterns('.*','data','config','cache','__pycache__','tests','docs','previews','dist','tools','assets'))
+    if name=='nonebot_plugin_unibot':
+        shutil.copytree(source/'assets/fonts',root/name/'assets/fonts')
 nonebot.init(driver='~fastapi',llmchat={'api_presets':[{'name':'fixture','api_base':'https://fixture.invalid/v1','api_key':'fixture-key','model_name':'fixture','support_tools':True}]},localstore_data_dir=str(root/'data'),localstore_config_dir=str(root/'config'),localstore_cache_dir=str(root/'cache'))
 from nonebot.adapters.onebot.v11 import Adapter,Bot
 nonebot.get_driver().register_adapter(Adapter)
