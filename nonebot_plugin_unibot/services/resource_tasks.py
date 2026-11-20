@@ -39,19 +39,42 @@ async def refresh_songlist(context):
             raise ValueError("Missing CN resource version")
         songs = await context.network(client.get(s.BASE_URL + s.API_PATH, params={"notes": True, "version": version}, timeout=30), "fetching_songlist")
         songs.raise_for_status()
-        aliases = await context.network(client.get(s.BASE_URL + "/api/v0/chunithm/alias/list", timeout=30), "fetching_song_aliases")
-        aliases.raise_for_status()
-        payload, aliases = songs.json(), aliases.json()
+        from .song_aliases import URLS, parse_tsv
+        import csv
+        external, unavailable = {}, []
+        try:
+            response = await context.network(client.get(s.BASE_URL + "/api/v0/chunithm/alias/list", timeout=30), "fetching_song_aliases")
+            response.raise_for_status()
+            aliases = response.json()["aliases"]
+            if not aliases or not isinstance(aliases, list) or not all(
+                isinstance(r, dict) and str(r.get("song_id", "")).isdigit() and isinstance(r.get("aliases"), list)
+                and all(isinstance(a, str) for a in r["aliases"]) for r in aliases
+            ):
+                raise ValueError("Invalid LXNS aliases")
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            aliases = []
+            unavailable.append("lxns")
+        for source, url in URLS.items():
+            try:
+                response = await context.network(client.get(url, timeout=20), "fetching_" + source)
+                response.raise_for_status()
+                external[source] = parse_tsv(response.content)
+            except (httpx.HTTPError, ValueError, csv.Error, KeyError):
+                unavailable.append(source)
+        payload = songs.json()
         if version not in {v.get("version") for v in payload.get("versions", []) if isinstance(v, dict)}:
             raise ValueError("CN version absent from catalog")
         payload["rating_version"] = version
-    counts = await context.write("committing_songlist", s.commit_lxns_songlist, payload, aliases)
+    counts = await context.write("committing_songlist", s.commit_lxns_songlist, payload, aliases, external)
+    counts["unavailable_alias_sources"] = unavailable
     summary = [
         f"{label}：新增 {counts[kind + '_added']}，变更 {counts[kind + '_changed']}，"
         f"移除 {counts[kind + '_removed']}，新停用 {counts[kind + '_disabled']}"
         for kind, label in (("songs", "歌曲"), ("charts", "谱面"))
     ] if counts["changes_available"] else ["旧曲库元信息异常，已保留备份，无法可靠计算差异。"]
     hint = f"国服曲库已更新，共 {counts['song_count']} 首，保留及合并别名 {counts['alias_count']} 条。"
+    if unavailable:
+        hint += " 未更新来源：" + "、".join(unavailable)
     return outcome(hint=hint + "\n" + "\n".join(summary), data=counts)
 
 

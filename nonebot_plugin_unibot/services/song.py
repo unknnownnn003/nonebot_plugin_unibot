@@ -20,13 +20,24 @@ async def change_alias(song_id, alias, *, delete=False):
                          "action": "delete" if delete else "add"})
 
 
+def page_hint(result):
+    count = result.get("total", len(result["ambiguous"]))
+    return f"共 {count} 首，第 {result.get('page', 1)}/{(count + 7) // 8} 页。按 ID 选择，或在查询词后加 --page 页码。"
+
+
 async def prepare(query, *, catalog=None):
+    import re
     from .. import song as s
+    page = 1
+    suffix = re.fullmatch(r"(.+?)\s+--page\s+([1-9][0-9]{0,8})", query.strip())
+    if suffix:
+        query, page = suffix[1], int(suffix[2])
     options = {"catalog": catalog} if catalog is not None else {}
-    matches = await async_call(s.find_song_matches, query, limit=8, **options)
-    local_song, ambiguous = s.pick_song_match(matches)
-    import copy
-    return copy.deepcopy({"song": local_song, "ambiguous": ambiguous})
+    matches = await async_call(s.find_song_matches, query, **options)
+    song, ambiguous = s.pick_song_match(matches)
+    total = len(ambiguous)
+    page = min(page, max(1, (total + 7) // 8))
+    return {"song": song, "ambiguous": ambiguous[(page-1)*8:page*8], "total": total, "page": page}
 
 
 async def search(query, *, prepared=None):
@@ -35,9 +46,9 @@ async def search(query, *, prepared=None):
     local_song, ambiguous = resolved["song"], resolved["ambiguous"]
     if ambiguous:
         jackets = await asyncio.gather(*(s.download_match_jacket(m) for m in ambiguous[:8]))
-        content = await async_call(s.render_song_candidates_image, query, ambiguous[:8], list(jackets))
-        return outcome("AMBIGUOUS_TARGET", "请用候选歌曲 ID 选择。", status="needs_input",
-                       data={"candidates": [{"id": m["song"].get("id"), "title": m["song"].get("title")} for m in ambiguous[:8]]},
+        content = await async_call(s.render_song_candidates_image, f"{query}  ·  共 {resolved.get('total', len(ambiguous))} 首 / 第 {resolved.get('page', 1)} 页", ambiguous, list(jackets))
+        return outcome("AMBIGUOUS_TARGET", page_hint(resolved), status="needs_input",
+                       data={"total": resolved.get("total", len(ambiguous)), "page": resolved.get("page", 1), "candidates": [{"id": m["song"].get("id"), "title": m["song"].get("title")} for m in ambiguous[:8]]},
                        artifacts=[image(content)])
     if not local_song:
         return outcome("NOT_FOUND", "没有找到匹配的曲目。", status="needs_input")
@@ -54,12 +65,11 @@ async def search(query, *, prepared=None):
 
 
 async def aliases(query):
-    from .. import song as s
-    matches = await async_call(s.find_song_matches, query, limit=8)
-    song, ambiguous = s.pick_song_match(matches)
+    resolved = await prepare(query)
+    song, ambiguous = resolved["song"], resolved["ambiguous"]
     if ambiguous:
-        return outcome("AMBIGUOUS_TARGET", "请提供更精确的名称或ID。", status="needs_input",
-                       data={"candidates": [{"id": m["song"].get("id"), "title": m["song"].get("title")} for m in ambiguous[:8]]})
+        return outcome("AMBIGUOUS_TARGET", page_hint(resolved), status="needs_input",
+                       data={"total": resolved.get("total", len(ambiguous)), "page": resolved.get("page", 1), "candidates": [{"id": m["song"].get("id"), "title": m["song"].get("title")} for m in ambiguous[:8]]})
     if song is None:
         return outcome("NOT_FOUND", "未找到匹配的曲目。", status="needs_input")
     return outcome(data={"id": song.get("id"), "title": song.get("title"), "aliases": song.get("aliases", [])})
@@ -69,7 +79,7 @@ async def detail(song_id):
     """Render details for one explicit local song ID without fuzzy selection."""
     from .. import song as s
 
-    matches = await async_call(s.find_song_matches, str(song_id), limit=8)
+    matches = await async_call(s.find_song_matches, str(song_id))
     local_song = next((item["song"] for item in matches
                        if str(item.get("song", {}).get("id")) == str(song_id)), None)
     if local_song is None:

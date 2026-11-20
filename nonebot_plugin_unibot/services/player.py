@@ -117,8 +117,9 @@ async def song_scores(snapshot, catalog, query, level_index=None):
     prepared = await prepare(query, catalog=catalog)
     if not prepared["song"]:
         choices = [{"id": row["song"]["id"], "title": row["song"].get("title")} for row in prepared["ambiguous"][:8]]
-        text = "请用候选歌曲 ID 选择：" + "、".join(f"{r['id']} {r['title']}" for r in choices) if choices else "未找到歌曲，请使用歌名、别名或原始ID。"
-        return outcome("AMBIGUOUS_TARGET" if choices else "NOT_FOUND", text, status="needs_input", data={"candidates": choices})
+        from .song import page_hint
+        text = page_hint(prepared) + " " + "、".join(f"{r['id']} {r['title']}" for r in choices) if choices else "未找到歌曲，请使用歌名、别名或原始ID。"
+        return outcome("AMBIGUOUS_TARGET" if choices else "NOT_FOUND", text, status="needs_input", data={"candidates": choices, "total": prepared["total"], "page": prepared["page"]})
     song_id = prepared["song"]["id"]
     if song_id not in catalog.songs:
         raise PlayerError("INVALID_DATA")

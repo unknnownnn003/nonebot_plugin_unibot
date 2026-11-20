@@ -42,7 +42,8 @@ from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 
 def _raw_term(value):
-    return " ".join(value.casefold().split())
+    from .services.song_aliases import normalized
+    return normalized(value)
 
 
 def _compact(value):
@@ -69,19 +70,17 @@ def _term_forms(raw):
     return tuple(sorted(forms - {""}))
 
 
-def _partial_score(queries, terms):
+def _fuzzy_score(queries, terms):
     score = 0.0
     for query in queries:
         for term in terms:
-            if query in term:
-                score = max(score, 0.70 + 0.25 * len(query) / len(term))
-            elif len(query) >= 4 and min(len(query), len(term)) >= 3:
+            if len(query) >= 4 and min(len(query), len(term)) >= 3:
                 minimum = 0.75 if len(query) < 6 else 0.70
                 matcher = SequenceMatcher(None, query, term, autojunk=False)
                 if matcher.real_quick_ratio() >= minimum and matcher.quick_ratio() >= minimum:
                     similarity = matcher.ratio()
                     if similarity >= minimum:
-                        score = max(score, similarity * 0.72)
+                        score = max(score, similarity * 0.69)
     return score
 
 
@@ -104,62 +103,29 @@ def _write_songlist_data(data: Dict[str, Any]) -> None:
     os.replace(temp_path, SONGLIST_PATH)
 
 
-def set_song_aliases(song_id: str, aliases: List[str]) -> Optional[Dict[str, Any]]:
-    """Replace one song's local aliases and return the updated song."""
+def _edit_alias(song_id, alias_name, remove):
+    from .services.song_aliases import edit_local
     with SONGLIST_LOCK:
         data = _read_songlist_data()
-        if data is None:
-            raise OSError("读取 songlist.json 失败")
-        if not isinstance(data, dict):
-            raise ValueError("songlist.json 格式异常")
-        for song_data in data.get("songs", []):
-            if isinstance(song_data, dict) and song_data.get("data_source") in (None, "lx", "lxns", "lxns_cn") and str(song_data.get("id")) == str(song_id):
-                song_data["aliases"] = list(aliases)
-                _write_songlist_data(data)
-                return song_data
-    return None
-
-
-def add_song_alias(song_id: str, alias_name: str) -> Tuple[bool, bool]:
-    """Add an alias using the same locked songlist writer as admin API."""
-    with SONGLIST_LOCK:
-        data = _read_songlist_data()
-        if not isinstance(data, dict):
+        if not data or not any(str(row["id"]) == str(song_id) and row.get("data_source") in
+                               (None, "lx", "lxns", "lxns_cn") for row in data["songs"]):
             return False, False
-        for song_data in data.get("songs", []):
-            if isinstance(song_data, dict) and song_data.get("data_source") in (None, "lx", "lxns", "lxns_cn") and str(song_data.get("id")) == str(song_id):
-                aliases = song_data.setdefault("aliases", [])
-                if not isinstance(aliases, list):
-                    aliases = []
-                    song_data["aliases"] = aliases
-                if alias_name in aliases:
-                    return True, False
-                aliases.append(alias_name)
-                _write_songlist_data(data)
-                return True, True
-    return False, False
+        changed = edit_local(data, str(song_id), alias_name, remove)
+        if changed:
+            _write_songlist_data(data)
+        return True, changed
 
 
-def remove_song_alias(song_id: str, alias_name: str) -> Tuple[bool, bool]:
-    """Remove an alias using the same locked songlist writer as admin API."""
-    with SONGLIST_LOCK:
-        data = _read_songlist_data()
-        if not isinstance(data, dict):
-            return False, False
-        for song_data in data.get("songs", []):
-            if isinstance(song_data, dict) and song_data.get("data_source") in (None, "lx", "lxns", "lxns_cn") and str(song_data.get("id")) == str(song_id):
-                aliases = song_data.get("aliases", [])
-                if not isinstance(aliases, list):
-                    return True, False
-                if alias_name not in aliases:
-                    return True, False
-                aliases.remove(alias_name)
-                _write_songlist_data(data)
-                return True, True
-    return False, False
+def add_song_alias(song_id, alias_name):
+    return _edit_alias(song_id, alias_name, False)
 
-def find_song_matches(query: str, limit: int = 8, *, catalog=None, exact_only=False) -> List[Dict[str, Any]]:
-    if limit <= 0 or not query.strip():
+
+def remove_song_alias(song_id, alias_name):
+    return _edit_alias(song_id, alias_name, True)
+
+
+def find_song_matches(query: str, *, catalog=None, exact_only=False) -> List[Dict[str, Any]]:
+    if not query.strip():
         return []
     if catalog is None:
         from .services.song_model import Catalog
@@ -174,8 +140,8 @@ def find_song_matches(query: str, limit: int = 8, *, catalog=None, exact_only=Fa
     is_id = numeric.isascii() and numeric.isdecimal()
     versions = catalog.metadata.get("versions", [])
 
-    def build_match(sid, score, source, value):
-        view = catalog.query_song(sid)
+    def build_match(sid, score, source, value, full=True):
+        view = catalog.query_song(sid) if full else catalog.songs[sid].as_dict()
         view["_versions"] = versions
         return {"song": view, "score": score, "source": source, "matched": value}
 
@@ -187,7 +153,7 @@ def find_song_matches(query: str, limit: int = 8, *, catalog=None, exact_only=Fa
         if sid in catalog.songs:
             return [build_match(sid, 1.2, "ID", str(sid))]
 
-    query_forms = set(_term_forms(raw))
+    query_forms = {raw, *_term_forms(raw)}
     exact, searchable = {}, []
     for sid, song in catalog.songs.items():
         attrs = song.attributes
@@ -196,49 +162,56 @@ def find_song_matches(query: str, limit: int = 8, *, catalog=None, exact_only=Fa
         terms = [("曲名", title)]
         if isinstance(aliases, list):
             terms.extend(("别名", alias) for alias in aliases if isinstance(alias, str))
-        group_id = sid if is_id else catalog.parent_id(sid)
         for source, value in terms:
             term = _raw_term(value)
             if not term:
                 continue
-            forms = _term_forms(term)
+            forms = {term, *_term_forms(term)}
             if term == raw:
                 score = 1.05
             elif query_forms.intersection(forms):
                 score = 1.0
-            elif not exact_only and not is_id:
-                searchable.append((group_id, sid, source, value, forms))
+            elif not exact_only:
+                searchable.append((sid, source, value, forms))
                 continue
             else:
                 continue
-            key = (-score, source != "曲名", group_id, sid, value)
-            if group_id not in exact or key < exact[group_id][0]:
-                exact[group_id] = (key, source)
+            key = (-score, source != "曲名", sid, value)
+            if sid not in exact or key < exact[sid][0]:
+                exact[sid] = (key, source)
 
     if exact:
         ranked = sorted(exact.values())
         # Keep collisions at the strongest exact tier. Never let the display
         # limit turn a collision into an automatic selection.
         ranked = [row for row in ranked if row[0][0] == ranked[0][0][0]]
-        return [build_match(key[2], -key[0], source, key[4]) for key, source in ranked[:max(2, limit)]]
+        return [build_match(key[2], -key[0], source, key[3], len(ranked) == 1) for key, source in ranked]
     if exact_only:
         return []
-    if is_id:
-        ids = sorted(sid for sid in catalog.songs if str(sid).startswith(numeric))
-        return [build_match(sid, 0.75, "ID", str(sid)) for sid in ids[:limit]]
     matches = {}
-    for group_id, sid, source, value, forms in searchable:
-        score = _partial_score(query_forms, forms)
-        if score:
-            key = (-score, source != "曲名", group_id, sid, value)
-            if group_id not in matches or key < matches[group_id][0]:
-                matches[group_id] = (key, source)
-    return [build_match(key[2], -key[0], source, key[4])
-            for key, source in sorted(matches.values())[:limit]]
+    if is_id:
+        for sid in catalog.songs:
+            if str(sid).startswith(numeric):
+                matches[sid] = ((-0.75, False, sid, str(sid)), "ID")
+    for fuzzy in (False, True):
+        for sid, source, value, forms in searchable:
+            if fuzzy:
+                score = _fuzzy_score(query_forms, forms)
+            else:
+                score = max((0.70 + 0.25 * len(q) / len(term)
+                             for q in query_forms for term in forms if q in term), default=0)
+            if score:
+                key = (-score, source != "曲名", sid, value)
+                if sid not in matches or key < matches[sid][0]:
+                    matches[sid] = (key, source)
+        if matches:
+            break
+    return [build_match(key[2], -key[0], source, key[3], len(matches) == 1)
+            for key, source in sorted(matches.values())]
 
 
 def pick_song_match(matches: List[Dict[str, Any]]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
-    if len(matches) == 1 and matches[0]["score"] >= 1:
+    if len(matches) == 1 and matches[0]["score"] >= 0.7:
         return matches[0]["song"], []
     return None, matches
 
@@ -317,7 +290,7 @@ def clamp_wrapped_text(text: str, font: ImageFont.FreeTypeFont, max_width: int, 
     return "\n".join(lines)
 
 def match_song_by_query(query: str) -> Optional[Dict[str, Any]]:
-    match, _ = pick_song_match(find_song_matches(query, limit=8, exact_only=True))
+    match, _ = pick_song_match(find_song_matches(query))
     return match
 
 def make_empty_jacket(size: int = 200) -> Image.Image:
@@ -335,7 +308,12 @@ def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jack
     row_h = 118
     header_h = 112
     footer_h = 58
-    height = header_h + row_h * len(matches) + footer_h
+    font_head = get_font(22, "Medium")
+    measure = ImageDraw.Draw(Image.new("L", (1, 1)))
+    titles = [wrap_text_with_height(f"{i}. {m['song']['title']}", font_head, 426, measure)
+              for i, m in enumerate(matches, 1)]
+    heights = [max(row_h, h + 74) for _, _, h in titles]
+    height = header_h + sum(heights) + footer_h
 
     img = Image.new("RGBA", (card_width, height), BG_COLOR)
     draw = ImageDraw.Draw(img)
@@ -350,6 +328,7 @@ def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jack
 
     y = header_h
     for index, match in enumerate(matches, 1):
+        row_h = heights[index - 1]
         song = match["song"]
         title = str(song.get("title", "Unknown"))
         artist = str(song.get("artist", "-"))
@@ -366,10 +345,10 @@ def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jack
         img.paste(jacket, (58, y + 18), jacket if jacket.mode == "RGBA" else None)
 
         text_x = 158
-        title_wrapped = clamp_wrapped_text(f"{index}. {title}", font_head, 430, 2, draw)
+        title_wrapped = titles[index - 1][0]
         title_h = draw.multiline_textbbox((0, 0), title_wrapped, font=font_head)[3]
         draw_text(draw, (text_x, y + 18), title_wrapped, font_head, TEXT_MAIN)
-        meta_y = y + 18 + min(title_h, 52) + 6
+        meta_y = y + 18 + title_h + 6
         artist_wrapped, _, _ = wrap_text_with_height(f"ID: {song_id}   Artist: {artist}", font_small, 430, draw)
         draw_text(draw, (text_x, meta_y), artist_wrapped, font_small, TEXT_SUB)
 
@@ -395,17 +374,28 @@ async def download_match_jacket(match: Dict[str, Any]) -> Optional[Image.Image]:
     return await download_jacket(song_id)
 
 
+lookup_cmd = on_command("查歌", priority=10, block=True)
+
+
+async def _search_reply(matcher, bot, event, query):
+    from .services.media_jobs import submit
+    from .services.results import send_command_result
+    if not query:
+        await matcher.finish("请输入曲名、别名或歌曲 ID。")
+    result = await submit(bot, event, "song.search", {"query": query}, origin="command")
+    await send_command_result(matcher, result, finish=True)
+
+
 @song_query.handle()
 async def _(bot: Bot, event: MessageEvent):
-    query = event.get_plaintext().strip()[:-4].strip()
-    if not query:
-        return
-    from .services.media_jobs import submit
-    result = await submit(bot, event, "song.search", {"query": query}, origin="command")
-    from .services.results import send_command_result
-    await send_command_result(song_query, result, finish=True)
+    await _search_reply(song_query, bot, event, event.get_plaintext().strip()[:-4].strip())
 
-# ==== 别名管理功能 ====
+
+@lookup_cmd.handle()
+async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
+    await _search_reply(lookup_cmd, bot, event, args.extract_plain_text().strip())
+
+
 add_alias_cmd = on_command("添加别名", priority=10, block=True)
 del_alias_cmd = on_command("删除别名", permission=SUPERUSER, priority=10, block=True)
 view_alias_cmd = on_command("查看别名", priority=10, block=True)
@@ -460,15 +450,12 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
     if not query:
         await _error_call(view_alias_cmd.finish, "格式错误。请使用: /查看别名 <模糊搜索/名字/ID/别名>")
         
-    from .services.job_store import async_call
-    matches = await async_call(find_song_matches, query, limit=8)
-    local_song, ambiguous_matches = pick_song_match(matches)
-    if ambiguous_matches:
-        lines = []
-        for item in ambiguous_matches[:8]:
-            song = item["song"]
-            lines.append(f"{song.get('id')} - {song.get('title')}（{item.get('source')}: {item.get('matched')}）")
-        await view_alias_cmd.finish("请使用更精确的名称或候选 ID：\n" + "\n".join(lines))
+    from .services.song import prepare, page_hint
+    result = await prepare(query)
+    local_song = result["song"]
+    if result["ambiguous"]:
+        lines = [f"{m['song']['id']} · {m['song']['title']}" for m in result["ambiguous"]]
+        await view_alias_cmd.finish(page_hint(result) + "\n" + "\n".join(lines))
 
     if not local_song:
         await _error_call(view_alias_cmd.finish, "未找到匹配的曲目。")

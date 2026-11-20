@@ -62,7 +62,7 @@ assert {(c.song.id,c.chart.difficulty) for c in progress_matches('new',catalog)}
 assert {(c.song.id,c.chart.difficulty) for c in progress_matches('old',catalog)}=={(10,3)}
 assert s.find_song_matches('foreign-only')==[]
 matches=s.find_song_matches('Same title')
-assert len([row for row in matches if row['score']>=1])==3
+assert len([row for row in matches if row['score']>=1])==4
 assert s.pick_song_match(matches)[0] is None  # unrelated same-title songs stay ambiguous
 base=s.find_song_matches('10')[0]['song']
 assert base['id']==10 and len(base['difficulties'])==4
@@ -88,11 +88,14 @@ for query_text, sid in [
     assert selected and selected['id']==sid and not candidates, (query_text, selected, candidates)
 for query_text, first in [('2', 24), ('b', 3), ('acid', 2651), ('Acid Gdo', 2651), ('Aicd Gdo', 2651), ('アスノヨゾラ', 210)]:
     selected, candidates = s.pick_song_match(s.find_song_matches(query_text, catalog=search_catalog))
-    assert selected is None and candidates[0]['song']['id']==first, (query_text, candidates)
+    if query_text in ('acid', 'アスノヨゾラ', 'b'):
+        assert selected and selected['id']==first, query_text
+    else:
+        assert selected is None and candidates[0]['song']['id']==first, (query_text, candidates)
     assert not s.find_song_matches(query_text, catalog=search_catalog, exact_only=True)
 for rows in (search_rows, reversed(search_rows)):
     alternate = Catalog({'songs': [dict(row, difficulties=[]) for row in rows]})
-    selected, candidates = s.pick_song_match(s.find_song_matches('共享', limit=1, catalog=alternate))
+    selected, candidates = s.pick_song_match(s.find_song_matches('共享', catalog=alternate))
     assert not selected and [row['song']['id'] for row in candidates]==[3, 38]
 with patch.object(s, '_read_songlist_data', return_value=search_catalog.as_dict()):
     assert chuguess.match_song_by_query('bk')['id']==3
@@ -140,6 +143,18 @@ from nonebot.adapters.onebot.v11 import PrivateMessageEvent
 event=PrivateMessageEvent(time=0,self_id=1,post_type='message',sub_type='friend',user_id=7,
     message_type='private',message_id=8,message=[],raw_message='',font=0,sender={'user_id':7})
 async def run():
+    rows = [dict(id=i, title=("共通" if i == 1 else "星" * 90 + str(i)), difficulties=[],
+                 aliases=["共通", "Ａ＋Ｂ"]) for i in range(1, 12)]
+    case = Catalog({"songs": rows})
+    result = await query.prepare("共通 --page 2", catalog=case)
+    assert result["total"] == 11 and len(result["ambiguous"]) == 3 and result["page"] == 2
+    assert len(s.find_song_matches("a+b", catalog=case)) == 11
+    assert (await query.prepare("共通", catalog=case))["song"] is None
+    with patch.object(s, "_read_songlist_data", return_value=case.as_dict()), patch.object(s, "download_match_jacket", AsyncMock(return_value=None)):
+        native = await query.search("共通 --page 2")
+        tools = await query.aliases("共通 --page 2")
+        assert native["data"] == tools["data"] and native["data"]["total"] == 11
+        assert native["data"]["candidates"][0]["title"] == rows[8]["title"]
     prepared = await query.prepare('local alias')
     updated = copy.deepcopy(FIXTURE)
     first = updated['songs'][0]
@@ -192,6 +207,41 @@ async def run():
     assert counts['backup_created'] and not counts['changes_available']
     assert any(p.read_bytes()==previous for p in (target/'catalog_backups').glob('*.json'))
     assert s.find_song_matches('recovered alias')[0]['song']['id']==10
+    # Both the failed file and malformed/empty replacements retain their last good source.
+    import httpx
+    from nonebot_plugin_unibot.services import resource_tasks, song_aliases
+    from contextlib import asynccontextmanager
+    public = copy.deepcopy(updated)
+    public["songs"][-1]["title"] = "Import target"
+    previous_sources = {"marisabot": [["Import target", "preserved alias"]],
+                        "gcm_ja": [["Import target", "old Japanese"]]}
+    update.commit_lxns_songlist(public, {"aliases": [{"song_id": 12, "aliases": ["official"]}]}, previous_sources)
+    payloads = {update.BASE_URL + "/api/v0/site/config":
+                {"success": True, "code": 200, "data": {"resource_version": {"chunithm": 24000}}},
+                update.BASE_URL + update.API_PATH: public,
+                update.BASE_URL + "/api/v0/chunithm/alias/list": {"aliases": []}}
+    def respond(request):
+        url = str(request.url).split("?")[0]
+        if url in payloads:
+            return httpx.Response(200, json=payloads[url])
+        if url == song_aliases.URLS["marisabot"]:
+            raise httpx.ConnectError("fixture")
+        if url == song_aliases.URLS["gcm_ja"]:
+            return httpx.Response(200, content=b"")
+        return httpx.Response(200, content=b"Import target\tnew English")
+    @asynccontextmanager
+    async def client():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as session:
+            yield session
+    async def network(value, step):
+        return await value
+    async def write(step, fn, *args):
+        return fn(*args)
+    with patch.object(resource_tasks.http_safety, "client", client):
+        result = await resource_tasks.refresh_songlist(NS(network=network, write=write))
+    assert set(result["data"]["unavailable_alias_sources"]) == {"marisabot", "gcm_ja", "lxns"}
+    assert set(s.find_song_matches("12")[0]["song"]["aliases"]) == {"official", "preserved alias", "old Japanese", "new English"}
+
     # Cached retired invocations cannot write or resubmit old imports.
     for method in [llm_api.prepare_capability,llm_api.invoke_capability]:
         for name in ['player.bind','score.submit','score.sync','score.import_file']:

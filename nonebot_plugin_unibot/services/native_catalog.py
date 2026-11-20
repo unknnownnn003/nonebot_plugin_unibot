@@ -265,7 +265,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "添加别名",
-        "line": 409,
+        "line": 399,
         "matcher": "add_alias_cmd",
         "module": "song",
         "registration": "on_command"
@@ -277,7 +277,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "删除别名",
-        "line": 410,
+        "line": 400,
         "matcher": "del_alias_cmd",
         "module": "song",
         "permission_source": "SUPERUSER",
@@ -290,7 +290,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "查看别名",
-        "line": 411,
+        "line": 401,
         "matcher": "view_alias_cmd",
         "module": "song",
         "registration": "on_command"
@@ -318,6 +318,13 @@ NATIVE_CATALOG = json.loads(r'''{
         "module": "song",
         "pattern": "^(.+)是什么歌$",
         "registration": "on_regex"
+      },
+      {
+        "command": "查歌",
+        "line": 377,
+        "matcher": "lookup_cmd",
+        "module": "song",
+        "registration": "on_command"
       }
     ]
   },

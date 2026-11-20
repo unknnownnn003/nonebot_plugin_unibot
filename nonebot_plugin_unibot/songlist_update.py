@@ -50,7 +50,8 @@ def build_local_alias_map(data):
     return result
 
 
-def commit_lxns_songlist(songlist_data, alias_data):
+def commit_lxns_songlist(songlist_data, alias_data, external=None):
+    from .services.song_aliases import publish, local_rows
     catalog = Catalog(songlist_data)
     if not catalog.songs:
         raise ValueError("拒绝用空曲库覆盖现有数据")
@@ -75,11 +76,16 @@ def commit_lxns_songlist(songlist_data, alias_data):
         except (ValueError, TypeError, AttributeError):
             # A valid refresh can repair old metadata. The backup remains exact.
             changes = None
-        local = build_local_alias_map(old)
+        previous = old.get("alias_sources", {})
+        snapshots = {"lxns": [[key, *vals] for key, vals in remote.items()] or previous.get("lxns", []),
+                     "local": local_rows(old)}
+        snapshots.update({k: v for k, v in previous.items() if k not in snapshots})
+        snapshots.update(external or {})
         data = catalog.as_dict()
-        for song in data["songs"]:
-            sid = str(song["id"])
-            song["aliases"] = list(dict.fromkeys(remote.get(sid, []) + song.get("aliases", []) + local.get(sid, [])))
+        embedded = build_local_alias_map(data)
+        if embedded:
+            snapshots["lxns"].extend([key, *vals] for key, vals in embedded.items())
+        publish(data, snapshots)
         # The entire previous catalog (including removed songs/aliases/foreign
         # fields) survives every refresh. Never rewrite score or binding files.
         backup = None
