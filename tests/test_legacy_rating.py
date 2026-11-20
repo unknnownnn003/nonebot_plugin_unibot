@@ -35,7 +35,7 @@ class LegacyRatingTests(unittest.TestCase):
                     self.assertTrue(D(0) <= left <= middle <= right <= constant + 2)
                     self.assertLess(right - left, D(".001"))
 
-    def test_historical_rank_level_and_color(self):
+    def test_historical_rank_and_color(self):
         l = self.legacy
         for rank, score in (("C", 500000), ("B", 600000), ("BB", 700000), ("BBB", 800000),
                             ("A", 900000), ("AA", 925000), ("AAA", 950000), ("S", 975000),
@@ -43,8 +43,6 @@ class LegacyRatingTests(unittest.TestCase):
             self.assertEqual(l.score_rank(score), rank)
             self.assertNotEqual(l.score_rank(score - 1), rank)
         self.assertEqual([l.score_rank(s) for s in (990000, 1005000, 1009000)], ["S", "SS", "SSS"])
-        self.assertEqual([l.level_label(D(x)) for x in ("13.0", "13.6", "13.7", "13.9", "14.0")],
-                         ["13", "13", "13+", "13+", "14"])
         for frame, threshold in enumerate((4, 7, 10, 12, 13, 14, D("14.50"), 15), 2):
             self.assertEqual(l.rating_frame(threshold), frame)
             self.assertEqual(l.rating_frame(threshold - D(".01")), frame - 1)
@@ -84,7 +82,7 @@ class LegacyRatingTests(unittest.TestCase):
                                             (8, 3, 1_010_000), (1, 2, 1_009_000), (2, 5, 1_010_000)]]
         items = l.select(NS(scores=records), catalog, history)
         self.assertEqual([(r["id"], r["level_index"]) for r in items], [(1, 2), (1, 3), (2, 3)])
-        self.assertTrue(all(r["rating"] == D("15.7") and r["rank"] == "SSS" and r["level"] == "13+" for r in items))
+        self.assertTrue(all(r["rating"] == D("15.7") and r["rank"] == "SSS" and r["level_value"] == D("13.7") for r in items))
         self.assertEqual(items, l.select(NS(scores=list(reversed(records))), catalog, history))
         self.assertEqual(l.simulate(r["rating"] for r in items), l.Simulation(D("1.57"), D("5.1025"), D("2.355"), D("2.7475")))
         self.assertEqual(l.simulate([]), l.Simulation(D(0), D(0), D(0), D(0)))

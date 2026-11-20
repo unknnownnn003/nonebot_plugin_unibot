@@ -103,11 +103,6 @@ def score_rank(score):
     return ("D", "C", "B", "BB", "BBB", "A", "AA", "AAA", "S", "SS", "SSS")[bisect_right(bounds, score)]
 
 
-def level_label(constant):
-    major = int(constant)
-    return f"{major}+" if constant - major >= Decimal(".7") else str(major)
-
-
 def rating_frame(value):
     """Return the existing HDD frame whose color represents the 2021 band."""
     return (1, 2, 3, 4, 5, 6, 7, 8, 9)[bisect_right((4, 7, 10, 12, 13, 14, Decimal("14.50"), 15), value)]
@@ -149,7 +144,7 @@ def select(snapshot, catalog, history, *, now=None):
         score = record["score"]
         items.append(dict(id=sid, jacket_id=str(chart.jacket_id), song_name=historical.title,
                           level_index=difficulty, level_value=historical.constant,
-                          level=level_label(historical.constant), score=score,
+                          score=score,
                           rank=score_rank(score), rating=chart_rating(historical.constant, score),
                           clear=record.get("clear"), full_combo=normalize_fc(record.get("full_combo"))))
     items.sort(key=lambda row: (-row["rating"], -row["score"], row["id"], row["level_index"]))

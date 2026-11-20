@@ -134,27 +134,13 @@ WIDTH = COLUMNS * (CARD_WIDTH + GAP) - GAP + 24
 
 def _legacy_difficulty(card, item, side):
     difficulty = item["level_index"]
-    name_box = (10, side + 8, 114, side + 34)
+    name_box = (10, side + 8, 134, side + 34)
     if not contain(card, ui("difficulty", DIFFICULTY_ASSETS[difficulty]), name_box, trim=True):
         rounded(card, name_box, 5, INK)
-        label(card, name_box, LEVELS[difficulty], 16, PAPER, "center", fit=True)
-    level_box = (119, side + 8, 162, side + 34)
-    rounded(card, level_box, 5, "#2b3a4f")
-    level = item["level"]
-    glyphs = [ui("level", "plus" if character == "+" else character) for character in level]
-    if all(glyphs) and all(glyph.getbbox() for glyph in glyphs):
-        glyphs = [glyph.crop(glyph.getbbox()) for glyph in glyphs]
-        run = Image.new("RGBA", (sum(glyph.width for glyph in glyphs), max(glyph.height for glyph in glyphs)))
-        x = 0
-        for glyph in glyphs:
-            run.alpha_composite(glyph, (x, 0 if glyph.height * 2 < run.height else run.height - glyph.height))
-            x += glyph.width
-        contain(card, run, (121, side + 10, 160, side + 32))
-    else:
-        label(card, level_box, level, 17, PAPER, "center")
-    constant_box = (166, side + 8, 209, side + 34)
+        label(card, name_box, LEVELS[difficulty], 17, PAPER, "center", fit=True)
+    constant_box = (card.width - 64, side + 8, card.width - 10, side + 34)
     rounded(card, constant_box, 5, INK)
-    label(card, constant_box, f"{item['level_value']:.1f}", 17, PAPER, "center")
+    label(card, constant_box, f"{item['level_value']:.1f}", 19, PAPER, "center")
 
 
 def _card(item, number, jacket, title=None, *, legacy=False, title_size=24):
