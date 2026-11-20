@@ -367,6 +367,20 @@ async def run():
                 assert {r['level_index'] for r in result['data']['scores']}=={3,4,5}
                 assert result['artifacts'][0]['content'].startswith(b'\x89PNG')
         assert len(api_calls)==2 # all consumers share one complete Player/Score[] snapshot.
+        sample = {'name': 'render fixture', 'rating': 17.89}
+        summary = b.legacy_rating.simulate([Decimal('16.1')] * 30)
+        long_title = '祈 -我ら神祖と共に歩む者なり-'
+        sample_item = dict(song_name=long_title, jacket_id='1086', level_index=3, level_value=Decimal('14.1'),
+                           score=1007500, rank='SSS', clear='clear', full_combo='', rating=Decimal('16.1'))
+        with patch.object(image_components, 'digits', wraps=image_components.digits) as digits, \
+             patch.object(b, 'label', wraps=b.label) as labels:
+            b.draw_legacy_rating_image(sample, [sample_item], {}, {}, summary)
+        title_calls = [call for call in labels.call_args_list if call.args[2] == long_title]
+        assert len(title_calls) == 1 and title_calls[0].kwargs['fit'] is False
+        rating_calls = [call.args for call in digits.call_args_list if call.args[0] == 'player-rating']
+        assert rating_calls[0] == ('player-rating', image_components.rating_frame(17), '16.10')
+        assert rating_calls[1:3] == [('player-rating', 10, '16.1000')] * 2
+        assert sample['rating'] == 17.89
         await check_progress(snapshot)
         with patch.object(paths, 'SONGLIST_PATH', root/'missing-catalog.json'):
             result = await player.query(bot,e,'player.profile',{})

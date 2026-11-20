@@ -19,9 +19,6 @@ from _unibot_history import legacy_rating as legacy
 
 SOURCE = f"https://github.com/MAX-eipi/ChunithmMusicDataTable/blob/{legacy.SOURCE_COMMIT}/index.html"
 LXNS = "https://maimai.lxns.net/api/v0/chunithm/song/list?version=24000&notes=true"
-# https://info-chunithm.sega.jp/2007/ confirms the layout changed even though
-# the note total did not. An ID, creator or note count match cannot prove sameness.
-CHANGED_CHARTS = {1086: {3: "SEGA 2022-04-14 chart change (https://info-chunithm.sega.jp/2007/)"}}
 # Only add historic-title-to-ID renames with independently verified identity.
 REVIEWED_RENAMES = {}
 
@@ -119,9 +116,7 @@ def build(html, catalog):
             if index in seen:
                 raise ValueError(f"Duplicate LXNS chart {sid}/{index}")
             seen.add(index)
-            if index in CHANGED_CHARTS.get(sid, {}):
-                excluded[str(index)] = CHANGED_CHARTS[sid][index]
-            elif type(chart.get("version")) is int and 10000 <= chart["version"] <= legacy.VERSION_ID:
+            if type(chart.get("version")) is int and 10000 <= chart["version"] <= legacy.VERSION_ID:
                 identities[index] = legacy.chart_identity(song, chart)
             else:
                 excluded[str(index)] = "unknown or post-LOST chart version"

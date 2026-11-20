@@ -43,7 +43,7 @@ class LegacyRatingTests(unittest.TestCase):
             self.assertEqual(l.score_rank(score), rank)
             self.assertNotEqual(l.score_rank(score - 1), rank)
         self.assertEqual([l.score_rank(s) for s in (990000, 1005000, 1009000)], ["S", "SS", "SSS"])
-        for frame, threshold in enumerate((4, 7, 10, 12, 13, 14, D("14.50"), 15), 2):
+        for frame, threshold in enumerate((4, 7, 10, 12, 13, 14, D("14.50"), 15, 16), 2):
             self.assertEqual(l.rating_frame(threshold), frame)
             self.assertEqual(l.rating_frame(threshold - D(".01")), frame - 1)
 
@@ -54,7 +54,8 @@ class LegacyRatingTests(unittest.TestCase):
         self.assertEqual(len(data["songs"]), 893)
         self.assertEqual(len(history), data["mapping"]["mapped_charts"])
         self.assertIn((1086, 2), history)
-        self.assertNotIn((1086, 3), history)  # SEGA-confirmed layout revision.
+        self.assertEqual(history[1086, 3].constant, D("14.1"))
+        self.assertEqual(l.chart_rating(history[1086, 3].constant, 1_009_000), D("16.1"))
         self.assertNotIn((2792, 3), history)  # Same title, post-LOST chart.
         self.assertTrue(all(0 <= difficulty < 4 for _, difficulty in history))
         ratings = [l.chart_rating(D(c) / 10, 1_007_500) for row in data["songs"] for c in row["constants"]]

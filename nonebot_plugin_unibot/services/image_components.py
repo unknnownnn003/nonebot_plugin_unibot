@@ -313,14 +313,14 @@ def _trophy_metadata(equipped):
     return equipped
 
 
-def playerbar(player, images, *, show_rating=True):
+def playerbar(player, images, *, rating_style=None):
     canvas = Image.new("RGBA", (576, 228))
     if not contain(canvas, resources.decode_png(images.get("plate")), (0, 0, 576, 228)):
         rounded(canvas, (4, 4, 571, 221), 12, "#e4ecef", "#c7dce0")
     if not contain(canvas, ui("playerbar", "base"), (140, 83, 468, 173)):
         rounded(canvas, (140, 83, 468, 173), 7, "#f9fbfc", "#c7dce0")
     possession = player.get("rating_possession")
-    if show_rating and possession in ("copper", "silver", "gold", "platina", "rainbow"):
+    if rating_style is None and possession in ("copper", "silver", "gold", "platina", "rainbow"):
         contain(canvas, ui("playerbar", f"field-{possession}"), (140, 83, 468, 173))
     trophy = images.get("trophy_metadata") or player.get("trophy") or {}
     trophy_box = (135, 39, 561, 89)
@@ -355,8 +355,8 @@ def playerbar(player, images, *, show_rating=True):
         if not contain(canvas, digits("playerbar", "level", str(player["level"])), (168, 100, 228, 136)):
             label(canvas, (171, 100, 226, 136), player["level"], 27, "#182d43", fit=True)
     rating = player.get("rating")
-    if show_rating and rating is not None:
-        rating_pair(canvas, (148, 142, 313, 172), rating, 2, gap=18)
+    if rating is not None:
+        rating_pair(canvas, (148, 142, 313, 172), rating, 2, gap=18, **(rating_style or {}))
     emblem = player.get("class_emblem") or {}
     base_drawn = False
     for key, kind, box in (("base", "ribbon", (317, 140, 415, 172)), ("medal", "medal", (334, 131, 400, 181))):

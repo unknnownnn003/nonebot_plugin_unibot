@@ -105,7 +105,7 @@ def score_rank(score):
 
 def rating_frame(value):
     """Return the existing HDD frame whose color represents the 2021 band."""
-    return (1, 2, 3, 4, 5, 6, 7, 8, 9)[bisect_right((4, 7, 10, 12, 13, 14, Decimal("14.50"), 15), value)]
+    return 1 + bisect_right((4, 7, 10, 12, 13, 14, Decimal("14.50"), 15, 16), value)
 
 
 @dataclass(frozen=True)

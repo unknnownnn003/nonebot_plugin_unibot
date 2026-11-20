@@ -14,7 +14,7 @@
     "historical_songs": 893,
     "historical_charts": 3572,
     "mapped_songs": 762,
-    "mapped_charts": 3047,
+    "mapped_charts": 3048,
     "different_or_new_song": 1,
     "missing_in_cn": 130
   },
@@ -911,6 +911,6 @@
     {"title": "Elemental Ethnic", "constants": [30, 85, 122, 138], "lxns_id": 1078, "identities": ["f9431519528411aff840697a7e5b6e2236ce71a4a0ef37009c5e51e66d9215ac", "1d8f16a8c672dbacfddf93ea141c1817062a187979370d27a461f8e5600151a9", "50c12b59e03aaba51a6ec76ed0ea6797fe0e3283755c6c062900768f75cd1097", "2f87709b03c14b75b0140f9c42bfd89df8c8e68a1ded4200a2836a3b68cea0e3"]},
     {"title": "TECHNOPOLIS 2085", "constants": [20, 70, 120, 135], "lxns_id": 1100, "identities": ["dee1dedcb4f1e54a6200be9186aaada572477e99ca8e47fe666449d00081c7d4", "c565826206a5892d7affdb172dee14e6091029385a6615650a06b4d8f7588bfe", "36627def3716af1804601520ace84f28614d217d5819dd8ec752acffa11b0323", "9c6361c3b2e7886954b88c90746008d45eaa06710629b74765a967e66c17e701"]},
     {"title": "X7124", "constants": [40, 99, 134, 140], "lxns_id": 1079, "identities": ["e7e3d463b98f004e6497b320610e2ee06a2bf1f5e43a10dc85e75de1c44a009f", "d1730af0081822db0937e0af969d19813612e46fa6f974972dc12411ff6c84cc", "ac1a23fb51be47d4943cae77d5ca862fcc16163d6aad5533b903240635a0f1a4", "737069d4f8edc5acfeea1e2b6451ee00e941fd0ccd5628f7ad36e370209dee57"]},
-    {"title": "祈 -我ら神祖と共に歩む者なり-", "constants": [60, 100, 135, 141], "lxns_id": 1086, "identities": ["42804b730494f2dcefed48060683a105198e0c21b3f973f28553112f52892619", "5678f7dfead0ca81ee9d8eb221fdaf8d2512c7d72d250d543361b9b3ced3da0c", "2d31769151113be9791c7da11284c9704e4b66580653c75247b54173ff4ae1b3", null], "excluded_charts": {"3": "SEGA 2022-04-14 chart change (https://info-chunithm.sega.jp/2007/)"}}
+    {"title": "祈 -我ら神祖と共に歩む者なり-", "constants": [60, 100, 135, 141], "lxns_id": 1086, "identities": ["42804b730494f2dcefed48060683a105198e0c21b3f973f28553112f52892619", "5678f7dfead0ca81ee9d8eb221fdaf8d2512c7d72d250d543361b9b3ced3da0c", "2d31769151113be9791c7da11284c9704e4b66580653c75247b54173ff4ae1b3", "3d4332afe08524c84674b4ee8ad3fc8c7d8c2029c26c6908a815de80ce37414e"]}
   ]
 }
