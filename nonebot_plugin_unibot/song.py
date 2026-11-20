@@ -5,12 +5,10 @@ import os
 import re
 from difflib import SequenceMatcher
 from functools import lru_cache
-import platform
 import unicodedata
-from io import BytesIO
 from typing import Optional, Dict, Any, List, Tuple
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 from nonebot import on_regex
 from nonebot.adapters.onebot.v11 import MessageEvent, MessageSegment, Message
@@ -20,6 +18,8 @@ from .songlist_update import SONGLIST_LOCK
 
 from .services.paths import SONGLIST_PATH as _SONGLIST_PATH
 from .services.resources import jacket_image as download_jacket
+from .services.chat_cards import INK, LINE, MUTED, PAPER, TEAL, artwork, frame, lines
+from .services.image_components import label, png, rounded, wrap
 from .services.song_images import render_song_image
 
 SONGLIST_PATH = str(_SONGLIST_PATH)
@@ -216,33 +216,6 @@ def pick_song_match(matches: List[Dict[str, Any]]) -> Tuple[Optional[Dict[str, A
     return None, matches
 
 
-def get_font(size: int, weight: str = "Normal") -> ImageFont.FreeTypeFont:
-    # Noto 使用 Regular 而非 Normal；常见发行版只安装 Regular/Bold。
-    noto_weight = "Regular" if weight == "Normal" else weight
-    if platform.system() == "Windows":
-        font_paths = ["msyh.ttc", "msgothic.ttc"]
-    else:
-        font_paths = [
-            f"/usr/share/fonts/opentype/SourceHanSans/SourceHanSansSC-{weight}.otf",
-            f"/usr/share/fonts/truetype/custom/SourceHanSansSC-{weight}.otf",
-            f"/usr/share/fonts/opentype/noto/NotoSansCJK-{noto_weight}.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/opentype/SourceHanSans/SourceHanSansSC-Normal.otf",
-            "/usr/share/fonts/truetype/custom/SourceHanSansSC-Normal.otf",
-            "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
-            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-        ]
-    for path in font_paths:
-        try:
-            return ImageFont.truetype(path, size)
-        except OSError:
-            # 一个字体不可用时继续尝试，不能提前退回不支持 CJK 的默认字体。
-            continue
-    return ImageFont.load_default()
-
-def draw_text(draw: ImageDraw.ImageDraw, pos: tuple, text: str, font: ImageFont.FreeTypeFont, fill=(255, 255, 255), anchor="la"):
-    draw.text(pos, text, font=font, fill=fill, anchor=anchor)
-
 def get_version_name(version_num, versions) -> str:
     try:
         number = int(version_num)
@@ -252,117 +225,50 @@ def get_version_name(version_num, versions) -> str:
                  if isinstance(v, dict) and v.get("version") == number),
                 str(version_num))
 
-def wrap_text_with_height(text: str, font: ImageFont.FreeTypeFont, max_width: int, draw: ImageDraw.ImageDraw) -> tuple[str, int, int]:
-    lines = []
-    if not text:
-        return "", 0, 0
-    current_line = ""
-    for char in str(text):
-        test_line = current_line + char
-        if draw.textbbox((0, 0), test_line, font=font)[2] <= max_width:
-            current_line = test_line
-        else:
-            if not current_line: 
-                lines.append(test_line)
-                current_line = ""
-            else:
-                lines.append(current_line)
-                current_line = char
-    if current_line:
-        lines.append(current_line)
-    
-    result = "\n".join(lines)
-    bbox = draw.multiline_textbbox((0, 0), result, font=font)
-    width = bbox[2] - bbox[0]
-    height = bbox[3] - bbox[1]
-    return result, width, height
-
-def clamp_wrapped_text(text: str, font: ImageFont.FreeTypeFont, max_width: int, max_lines: int, draw: ImageDraw.ImageDraw) -> str:
-    wrapped, _, _ = wrap_text_with_height(text, font, max_width, draw)
-    lines = wrapped.splitlines()
-    if len(lines) <= max_lines:
-        return wrapped
-    lines = lines[:max_lines]
-    tail = lines[-1]
-    while tail and draw.textbbox((0, 0), tail + "...", font=font)[2] > max_width:
-        tail = tail[:-1]
-    lines[-1] = tail + "..."
-    return "\n".join(lines)
-
 def match_song_by_query(query: str) -> Optional[Dict[str, Any]]:
     match, _ = pick_song_match(find_song_matches(query))
     return match
 
-def make_empty_jacket(size: int = 200) -> Image.Image:
-    return Image.new("RGBA", (size, size), (0, 0, 0, 0))
-
-
-def render_song_candidates_image(query: str, matches: List[Dict[str, Any]], jacket_imgs: List[Optional[Image.Image]]) -> bytes:
-    BG_COLOR = (30, 30, 35, 255)
-    PANEL_COLOR = (45, 45, 52, 255)
-    TEXT_MAIN = (245, 245, 245, 255)
-    TEXT_SUB = (180, 180, 180, 255)
-    ACCENT = (98, 114, 164, 255)
-
-    card_width = 800
-    row_h = 118
-    header_h = 112
-    footer_h = 58
-    font_head = get_font(22, "Medium")
-    measure = ImageDraw.Draw(Image.new("L", (1, 1)))
-    titles = [wrap_text_with_height(f"{i}. {m['song']['title']}", font_head, 426, measure)
-              for i, m in enumerate(matches, 1)]
-    heights = [max(row_h, h + 74) for _, _, h in titles]
-    height = header_h + sum(heights) + footer_h
-
-    img = Image.new("RGBA", (card_width, height), BG_COLOR)
-    draw = ImageDraw.Draw(img)
-    font_title = get_font(30, "Bold")
-    font_head = get_font(22, "Medium")
-    font_body = get_font(18, "Normal")
-    font_small = get_font(15, "Normal")
-
-    draw_text(draw, (40, 32), "歌曲候选", font_title, TEXT_MAIN)
-    query_wrapped = clamp_wrapped_text(f"查询：{query}", font_body, card_width - 80, 1, draw)
-    draw_text(draw, (40, 72), query_wrapped, font_body, TEXT_SUB)
-
-    y = header_h
-    for index, match in enumerate(matches, 1):
-        row_h = heights[index - 1]
+def render_song_candidates_image(query: str, matches: List[Dict[str, Any]],
+                                 jacket_imgs: List[Optional[Image.Image]], total: int, page: int) -> bytes:
+    rows = []
+    common_alias = matches[0].get("matched") if matches and all(
+        "别名" in (match.get("source") or "") and match.get("matched") == matches[0].get("matched")
+        for match in matches) else None
+    for match in matches:
         song = match["song"]
-        title = str(song.get("title", "Unknown"))
-        artist = str(song.get("artist", "-"))
-        song_id = song.get("id", "-")
+        title = song.get("title") or "—"
+        size = 30
+        titles = wrap(title, size, 580)
+        if len(titles) > 3:
+            size = 27
+            titles = wrap(title, size, 580)
         source = match.get("source") or "匹配"
-        matched = str(match.get("matched") or "")
+        hit = match.get("matched")
+        metadata = f"ID {song['id']}"
+        if hit and hit != common_alias and ("别名" in source or hit not in (title, str(song["id"]))):
+            metadata += f"  ·  {source}  {hit}"
+        details = wrap(metadata, 23, 580)
+        height = max(108, 22 + 40 * len(titles) + 32 * len(details))
+        rows.append((titles, details, size, height))
+    term = f"匹配别名 {common_alias}" if common_alias == query else query
+    if common_alias and common_alias != query:
+        term += f"  ·  匹配别名 {common_alias}"
+    summary = wrap(f"{term}  ·  共 {total} 首  ·  第 {page}/{(total + 7) // 8} 页", 25, 736)
+    y = 88 + 35 * len(summary)
+    canvas = frame("歌曲候选", y + 44 + sum(row[-1] + 8 for row in rows))
+    lines(canvas, summary, 28, 78, 772, 25, 35, MUTED)
+    for index, (titles, details, size, height) in enumerate(rows):
+        rounded(canvas, (20, y, 780, y + height), 14, PAPER, LINE)
+        artwork(canvas, jacket_imgs[index] if index < len(jacket_imgs) else None,
+                (32, y + 10, 120, y + 98))
+        top = y + (height - 40 * len(titles) - 32 * len(details)) // 2
+        top = lines(canvas, titles, 139, top, 760, size, 40, INK)
+        lines(canvas, details, 139, top, 760, 23, 32, TEAL)
+        y += height + 8
+    label(canvas, (28, y, 772, y + 38), "按 ID 查询  ·  翻页请加 --page 页码", 22, MUTED)
+    return png(canvas)
 
-        draw.rounded_rectangle([32, y + 8, card_width - 32, y + row_h - 8], radius=8, fill=PANEL_COLOR)
-        draw.rounded_rectangle([32, y + 8, 42, y + row_h - 8], radius=8, fill=ACCENT)
-        draw.rectangle([38, y + 8, 42, y + row_h - 8], fill=ACCENT)
-
-        jacket_img = jacket_imgs[index - 1] if index - 1 < len(jacket_imgs) else None
-        jacket = (jacket_img or make_empty_jacket(82)).resize((82, 82), Image.Resampling.LANCZOS)
-        img.paste(jacket, (58, y + 18), jacket if jacket.mode == "RGBA" else None)
-
-        text_x = 158
-        title_wrapped = titles[index - 1][0]
-        title_h = draw.multiline_textbbox((0, 0), title_wrapped, font=font_head)[3]
-        draw_text(draw, (text_x, y + 18), title_wrapped, font_head, TEXT_MAIN)
-        meta_y = y + 18 + title_h + 6
-        artist_wrapped, _, _ = wrap_text_with_height(f"ID: {song_id}   Artist: {artist}", font_small, 430, draw)
-        draw_text(draw, (text_x, meta_y), artist_wrapped, font_small, TEXT_SUB)
-
-        matched_text = f"{source}: {matched}" if matched else source
-        matched_wrapped = clamp_wrapped_text(matched_text, font_small, 180, 2, draw)
-        draw_text(draw, (card_width - 230, y + 28), matched_wrapped, font_small, TEXT_SUB)
-        y += row_h
-
-    draw.line([(40, height - 44), (card_width - 40, height - 44)], fill=ACCENT, width=2)
-    draw_text(draw, (40, height - 28), "请使用更完整的曲名、ID 或添加别名后再查询", font_small, TEXT_SUB)
-
-    buf = BytesIO()
-    img.convert("RGB").save(buf, format="JPEG", quality=90)
-    return buf.getvalue()
 
 async def download_match_jacket(match: Dict[str, Any]) -> Optional[Image.Image]:
     song = match.get("song", {})

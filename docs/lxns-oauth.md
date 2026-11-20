@@ -25,7 +25,7 @@
 
 新增命令放在既有 `user_bind` 模块，沿用综合插件 `MODULE_FEATURES.user_bind = scores` 和内部 `oauth.manage -> scores`，没有新增第二份策略文件或修改综合插件。群发起、回调交换前、回调保存前、最终确认及群内回复前重查原群策略；等待期间关停不完成绑定。私聊不受群开关影响，但仍校验真实 OneBot 身份。群内可接受原 QQ 的本地网页确认串，但不接受 Token、客户端密钥或落雪授权码。
 
-OAuth **不作为 LLM 工具**。现有 API v1、能力版本4.1.0和25项公开能力保持契约；好友码绑定和旧同步能力已退役。伪造的 `oauth.*` 工具在私聊返回 `NATIVE_ONLY`，群内先遵守当前策略。原生命令仍受 command_receipts 去重，目录新增独立 `NATIVE_ONLY_COMMANDS`，不会把授权链接、凭据或确认交给模型处理。LLMChat 无需为本阶段改代码。
+OAuth **不作为 LLM 工具**。API v1 提供 25 项公开能力，能力版本见 `llm_api.py`；好友码绑定和旧同步能力已退役。伪造的 `oauth.*` 工具在私聊返回 `NATIVE_ONLY`，群内先遵守当前策略。原生命令仍受 command_receipts 去重，目录新增独立 `NATIVE_ONLY_COMMANDS`，不会把授权链接、凭据或确认交给模型处理。
 
 ## 配置
 

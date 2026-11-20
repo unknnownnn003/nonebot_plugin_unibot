@@ -107,7 +107,7 @@ def measure(value, size):
 def wrap(value, size, width):
     """Wrap Latin words where possible and split long lines at grapheme boundaries."""
     rows, line = [], ""
-    for word in regex.findall(r"\s+|[\p{Latin}\p{N}]+|\X", str(value).strip()):
+    for word in regex.findall(r"\s+|[0-9]+(?:[,.][0-9]+)+|[\p{Latin}\p{N}]+|\X", str(value).strip()):
         if line and measure(line + word, size) > width:
             rows.append(line.rstrip())
             line = ""

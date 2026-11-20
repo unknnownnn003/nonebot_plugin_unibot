@@ -1,6 +1,6 @@
 """Versioned optional Agent API. Importing this module does not load llmchat."""
 from __future__ import annotations
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from typing import Literal
 import inspect
 from .services.permissions import native_superuser
@@ -9,7 +9,7 @@ from .services import group_policy
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "4.1.0"
+CAPABILITY_VERSION = "4.2.0"
 
 
 class SearchArgs(BaseModel):
@@ -53,7 +53,14 @@ class GameGuessArgs(BaseModel):
 
 class RecommendArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    filter: str = Field("", max_length=20, description="原推什么参数：等级如13+，或aj/ajc/fc；空为全部")
+    filter: str = Field("", max_length=32, description="推分、推OP、综合、aj、ajc 或 fc，可与显示等级或精确定数组合，如 14+ 推OP 或 14.8；留空返回三种方向")
+
+    @field_validator("filter")
+    @classmethod
+    def valid_filter(cls, value):
+        from .services.recommendation import parse_filter
+        parse_filter(value)
+        return value
 
 
 class SongScoreArgs(SearchArgs):
@@ -88,8 +95,8 @@ def _describe_capabilities():
                  parameters=SongScoreArgs.model_json_schema(), effect="none", long_task=True, keywords=["单曲成绩", "chu成绩", "这首成绩"]),
             dict(id="player.progress", name="nb_unibot_progress", description="本人OAuth MASTER/ULTIMA筛选进度；OP按筛选谱面逐张合计，非游戏内总OP，WE不参与；query为难度/定数/版本/分类条件。",
                  parameters=SearchArgs.model_json_schema(), effect="none", long_task=True, keywords=["进度", "chulist", "完成率"]),
-            dict(id="player.recommend", name="nb_unibot_recommend", description="原推什么算法推荐当前发起人可推的谱面；保留原图。",
-                 parameters=RecommendArgs.model_json_schema(), effect="none", long_task=True, keywords=["推荐", "推什么", "推分"]),
+            dict(id="player.recommend", name="nb_unibot_recommend", description="依据本人落雪 OAuth 成绩推荐最多三首不同歌曲。可按推分、推OP、综合或连击目标筛选。同曲取最高OP，有效理论空间为上界，实际提升未知。",
+                 parameters=RecommendArgs.model_json_schema(), effect="none", long_task=True, keywords=["推荐", "推什么", "推分", "推OP"]),
             dict(id="song.aliases", name="nb_unibot_aliases", description="查询中二歌曲原本地别名；歧义时返回候选。",
                  parameters=SearchArgs.model_json_schema(), effect="none", keywords=["别名", "外号"]),
             dict(id="song.alias_add", name="nb_unibot_alias_add", description="给明确歌曲ID添加本地别名；沿用普通用户权限，需要确认。",

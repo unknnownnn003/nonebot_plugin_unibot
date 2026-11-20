@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Tuple
 from .song import download_jacket
 from .services.image_components import (
     DIFFICULTY_ASSETS, DIFFICULTY_COLORS, LEVELS, RESAMPLE, badge, brand, contain,
-    cover, label, playerbar, png, rating_number, rating_pair, rounded, ui,
+    cover, label, playerbar, png, rating_number, rating_pair, rounded, score_digits, ui, wrap,
 )
 from .services.job_store import check_render_cancelled
 
@@ -130,8 +130,11 @@ COLUMNS = 5
 WIDTH = COLUMNS * (CARD_WIDTH + GAP) - GAP + 24
 
 
-def _card(item, number, jacket):
-    width, height = CARD_WIDTH, CARD_HEIGHT
+def _card(item, number, jacket, title=None):
+    width = CARD_WIDTH
+    title = title if title is not None else wrap(item["song_name"], 24, width - 24)
+    offset = (len(title) - 1) * 30
+    height = CARD_HEIGHT + offset
     card = Image.new("RGB", (width, height), CLOUD)
     rounded(card, (0, 0, width - 1, height - 1), 16, PAPER, LINE)
     side = width - 12
@@ -156,20 +159,32 @@ def _card(item, number, jacket):
     label(card, (10, side + 4, 120, side + 30), LEVELS[difficulty], 19, PAPER, "center")
     rounded(card, (width - 64, side + 6, width - 10, side + 32), 9, INK)
     label(card, (width - 64, side + 4, width - 10, side + 30), f"{item['level_value']:.1f}", 20, PAPER, "center")
-    label(card, (11, 247, width - 10, 278), item["song_name"], 25, INK)
-    label(card, (10, 280, width - 10, 322), f"{item['score']:,}", 39, INK, fit=True)
-    badge(card, (7, 324, width // 2 - 2, 350), "clear", item["clear"])
-    badge(card, (width // 2 + 2, 324, width - 7, 350), "combo", item["full_combo"])
-    rounded(card, (7, 353, width - 8, height - 6), 10, "#e7f1f4")
-    rating_pair(card, (7, 353, width - 7, height - 5), item["rating"], 4,
+    for index, line in enumerate(title):
+        top = 247 + index * 30
+        label(card, (11, top, width - 10, top + 30), line, 24, INK, fit=True)
+    score_digits(card, (10, 280 + offset, width - 10, 322 + offset), item["score"])
+    badge(card, (7, 324 + offset, width // 2 - 2, 350 + offset), "clear", item["clear"])
+    badge(card, (width // 2 + 2, 324 + offset, width - 7, 350 + offset), "combo", item["full_combo"])
+    rounded(card, (7, 353 + offset, width - 8, height - 6), 10, "#e7f1f4")
+    rating_pair(card, (7, 353 + offset, width - 7, height - 5), item["rating"], 4,
                 gap=8, group="chart-rating", centered=True)
     return card
 
 
 def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, stopped):
     width = WIDTH
-    stride = CARD_HEIGHT + GAP
-    height = 260 + sum(76 + math.ceil(limit / COLUMNS) * stride for _, limit, _, _, _ in groups)
+    layouts = []
+    for _, limit, items, _, _ in groups:
+        titles = []
+        for item in items:
+            check_render_cancelled(stopped)
+            titles.append(wrap(item["song_name"], 24, CARD_WIDTH - 24))
+        strides = []
+        for start in range(0, math.ceil(limit / COLUMNS) * COLUMNS, COLUMNS):
+            lines = max((len(title) for title in titles[start:start + COLUMNS]), default=1)
+            strides.append(CARD_HEIGHT + GAP + (lines - 1) * 30)
+        layouts.append((titles, strides))
+    height = 260 + sum(76 + sum(strides) for _, strides in layouts)
     canvas = Image.new("RGB", (width, height), CLOUD)
     draw = ImageDraw.Draw(canvas)
     draw.rectangle((0, 0, width, 246), fill="#fff7dc")
@@ -181,16 +196,18 @@ def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, 
     label(canvas, (685, 55, width - 20, 89), heading, 24, MUTED, "right", fit=True)
     rating_number(canvas, (width - 267, 95, width - 19, 151), value, 4)
     y = 250
-    for title, limit, items, mean, color in groups:
+    for (title, _, items, mean, color), (titles, strides) in zip(groups, layouts):
         rounded(canvas, (15, y + 15, 23, y + 57), 4, color)
         label(canvas, (36, y + 5, 330, y + 66), title, 39, INK)
         label(canvas, (335, y + 5, width - 17, y + 66), f"均值 {mean:.4f}", 27, MUTED, "right")
         y += 76
-        for i, item in enumerate(items):
-            check_render_cancelled(stopped)
-            card = _card(item, i + 1, jacket_images.get(item["jacket_id"]))
-            canvas.paste(card, (12 + i % COLUMNS * (CARD_WIDTH + GAP), y + i // COLUMNS * stride))
-        y += math.ceil(limit / COLUMNS) * stride
+        for row, stride in enumerate(strides):
+            for i in range(row * COLUMNS, min((row + 1) * COLUMNS, len(items))):
+                check_render_cancelled(stopped)
+                item = items[i]
+                card = _card(item, i + 1, jacket_images.get(item["jacket_id"]), titles[i])
+                canvas.paste(card, (12 + i % COLUMNS * (CARD_WIDTH + GAP), y))
+            y += stride
     check_render_cancelled(stopped)
     return png(canvas)
 

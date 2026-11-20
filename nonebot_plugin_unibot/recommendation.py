@@ -1,174 +1,113 @@
-from nonebot.adapters.onebot.v11 import Bot
-from .services.job_store import async_call
-from .services.results import outcome, image
-import random
-from io import BytesIO
+import asyncio
+from collections import OrderedDict
+import time
 
-from PIL import Image, ImageDraw, ImageFont
 from nonebot import on_regex
-from nonebot.adapters.onebot.v11 import MessageEvent, MessageSegment
+from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 
-from .song import get_font, get_version_name, wrap_text_with_height, draw_text, download_jacket, make_empty_jacket
+from .services.chat_cards import INK, LINE, MUTED, PAPER, TEAL, artwork, frame, lines
+from .services.image_components import badge, label, png, rounded, score_digits, wrap
+from .services.job_store import async_render, check_render_cancelled
+from .services.recommendation import MODES, parse_filter, select
+from .services.results import image, outcome
+from .services.song_images import _difficulty
+from .song import download_jacket
 
 
 recommend_cmd = on_regex(r"^推什么\s*(.+)?$", priority=5, block=True)
+_recent = OrderedDict()
 
-def render_recommendation_image(song: dict, diff: dict, user_score: int, user_op: float, max_op: float, jacket_img: Image.Image | None, has_score: bool) -> bytes:
-    BG_COLOR = (30, 30, 35, 255)
-    PANEL_COLOR = (45, 45, 52, 255)
-    TEXT_MAIN = (245, 245, 245, 255)
-    TEXT_SUB = (180, 180, 180, 255)
 
-    DIFF_COLORS = [
-        (46, 204, 113),   # BASIC
-        (241, 196, 15),   # ADVANCED
-        (231, 76, 60),    # EXPERT
-        (155, 89, 182),   # MASTER
-        (30, 30, 30),     # ULTIMA
-        (243, 156, 18)    # WORLD'S END
-    ]
-    DIFF_NAMES = ["BASIC", "ADVANCED", "EXPERT", "MASTER", "ULTIMA", "WORLD'S END"]
+def remember(scope, mode, level, rows):
+    key = (scope, mode, level)
+    _recent[key] = time.monotonic(), tuple((row["song_id"], row["level_index"]) for row in rows)
+    _recent.move_to_end(key)
+    if len(_recent) > 64:
+        _recent.popitem(last=False)
 
-    font_title = get_font(36, "Bold")
-    font_head = get_font(24, "Medium")
-    font_body = get_font(20, "Normal")
-    font_diff = get_font(28, "Bold")
-    font_op = get_font(26, "Bold")
-    font_small = get_font(16, "Normal")
 
-    diff_idx = diff.get("difficulty", 0)
-    color = DIFF_COLORS[diff_idx] if diff_idx < len(DIFF_COLORS) else (100, 100, 100)
-    diff_name = DIFF_NAMES[diff_idx] if diff_idx < len(DIFF_NAMES) else f"DIFF {diff_idx}"
+def _op(value):
+    return "未知" if value is None else f"{value:.2f}"
 
-    card_width = 800
-    temp_img = Image.new("RGBA", (card_width, 800), BG_COLOR)
-    draw = ImageDraw.Draw(temp_img)
 
-    jacket_size = 200
-    jacket_img = jacket_img or make_empty_jacket(jacket_size)
-    jacket_img = jacket_img.resize((jacket_size, jacket_size), Image.Resampling.LANCZOS)
-    temp_img.paste(jacket_img, (40, 40), jacket_img if jacket_img.mode == "RGBA" else None)
+def render_recommendation_image(picks, jackets, stopped=None):
+    cards = []
+    for mode, candidate in picks:
+        check_render_cancelled(stopped)
+        data = candidate.data(mode)
+        size = 33
+        title = wrap(data["title"], size, 504)
+        if len(title) >= 4:
+            size = 29
+            title = wrap(data["title"], size, 504)
+        reason = wrap(data["reason"], 23, 704)
+        head = max(162, 89 + 42 * len(title))
+        cards.append((mode, candidate, data, title, size, reason, head, head + 224 + len(reason) * 31))
 
-    info_x = 40 + jacket_size + 30
-    current_y = 40
-    
-    title = song.get("title", "Unknown")
-    artist = song.get("artist", "-")
-    bpm = song.get("bpm", 0)
-    genre = song.get("genre", "-")
-    version_raw = song.get("version", "-")
-    version = get_version_name(version_raw, song.get("_versions", []))
+    canvas = frame("推什么", 143 + sum(card[-1] + 12 for card in cards))
+    y = 83
+    for mode, candidate, data, title, size, reason, head, height in cards:
+        check_render_cancelled(stopped)
+        rounded(canvas, (20, y, 780, y + height), 16, PAPER, LINE)
+        artwork(canvas, jackets.get(data["song_id"]), (36, y + 17, 176, y + 157))
+        label(canvas, (193, y + 10, 745, y + 43), MODES[mode], 24, TEAL)
+        top = lines(canvas, title, 193, y + 43, 750, size, 42, INK)
+        _difficulty(canvas, 193, top, data["level_index"], compact=True)
+        label(canvas, (390, top, 746, top + 43), f"{data['level']}  ·  定数 {data['level_value']:.1f}", 25, INK)
+        top = y + head + 9
+        rounded(canvas, (36, top, 764, top + 96), 10, "#eff6f6")
+        label(canvas, (49, top + 3, 367, top + 32), "当前成绩", 22, MUTED)
+        if data["score"] is None:
+            label(canvas, (49, top + 33, 365, top + 84), "落雪无成绩记录", 28, INK)
+        else:
+            score_digits(canvas, (47, top + 35, 272, top + 84), data["score"])
+            badge(canvas, (288, top + 37, 382, top + 82), "rank", candidate.record.get("rank"))
+        label(canvas, (403, top + 3, 748, top + 32), "目标  " + data["objective"], 24, TEAL)
+        if data["target_score"] is not None:
+            score_digits(canvas, (401, top + 35, 634, top + 84), data["target_score"])
+        else:
+            label(canvas, (403, top + 34, 749, top + 82), "达成连击标记", 28, INK)
+        top += 104
+        for index, (caption, value) in enumerate((
+            ("当前谱面 OP", data["current_chart_op"]), ("当前歌曲 OP", data["current_song_op"]),
+            ("本谱理论上限", data["theoretical_chart_op"]), ("本谱有效理论空间", data["theoretical_effective_room"]),
+        )):
+            x = 45 + index % 2 * 359
+            line = top + index // 2 * 36
+            label(canvas, (x, line, x + 344, line + 35), f"{caption}  {_op(value)}", 23, INK)
+        lines(canvas, reason, 45, top + 77, 749, 23, 31, MUTED)
+        y += height + 12
+    label(canvas, (28, y, 772, y + 43), "同曲取最高 OP · 理论空间为上界 · 实际提升未知", 23, MUTED, fit=True)
+    check_render_cancelled(stopped)
+    return png(canvas)
 
-    title_wrapped, _, t_h = wrap_text_with_height(title, font_title, card_width - info_x - 40, draw)
-    draw_text(draw, (info_x, current_y), title_wrapped, font_title, TEXT_MAIN)
-    current_y += t_h + 15
-    
-    draw_text(draw, (info_x, current_y), f"Artist: {artist}", font_head, TEXT_SUB)
-    current_y += 35
 
-    draw_text(draw, (info_x, current_y), f"BPM: {bpm}   Genre: {genre}", font_body, TEXT_SUB)
-    current_y += 30
-    
-    draw_text(draw, (info_x, current_y), f"Version: {version}", font_body, TEXT_SUB)
-    current_y += 40
-
-    start_y = max(current_y, 40 + jacket_size + 30)
-
-    # 画谱面框
-    box_h = 160 if has_score else 80
-    draw.rounded_rectangle([40, start_y, card_width - 40, start_y + box_h], radius=8, fill=PANEL_COLOR)
-    
-    stripe_color = color if diff_idx != 4 else (20, 20, 20)
-    draw.rounded_rectangle([40, start_y, 55, start_y + box_h], radius=8, fill=stripe_color)
-    draw.rectangle([48, start_y, 55, start_y + box_h], fill=stripe_color)
-    
-    if diff_idx == 4:
-        draw.rounded_rectangle([40, start_y, card_width - 40, start_y + box_h], radius=8, fill=None, outline=(220, 50, 50), width=2)
-        text_color = (255, 255, 255)
-    else:
-        text_color = color
-
-    level_value_str = f"{float(diff.get('level_value', 0)):.1f}"
-    draw_text(draw, (70, start_y + 20), f"{diff_name} {diff.get('level', '')} ({level_value_str})", font_diff, text_color)
-
-    if has_score:
-        draw_text(draw, (70, start_y + 70), f"Current Score: {user_score}", font_body, TEXT_MAIN)
-        op_diff = max_op - user_op
-        draw_text(draw, (70, start_y + 110), f"OP: {user_op:.2f} / {max_op:.2f}  (可推: +{op_diff:.2f})", font_op, (255, 215, 0))
-
-    end_y = start_y + box_h + 30
-    draw.line([(40, end_y), (card_width - 40, end_y)], fill=(98, 114, 164), width=2)
-    draw_text(draw, (40, end_y + 15), "Generated by Robinbot | unibot", font_small, TEXT_SUB)
-
-    final_img = temp_img.crop((0, 0, card_width, int(end_y + 60)))
-    buf = BytesIO()
-    final_img.convert("RGB").save(buf, format="JPEG", quality=90)
-    return buf.getvalue()
-
-async def recommend_chart(snapshot, query_text, catalog):
-    msg_raw = query_text
-    prefix = '推什么'
-    level_filter = None
-    status_filter = None
-    if msg_raw.startswith(prefix):
-        level_filter = msg_raw[len(prefix):].strip()
-        if level_filter.lower() in ('aj', 'ajc', 'fc'):
-            status_filter = level_filter.lower()
-            level_filter = None
-        elif not level_filter:
-            level_filter = None
-    from .services.rating import eligible
-    allowed = {(str(s.id), c.difficulty) for s in catalog.songs.values() for c in s.charts if eligible(s, c)}
-    songs = catalog.as_dict()["songs"]
-    score_dict = {f"{row['id']}_{row['level_index']}": row for row in snapshot.scores}
-    candidates = []
-    for song in songs:
-        song_id = str(song.get('id'))
-        for diff in song.get('difficulties', []):
-            level_index = str(diff.get('difficulty', ''))
-            if level_index not in ('3', '4') or (song_id, diff.get('difficulty')) not in allowed:
-                continue
-            level_str = str(diff.get('level', ''))
-            level_value = float(diff.get('level_value', 0.0))
-            if level_filter and level_str != level_filter:
-                continue
-            max_op = (level_value + 3.0) * 5.0
-            key = f'{song_id}_{level_index}'
-            s_info = score_dict.get(key)
-            user_sc = 0
-            user_op = 0.0
-            fc = ''
-            if s_info:
-                user_sc = int(s_info.get('score', 0))
-                fc = str(s_info.get('full_combo', '')).lower()
-                user_op = s_info['over_power']
-            if status_filter:
-                can_push = False
-                if status_filter == 'ajc':
-                    can_push = fc != 'alljusticecritical'
-                elif status_filter == 'aj':
-                    can_push = fc not in ('alljustice', 'alljusticecritical')
-                elif status_filter == 'fc':
-                    can_push = fc not in ('fullcombo', 'alljustice', 'alljusticecritical')
-                if can_push:
-                    candidates.append((song, diff, user_sc, user_op, max_op))
-            elif max_op - user_op > 0.001:
-                candidates.append((song, diff, user_sc, user_op, max_op))
-    if not candidates:
-        return outcome('NOT_FOUND', '未找到符合条件可推的谱面。', status='needs_input')
-        return
-    chosen_song, chosen_diff, user_score, user_op, max_op = random.choice(candidates)
-    song_id = int(chosen_song.get('id', 0))
-    chosen_song["_versions"] = catalog.metadata.get("versions", [])
-    jacket_img = await download_jacket(song_id)
-    has_score = f"{song_id}_{chosen_diff['difficulty']}" in score_dict
-    img_bytes = await async_call(render_recommendation_image, chosen_song, chosen_diff, user_score, user_op, max_op, jacket_img, has_score)
-    return outcome(data={'song_id': song_id, 'title': chosen_song.get('title'), 'score': user_score, 'current_op': user_op, 'theoretical_op': max_op}, artifacts=[image(img_bytes)])
+async def recommend_chart(snapshot, catalog, mode, level, scope):
+    timestamp, previous = _recent.get((scope, mode, level), (0, ()))
+    picks = await async_render(select, snapshot, catalog, mode, level,
+                               previous if time.monotonic() - timestamp < 300 else ())
+    if not picks:
+        return outcome("NOT_FOUND", "没有符合筛选条件且有足够成绩依据的谱面。"
+                       "可以放宽筛选，或先在落雪记录几首同定数附近的成绩。", status="needs_input")
+    song_ids = [candidate.song.id for _, candidate in picks]
+    jackets = dict(zip(song_ids, await asyncio.gather(*(download_jacket(sid) for sid in song_ids))))
+    content = await async_render(render_recommendation_image, picks, jackets)
+    return outcome(data={"mode": mode, "level": level,
+                         "recommendations": [candidate.data(kind) for kind, candidate in picks]},
+                   artifacts=[image(content)])
 
 
 @recommend_cmd.handle()
 async def _(bot: Bot, event: MessageEvent):
     from .services.media_jobs import submit
-    result = await submit(bot, event, "player.recommend", {"filter": event.get_plaintext().strip()[3:].strip()}, origin="command")
     from .services.results import send_command_result
+
+    try:
+        filters = event.get_plaintext().strip()[3:].strip()
+        parse_filter(filters)
+    except ValueError as error:
+        await send_command_result(recommend_cmd, outcome("INVALID_ARGUMENTS", str(error), status="needs_input"),
+                                  finish=True)
+        return
+    result = await submit(bot, event, "player.recommend", {"filter": filters}, origin="command")
     await send_command_result(recommend_cmd, result, finish=True)

@@ -1,9 +1,9 @@
 """The single guessing-game state machine shared by commands and Agent tools."""
 from __future__ import annotations
 import asyncio
-import io
 import time
 from uuid import uuid4
+from .job_store import async_call
 from .results import outcome, image
 
 
@@ -51,13 +51,13 @@ def _consume(c, key, game):
 
 
 async def _result_image(c, game, score, **kwargs):
-    return await asyncio.to_thread(c.make_game_result_image, game["song"], game["jacket"],
+    return await async_call(c.make_game_result_image, game["song"], game["jacket"],
         game["crop_x"], game["crop_y"], game["crop_w"], game["crop_h"], game["difficulty"], score, **kwargs)
 
 
 async def hint(group_id, *, expected_round=None):
     from .. import chuguess as c
-    from nonebot.adapters.onebot.v11 import Message, MessageSegment
+    from nonebot.adapters.onebot.v11 import Message
     key = str(group_id)
     async with await c._get_group_lock(key):
         game = c.active_games.get(key)
@@ -73,8 +73,7 @@ async def hint(group_id, *, expected_round=None):
         if kind == "text":
             result["data"]["hint"] = str(content)
         elif kind in ("location", "more_area"):
-            label = "[提示] 截取位置:" if kind == "location" else "[提示] 额外曲绘区域:"
-            result["artifacts"] = [dict(kind="message", content=Message([MessageSegment.text(label), content]))]
+            result["artifacts"] = [dict(kind="message", content=Message([content]))]
         else:
             return outcome("NO_HINT", "获取提示失败，请稍后再试。", status="unavailable")
         result.update(effect="local_write", side_effect_state="committed")
@@ -114,15 +113,11 @@ async def start(group_id, difficulty="mas", *, bot_id=None, delivery_context=Non
         config = c.DIFFICULTY_CONFIG[difficulty]
         def crop():
             cropped, x, y, w, h = c.crop_jacket(jacket, config["ratio"])
-            buffer = io.BytesIO()
-            converted = cropped.convert("RGB")
             try:
-                converted.save(buffer, format="JPEG", quality=90)
-                return buffer.getvalue(), x, y, w, h
+                return c.make_clue_image(cropped, "猜猜这首歌"), x, y, w, h
             finally:
-                converted.close()
                 cropped.close()
-        content, x, y, w, h = await asyncio.to_thread(crop)
+        content, x, y, w, h = await async_call(crop)
         game = dict(song=song, jacket=jacket, crop_x=x, crop_y=y, crop_w=w, crop_h=h,
                     difficulty=difficulty, score=config["score"], start_time=time.time(), hints_used=set(),
                     name_reveal_step=0, revealed_areas=[(x,y,w,h)], group_id=key, bot_id=bot_id, round_id=uuid4().hex)

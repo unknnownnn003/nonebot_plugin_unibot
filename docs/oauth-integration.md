@@ -27,7 +27,7 @@ B30、B50与进度图的说明文字和图片一起进入持久投递计划，�
 
 ## 三插件契约
 
-- UniBot API_VERSION=1，CAPABILITY_VERSION=4.1.0，共25项公开能力；新增 `nb_unibot_b50`，`nb_unibot_best`保持B30单榜，`nb_unibot_song_scores`保留单曲。OAuth不交给模型代理。
+- UniBot API_VERSION=1，共25项公开能力；`nb_unibot_b50` 提供 B50，`nb_unibot_best` 提供 B30 单榜，`nb_unibot_song_scores` 提供单曲成绩。OAuth 操作仅通过原生命令。
 - 综合插件移除 `get_player_score` 模块映射，`scores` 显示为“OAuth 授权与账号管理”，维护菜单仅剩国服曲库、曲绘、收藏品、剧情。内部 `oauth.manage`映射到原`scores`；`player.*`继续映射`player`，推荐仍为`recommend`。不改变 `_policy_version=2`、八个功能键或持久用户选择。
 - LLMChat清理退役好友码、手动传分、同步、附件导入和日服维护的工具名称；动态发现当前已加载提供者，按真实身份和当前授权生成上下文目录。能力概览区分B30/B50/单曲。
 - LLMChat的 `tools/export_capabilities.py` 从公开schema生成现有 `docs/v3.1/CAPABILITIES.json` 审查快照（68项，UniBot25 + 综合43）。不加载宿主、不读取凭据或运行数据。旧v3.1过程文档保留为历史记录。

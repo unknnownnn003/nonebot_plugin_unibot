@@ -37,8 +37,14 @@ async def query(bot, event, capability, arguments, *, expected=None, checkpoint=
             from ..overpower_list_local import query_progress
             output = await query_progress(snapshot, arguments["query"], catalog)
         elif capability == "player.recommend":
-            from ..recommendation import recommend_chart
-            output = await recommend_chart(snapshot, "推什么 " + arguments.get("filter", ""), catalog)
+            from ..recommendation import recommend_chart, remember
+            from .recommendation import parse_filter
+            try:
+                mode, level = parse_filter(arguments.get("filter", ""))
+            except ValueError as error:
+                return outcome("INVALID_ARGUMENTS", str(error), status="needs_input")
+            scope = (str(bot.self_id), str(event.user_id), getattr(event, "group_id", None), snapshot.binding)
+            output = await recommend_chart(snapshot, catalog, mode, level, scope)
         elif capability == "player.song_scores":
             output = await song_scores(snapshot, catalog, **arguments)
         else:
@@ -52,6 +58,8 @@ async def query(bot, event, capability, arguments, *, expected=None, checkpoint=
             raise PlayerError("AUTHORIZATION_CHANGED")
         if not group_policy.enabled(event, capability):
             raise PlayerError("FEATURE_DISABLED")
+        if capability == "player.recommend" and output["code"] == "OK":
+            remember(scope, mode, level, output["data"]["recommendations"])
         output.setdefault("data", {}).update(source="lxns_oauth", cache_hit=snapshot.cache_hit,
             cache_ttl_seconds=60, unmatched_scores=unmatched)
         if unmatched:

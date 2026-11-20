@@ -146,10 +146,10 @@ async def check_progress(snapshot):
         assert segments.getpixel((x,2)) == ImageColor.getrgb(color)
 
     small = replace(snapshot, player=chosen, scores=scores)
-    with patch.object(pi, 'label', wraps=pi.label) as labels:
+    with patch.object(pi, 'label', wraps=pi.label) as labels, patch.object(pi, 'score_digits', wraps=pi.score_digits) as digits:
         result = await op.query_progress(small, '14+ ori', base)
     assert result['data']['played'] == 1 and result['data']['chart_count'] == 3
-    assert any(call.args[2] == 0 for call in labels.call_args_list)
+    assert [call.args[2] for call in digits.call_args_list] == [0]
     assert sum(call.args[2] == '未游玩' for call in labels.call_args_list) == 2
     assert any(call.args[2] == 'D' for call in labels.call_args_list)
     assert any(call.args[2] == '缺曲绘' for call in labels.call_args_list)
@@ -263,6 +263,11 @@ async def run():
             if cap=='player.progress':
                 assert result['data']['page']==1
                 assert result['artifacts'][0]['content'].startswith(b'\x89PNG')
+            if cap=='player.recommend':
+                rows=result['data']['recommendations']
+                assert 1 <= len(rows) <= 3 and len({row['song_id'] for row in rows})==len(rows)
+                assert all(row['predicted_effective_gain'] is None for row in rows)
+                assert result['artifacts'][0]['content'].startswith(b'\x89PNG')
             if cap=='player.best':
                 assert result['data']['chart_count']==2
                 assert abs(result['data']['b30_average']-1.09)<1e-9
@@ -336,7 +341,7 @@ async def run():
         assert rendered['full_combo']=='' and rendered['full_chain']=='fullchain'
         result=await player.query(bot,e,'player.song_scores',{'query':'Same title'})
         assert result['code']=='AMBIGUOUS_TARGET'
-        specs=llm_api.describe_capabilities();assert len(specs)==25 and llm_api.CAPABILITY_VERSION=='4.1.0'
+        specs=llm_api.describe_capabilities();assert len(specs)==25 and llm_api.CAPABILITY_VERSION=='4.2.0'
         assert not {'player.bind','score.submit','score.sync','score.import_file'} & {s['id'] for s in specs}
         assert next(s for s in specs if s['id']=='player.best')['native_commands'][0].get('aliases',[])==[]
         for method in [llm_api.prepare_capability,llm_api.invoke_capability]:
@@ -424,8 +429,9 @@ async def run():
         # A task queued with an old binding cannot execute after relinking.
         bind();_,old_binding=await auth.credential_lease('1','7')
         await auth.unlink('1','7');bind()
-        result=await player.query(bot,e,'player.best',{},expected=old_binding)
-        assert result['code']=='AUTHORIZATION_CHANGED'
+        for cap in ('player.best', 'player.recommend'):
+            result=await player.query(bot,e,cap,{},expected=old_binding)
+            assert result['code']=='AUTHORIZATION_CHANGED'
         # Revocation while a background renderer runs also discards completed image bytes.
         original_draw=b.draw_b30_image
         def revoke_during_render(*args):
@@ -441,6 +447,14 @@ async def run():
             return original_progress(*args)
         with patch.object(op,'draw_chulist_image',side_effect=revoke_during_progress):
             revoked=await player.query(bot,e,'player.progress',{'query':'old'})
+        assert revoked['code']=='AUTHORIZATION_CHANGED' and not revoked['artifacts']
+        bind()
+        original_rec=rec.render_recommendation_image
+        def revoke_during_recommendation(*args):
+            store.unlink('1:7')
+            return original_rec(*args)
+        with patch.object(rec,'render_recommendation_image',side_effect=revoke_during_recommendation):
+            revoked=await player.query(bot,e,'player.recommend',{})
         assert revoked['code']=='AUTHORIZATION_CHANGED' and not revoked['artifacts']
         bind()
         # Cancel during a live network request; late response never enters cache or sends.
@@ -480,13 +494,35 @@ async def run():
         assert progress_job.status in {'cancelled','failed'} and progress_job.result['code']=='JOB_CANCELLED'
         assert len(cards)==1 and not encoded
         assert all(segment.type != 'image' for _,kwargs in sent[before:] for segment in kwargs['message'])
+        entered.clear()
+        cards.clear()
+        original_artwork=rec.artwork
+        def paused_recommendation(*args):
+            def paused_artwork(*card_args):
+                cards.append(1)
+                loop.call_soon_threadsafe(entered.set)
+                assert args[-1].wait(5)
+                return original_artwork(*card_args)
+            with patch.object(rec,'artwork',side_effect=paused_artwork), patch.object(rec,'png',side_effect=lambda *_: encoded.append(True)):
+                return original_rec(*args)
+        rec_event=event().model_copy(update={'message_id':204})
+        before=len(sent)
+        with patch.object(rec,'render_recommendation_image',side_effect=paused_recommendation):
+            output=await media_jobs.submit(bot,rec_event,'player.recommend',{},origin='command')
+            job_id=output['data']['job_id']
+            await asyncio.wait_for(entered.wait(),5)
+            await sync.query(bot,rec_event,'cancel',job_id)
+            rec_job=await wait(job_id)
+        assert rec_job.result['code']=='JOB_CANCELLED' and len(cards)==1 and not encoded
+        assert all(segment.type != 'image' for _,kwargs in sent[before:] for segment in kwargs['message'])
         # Original group policy must also guard old player result materials.
         group_job=replace(job,context_type='group',context_id='123')
         allowed=False
         assert not await pd.job_authorized(group_job)
         before_calls=len(api_calls);before_sent=len(sent)
-        result=await media_jobs.submit(bot,g,'player.best',{})
-        assert result['code']=='FEATURE_DISABLED' and len(api_calls)==before_calls and len(sent)==before_sent
+        for cap in ('player.best', 'player.recommend'):
+            result=await media_jobs.submit(bot,g,cap,{})
+            assert result['code']=='FEATURE_DISABLED' and len(api_calls)==before_calls and len(sent)==before_sent
         # Historical retired queue entries do not import the deleted implementation.
         result=await sync.submit_operation(bot,e,'score.sync','retired',{})
         assert result['code']=='CAPABILITY_RETIRED'
@@ -498,7 +534,9 @@ print('PLAYER_HOST_OK')
 '''
         with tempfile.TemporaryDirectory() as directory:
             env=dict(os.environ,PYTHONIOENCODING='utf-8',PYTHONUTF8='1',PYTHONDONTWRITEBYTECODE='1')
-            result=subprocess.run([sys.executable,'-c','from pathlib import Path\nSOURCE=Path('+repr(str(ROOT))+')\n'+script],cwd=directory,env=env,capture_output=True,text=True,encoding='utf-8',timeout=90)
+            fixture_path = Path(directory) / 'player_host.py'
+            fixture_path.write_text(f'from pathlib import Path\nSOURCE=Path({str(ROOT)!r})\n' + script, encoding='utf-8')
+            result=subprocess.run([sys.executable,str(fixture_path)],cwd=directory,env=env,capture_output=True,text=True,encoding='utf-8',timeout=90)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
             self.assertIn('PLAYER_HOST_OK',result.stdout)
 

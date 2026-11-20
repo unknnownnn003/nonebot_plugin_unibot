@@ -37,7 +37,8 @@ async def prepare(query, *, catalog=None):
     song, ambiguous = s.pick_song_match(matches)
     total = len(ambiguous)
     page = min(page, max(1, (total + 7) // 8))
-    return {"song": song, "ambiguous": ambiguous[(page-1)*8:page*8], "total": total, "page": page}
+    return {"song": song, "ambiguous": ambiguous[(page-1)*8:page*8],
+            "query": query.strip(), "total": total, "page": page}
 
 
 async def search(query, *, prepared=None):
@@ -46,7 +47,8 @@ async def search(query, *, prepared=None):
     local_song, ambiguous = resolved["song"], resolved["ambiguous"]
     if ambiguous:
         jackets = await asyncio.gather(*(s.download_match_jacket(m) for m in ambiguous[:8]))
-        content = await async_call(s.render_song_candidates_image, f"{query}  ·  共 {resolved.get('total', len(ambiguous))} 首 / 第 {resolved.get('page', 1)} 页", ambiguous, list(jackets))
+        content = await async_call(s.render_song_candidates_image, resolved.get("query", query),
+                                   ambiguous, list(jackets), resolved["total"], resolved["page"])
         return outcome("AMBIGUOUS_TARGET", page_hint(resolved), status="needs_input",
                        data={"total": resolved.get("total", len(ambiguous)), "page": resolved.get("page", 1), "candidates": [{"id": m["song"].get("id"), "title": m["song"].get("title")} for m in ambiguous[:8]]},
                        artifacts=[image(content)])

@@ -1,39 +1,26 @@
 from nonebot.adapters.onebot.v11 import Bot
-import io
-import os
-import platform
-from PIL import Image, ImageDraw, ImageFont
+from .services.chat_cards import INK, LINE, MUTED, PAPER, TEAL, frame, lines
+from .services.image_components import label, png, rounded, wrap
 
 from nonebot import on_command
 from nonebot.adapters import Event
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
-from nonebot.exception import FinishedException
-from nonebot.log import logger
 from nonebot.params import CommandArg
 
 chuhelp_cmd = on_command("chuhelp", aliases={"中二帮助"}, priority=5, block=True)
 
-def get_font(size, weight="Normal"):
-    weight = "Regular" if weight == "Normal" else weight
-    try:
-        if platform.system() == "Windows":
-            return ImageFont.truetype("msyh.ttc", size)
-        else:
-            font_paths = [
-                f"/usr/share/fonts/opentype/SourceHanSans/SourceHanSansSC-{weight}.otf",
-                f"/usr/share/fonts/truetype/custom/SourceHanSansSC-{weight}.otf",
-                f"/usr/share/fonts/opentype/noto/NotoSansCJK-{weight}.ttc",
-                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-                "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc"
-            ]
-            for p in font_paths:
-                if os.path.exists(p): return ImageFont.truetype(p, size)
-            return ImageFont.load_default()
-    except: return ImageFont.load_default()
-
 HELP_SECTIONS = [
+    ("曲库与推荐", [
+        ("/查歌 [曲名、别名或 ID]", "也可发送「[曲名或别名]是什么歌」。候选过多时加 --page 页码翻页。"),
+        ("推什么", "授权后按成绩推荐三张不同谱面，分别练分数、OP 和综合表现。"),
+        ("推什么 推分 / 推OP / 综合", "指定一种方向。可加显示等级或定数，例如「推什么 14+ 推OP」或「推什么 14.8」。"),
+        ("推什么 fc / aj / ajc", "寻找有成绩依据、尚未达成的连击目标，可加等级或定数。"),
+        ("/查看别名 [曲名、别名或 ID]", "查看本地与收录来源的别名，支持简繁、罗马音和变体字查找。"),
+        ("/添加别名 [ID] [别名]", "为指定歌曲添加本地别名。"),
+    ]),
     ("账号与成绩", [
-        ("/落雪授权", "群内网页授权并确认，无需私聊；请及时撤回链接和确认指令"),
+        ("/落雪授权", "在当前聊天发起网页授权，绑定成功后 Bot 会尝试撤回原授权链接。"),
+        ("/落雪确认 <网页确认串>", "由发起授权的本人提交，群内请自行撤回确认指令。"),
         ("/落雪授权状态", "在当前聊天查看本人 OAuth 授权状态"),
         ("/落雪解绑 确认", "解除授权、使缓存失效；还需在落雪应用管理撤销"),
         ("/b30", "全版本普通谱面Rating前30均值，非玩家总Rating；缺位计零"),
@@ -41,13 +28,6 @@ HELP_SECTIONS = [
         ("/chu成绩 [歌名或ID] [难度]", "查询单曲全部已记录成绩，支持别名；WE归入明确原曲并保留ID"),
         ("/chuinfo", "读取本人完整 OAuth 玩家资料；别名 /个人信息、/分数"),
         ("/chulist <条件> [--nocat] [--page 页码]", "已配信 MASTER/ULTIMA 逐谱面统计；可按显示等级、定数、版本、分类组合筛选"),
-    ]),
-    ("曲库与推荐", [
-        ("[曲名/别名/ID]是什么歌", "查询歌曲详情，支持别名、罗马音、简繁体和变体字匹配"),
-        ("/添加别名 [ID] [别名]", "为歌曲添加自定义本地别名"),
-        ("/删除别名 [ID] [别名]", "删除指定歌曲的本地别名，仅 SUPERUSER 可用"),
-        ("/查看别名 [模糊查询/ID/别名]", "查看指定歌曲的本地及官方别名"),
-        ("推什么 [条件]", "按条件随机推荐可推分曲目，建议范围限定在国服曲库"),
     ]),
     ("曲绘猜曲", [
         ("/chuguess [难度]", "开始曲绘猜曲游戏，难度可选 bas/adv/exp/mas/ult，默认 mas"),
@@ -62,6 +42,7 @@ HELP_SECTIONS = [
         ("/剧情分类", "查看剧情分类；别名 /剧情列表"),
     ]),
     ("维护命令（SUPERUSER）", [
+        ("/删除别名 [ID] [别名]", "删除指定歌曲的本地别名。"),
         ("/更新songlist /更新曲库", "同步国服曲库及谱面，按原 ID 保留本地别名"),
         ("/更新曲绘 [全部|full]", "默认及全部补齐整库缺失与损坏曲绘；full 校验新图后替换旧图"),
         ("/更新收藏品", "同步收藏品资源"),
@@ -84,72 +65,27 @@ def help_text(topic=""):
     return "【UniBot 帮助】\n" + "\n\n".join("【" + name + "】\n" + "\n".join(cmd + "：" + desc for cmd, desc in items) for name, items in selected) + "\n\n/chuhelp 文字：完整文字版；/help：总帮助。日志群 /设置面板 可批量维护资源。命令前缀以宿主为准。"
 
 
-def wrap_line(draw, text, font, width):
-    lines, current = [], ""
-    for character in text:
-        if character == "\n":
-            lines.append(current)
-            current = ""
-        elif current and draw.textlength(current + character, font=font) > width:
-            lines.append(current)
-            current = character
-        else:
-            current += character
-    return lines + [current]
-
-
 def draw_help():
-    width = 980
-    img = Image.new("RGB", (width, 10), (30, 30, 46))
-    draw = ImageDraw.Draw(img)
+    sections = []
+    for name, items in HELP_SECTIONS:
+        commands = [(wrap(cmd, 27, 702), wrap(desc, 24, 702))
+                    for cmd, desc in items]
+        height = 54 + sum(len(cmd) * 36 + len(desc) * 32 + 10 for cmd, desc in commands)
+        sections.append((name, commands, height))
+    y = 83
+    canvas = frame("中二帮助", y + sum(height + 12 for _, _, height in sections) + 46, width=760)
+    for name, commands, height in sections:
+        admin = "SUPERUSER" in name
+        rounded(canvas, (14, y, 746, y + height), 14, PAPER, LINE)
+        label(canvas, (28, y + 5, 732, y + 47), name, 31, "#915321" if admin else TEAL)
+        top = y + 48
+        for cmd, desc in commands:
+            top = lines(canvas, cmd, 28, top, 732, 27, 36, INK)
+            top = lines(canvas, desc, 28, top, 732, 24, 32, MUTED) + 10
+        y += height + 12
+    label(canvas, (26, y, 734, y + 40), "/chuhelp 文字  ·  完整文字版     /help  ·  总帮助", 23, MUTED)
+    return png(canvas)
 
-    font_title = get_font(48, "Bold")
-    font_section = get_font(30, "Bold")
-    font_cmd = get_font(25, "Bold")
-    font_desc = get_font(21, "Normal")
-
-    commands = [(name, [("\n".join(wrap_line(draw, cmd, font_cmd, width - 116)),
-                           "\n".join(wrap_line(draw, desc, font_desc, width - 156)))
-                          for cmd, desc in items]) for name, items in HELP_SECTIONS]
-    
-    y = 135
-    for _, items in commands:
-        y += 48
-        for cmd, desc in items:
-            y += 38 * len(cmd.split("\n"))
-            for _ in desc.split('\n'):
-                y += 29
-            y += 6
-        y += 20
-        
-    height = y + 82
-    img = Image.new("RGB", (width, height), (30, 30, 46))
-    draw = ImageDraw.Draw(img)
-    
-    draw.text((40, 40), "Unibot 指令帮助", font=font_title, fill=(248, 248, 242))
-    draw.line([(40, 110), (width - 40, 110)], fill=(98, 114, 164), width=2)
-
-    y = 135
-    for section, items in commands:
-        draw.text((40, y), section, font=font_section, fill=(241, 250, 140))
-        y += 48
-        for cmd, desc in items:
-            for line in cmd.split("\n"):
-                draw.text((58, y), line, font=font_cmd, fill=(255, 121, 198))
-                y += 38
-            for line in desc.split('\n'):
-                draw.text((78, y), line, font=font_desc, fill=(139, 233, 253))
-                y += 29
-            y += 6
-        y += 20
-        
-    draw.line([(40, y + 10), (width - 40, y + 10)], fill=(98, 114, 164), width=2)
-    font_footer = get_font(18, "Normal")
-    draw.text((40, y + 30), "Generated by Robinbot | unibot", font=font_footer, fill=(191, 191, 191))
-    
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
 
 @chuhelp_cmd.handle()
 async def _(bot: Bot, event: Event, args: Message = CommandArg()):

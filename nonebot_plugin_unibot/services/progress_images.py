@@ -3,13 +3,12 @@ from dataclasses import dataclass
 from decimal import Decimal
 from functools import lru_cache
 from itertools import groupby
-from math import ceil
 
 from PIL import Image, ImageColor, ImageDraw, ImageOps
 
 from . import resources
 from .chart_progress import ChartProgress, summarize
-from .image_components import RESAMPLE, brand, contain, cover, label, playerbar, png, rounded
+from .image_components import RESAMPLE, brand, contain, cover, label, playerbar, png, rounded, score_digits, wrap
 from .job_store import check_render_cancelled
 
 INK, MUTED = "#182d43", "#3f5568"
@@ -42,6 +41,15 @@ class PageGroup:
     stats: dict
 
 
+@lru_cache(maxsize=512)
+def _title(value):
+    return wrap(value, 18, CARD_WIDTH - 14)
+
+
+def _stride(rows):
+    return STRIDE + 22 * (max(len(_title(row.song.attributes["title"])) for row in rows) - 1)
+
+
 def paginate(rows, *, grouped):
     """Pack consecutive rows while bounding both card count and canvas height."""
     pages, groups = [], []
@@ -51,14 +59,21 @@ def paginate(rows, *, grouped):
         stats = summarize(bucket)
         offset = 0
         while offset < len(bucket):
-            matrix_rows = max(0, (MAX_HEIGHT - height - GROUP_HEIGHT) // STRIDE)
-            take = min(len(bucket) - offset, PAGE_CARDS - count, matrix_rows * COLS)
+            take, cards_height = 0, 0
+            while offset + take < len(bucket) and count + take < PAGE_CARDS:
+                start = offset + take
+                batch = bucket[start:start + min(COLS, PAGE_CARDS - count - take)]
+                stride = _stride(batch)
+                if height + GROUP_HEIGHT + cards_height + stride > MAX_HEIGHT and (groups or take):
+                    break
+                take += len(batch)
+                cards_height += stride
             if take == 0:
                 pages.append(groups)
                 groups, height, count = [], HEADER + FOOTER, 0
                 continue
             groups.append(PageGroup(constant, tuple(bucket[offset:offset + take]), stats))
-            height += GROUP_HEIGHT + ceil(take / COLS) * STRIDE
+            height += GROUP_HEIGHT + cards_height
             count += take
             offset += take
     if groups:
@@ -225,7 +240,9 @@ def card(canvas, x, y, row, marked):
     if score is not None:
         band = "SSS+" if score >= 1009000 else "SSS" if score >= 1007500 else ""
     bg, outline = (("#e0e8eb", "#bdcbd0") if score is None else RANK_BG.get(band, (PAPER, LINE)))
-    rounded(canvas, (x, y, x + CARD_WIDTH - 1, y + STRIDE - 8), 10, bg, outline)
+    title = _title(row.song.attributes["title"])
+    offset = 22 * (len(title) - 1)
+    rounded(canvas, (x, y, x + CARD_WIDTH - 1, y + STRIDE + offset - 8), 10, bg, outline)
     cx, cy = x + 5, y + 5
     side = CARD_WIDTH - 10
     right, bottom = cx + side, cy + side
@@ -248,25 +265,30 @@ def card(canvas, x, y, row, marked):
         label(canvas, (right - 50, cy, right, cy + 22), "EXP↑", 16, PAPER, "center", fit=True)
     if row.tier:
         pill(canvas, (right - 44, bottom - 22, right, bottom), ACHIEVEMENTS[row.tier - 1][0], size=16)
-    label(canvas, (cx, bottom + 2, right, bottom + 24), row.song.attributes["title"], 18, INK)
+    for index, text in enumerate(title):
+        top = bottom + 2 + 22 * index
+        label(canvas, (cx, top, right, top + 22), text, 18, INK, fit=True)
+    bottom += offset
     if score is None:
         label(canvas, (cx, bottom + 24, right, bottom + 51), "未游玩", 18, MUTED)
     else:
-        label(canvas, (cx, bottom + 24, right, bottom + 51), score, 24, INK, fit=True)
+        score_digits(canvas, (cx, bottom + 25, right, bottom + 50), score)
         rank = rank_to_display(record.get("rank"))
         if not rank:
             rank = score_to_rank(score) if score >= 900000 else next(
                 name for cutoff, name in LOW_RANKS if score >= cutoff)
-        box = (cx, bottom - 23, cx + 56, bottom)
+        box = (cx, bottom - offset - 23, cx + 56, bottom - offset)
         rounded(canvas, box, 6, BADGES[band][0] if band else "#425d72")
         label(canvas, box, rank, 21, "#573400" if band else PAPER, "center", fit=True)
-    label(canvas, (cx, bottom + 51, right, y + STRIDE - 10),
+    label(canvas, (cx, bottom + 51, right, y + STRIDE + offset - 10),
           f"OP {row.op:.2f} / {row.maximum:.2f}", 14, MUTED, fit=True)
 
 
 def draw_chulist_image(player, images, query, stats, groups, page, page_count, marked, stopped=None):
-    height = HEADER + sum(GROUP_HEIGHT + ceil(len(group.rows) / COLS) * STRIDE for group in groups) + FOOTER
-    if height > MAX_HEIGHT or sum(len(group.rows) for group in groups) > PAGE_CARDS:
+    matrices = [[group.rows[i:i + COLS] for i in range(0, len(group.rows), COLS)] for group in groups]
+    strides = [[_stride(batch) for batch in matrix] for matrix in matrices]
+    height = HEADER + sum(GROUP_HEIGHT + sum(rows) for rows in strides) + FOOTER
+    if sum(len(group.rows) for group in groups) > PAGE_CARDS:
         raise ValueError("Oversized chulist page")
     canvas = Image.new("RGB", (WIDTH, height), BG)
     draw = ImageDraw.Draw(canvas)
@@ -301,7 +323,7 @@ def draw_chulist_image(player, images, query, stats, groups, page, page_count, m
 
     total = stats["chart_count"]
     y = HEADER
-    for group in groups:
+    for group, matrix, heights in zip(groups, matrices, strides):
         stats = group.stats
         rounded(canvas, (19, y, 1421, y + 115), 16, PAPER, LINE)
         rounded(canvas, (29, y + 10, 150, y + 70), 13, "#eadff3")
@@ -315,11 +337,14 @@ def draw_chulist_image(player, images, query, stats, groups, page, page_count, m
         achievement_track(canvas, (176, y + 50, 815, y + 71), stats)
         tally(canvas, 176, y + 78, 815, stats)
         extra_tally(canvas, y + 34, stats)
-        for index, row in enumerate(group.rows):
-            check_render_cancelled(stopped)
-            card(canvas, 24 + index % COLS * (CARD_WIDTH + CARD_GAP), y + 127 + index // COLS * STRIDE,
-                 row, (row.song.id, row.chart.difficulty) in marked)
-        y += GROUP_HEIGHT + ceil(len(group.rows) / COLS) * STRIDE
+        top = y + 127
+        for batch, stride in zip(matrix, heights):
+            for index, row in enumerate(batch):
+                check_render_cancelled(stopped)
+                card(canvas, 24 + index * (CARD_WIDTH + CARD_GAP), top,
+                     row, (row.song.id, row.chart.difficulty) in marked)
+            top += stride
+        y += GROUP_HEIGHT + sum(heights)
     count = sum(len(group.rows) for group in groups)
     label(canvas, (26, y, WIDTH - 26, y + 45),
           f"第 {page} / {page_count} 页     本页 {count} 张     共匹配 {total} 张",
