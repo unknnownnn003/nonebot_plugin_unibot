@@ -256,11 +256,13 @@ def check_recommendation_image():
     chart = song.charts[0]
     record = {"score": 999_700, "rank": "sp"}
     candidate = Candidate(song, chart, record, 85, 89, 89, 4, 1_000_000, "SS", "", 1, 1, 1)
-    assert rec._difficulty is song_images._difficulty and rec._level is song_images._level
+    assert rec.compact_difficulty is song_images.compact_difficulty
     assert rec.badge is image_components.badge and rec.score_digits is image_components.score_digits
-    with patch.object(rec, "_level", wraps=rec._level) as level, patch.object(rec, "label", wraps=rec.label) as labels:
+    with patch.object(song_images, "_level", wraps=song_images._level) as level, patch.object(song_images, "_difficulty", wraps=song_images._difficulty) as difficulty, patch.object(rec, "label", wraps=rec.label) as labels:
         content = rec.render_recommendation_image([("score", candidate)], {})
-    _, _, level_y, payload = level.call_args.args
+    _, level_x, level_y, payload = level.call_args.args
+    _, difficulty_x, difficulty_y, index = difficulty.call_args.args
+    assert (level_x - difficulty_x, difficulty_y - level_y, index) == (176, 14, 4)
     assert payload is chart.attributes and level.call_args.kwargs == {"compact": True}
     title_labels = [call for call in labels.call_args_list if call.args[1][0] == 193 and call.args[2] != "推分"]
     rows = [call.args[2] for call in title_labels]
@@ -294,6 +296,30 @@ def check_recommendation_image():
     assert [call.args[2] for call in digits.call_args_list] == [1_000_000]
     assert {"落雪无本谱成绩", "当前歌曲有效 OP", "本谱理论有效空间"} <= {call.args[2] for call in labels.call_args_list}
     assert not any("当前谱面 OP" in call.args[2] or "理论上限" in call.args[2] for call in labels.call_args_list)
+
+    for title in ("星を追いかけて ～ 夜航列车 / Beyond the Horizon ♫ × Ω ～ · 03",
+                  "空へ飛ぶ銀河鉄道 – Beyond the Sky / 星空列车 ♯ Ω · 05",
+                  "Æther × 夜航 星を追いかけて〜♫ " * 16 + " Étoile 03"):
+        lines, size = rec._wrap_title(title)
+        assert "".join("".join(lines).split()) == "".join(title.split())
+        assert len(lines) == 1 or image_components.measure(lines[-1], size) >= 110
+        assert all(image_components.measure(line, size) <= 550 for line in lines)
+    statuses = (("clear", "fullcombo"), ("hard", "alljustice"),
+                ("catastrophy", "alljusticecritical"), (None, "none"), (None, "fullcombo"))
+    for mode in ("score", "op"):
+        for clear, combo in statuses:
+            record_with_status = dict(record, clear=clear, full_combo=combo)
+            with patch.object(rec, "badge", wraps=rec.badge) as badges:
+                rec.render_recommendation_image([(mode, replace(candidate, record=record_with_status))], {})
+            current_rank = next(call for call in badges.call_args_list if call.args[2:] == ("rank", "sp"))
+            current_states = [call for call in badges.call_args_list if call.args[2] in ("clear", "combo")]
+            assert [call.args[2:] for call in current_states] == (
+                ([("clear", clear)] if clear else []) + ([("combo", combo)] if combo != "none" else []))
+            assert all(call.args[1][1] > current_rank.args[1][3] for call in current_states)
+            if mode == "score":
+                assert all(call.args[1][2] < 405 for call in current_states)
+            if len(current_states) == 1:
+                assert current_states[0].args[1][0] == current_rank.args[1][0]
 
 
 async def run():

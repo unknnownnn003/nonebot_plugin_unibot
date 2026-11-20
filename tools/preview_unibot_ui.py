@@ -1,5 +1,6 @@
 """Render real UniBot PNGs offline using public song metadata and synthetic scores."""
 import argparse
+from dataclasses import replace
 import asyncio
 from io import BytesIO
 import json
@@ -46,8 +47,8 @@ def recommendation_fixture():
                 scores.append(dict(id=sid, level_index=2, score=1_007_500, rating=16.3,
                                    over_power=84.4, rank="sss", full_combo="none"))
             if i < 8 or (group == 2 and i == 10):
-                points = 1_008_640 if i == 10 else score + (i - 3) * (250 if group < 2 else 100)
-                rank = next(rank for cutoff, rank in ((1_007_500, "sss"), (1_005_000, "ssp"),
+                points = 1_009_240 if i == 10 else score + (i - 3) * (250 if group < 2 else 100)
+                rank = next(rank for cutoff, rank in ((1_009_000, "sssp"), (1_007_500, "sss"), (1_005_000, "ssp"),
                             (1_000_000, "ss"), (990_000, "sp"), (975_000, "s"), (0, "aaa"))
                             if points >= cutoff)
                 op = round((value + 3) * 5 - (5.5 - group * 1.5) + i * .12, 2)
@@ -67,7 +68,8 @@ async def render(public_catalog, jacket_dir, output_dir):
     assert ui.digits("score", "platinum", "1,007,500") is not None
     assert all(ui.ui("level", key) is not None for key in ("standard-board", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "plus"))
     assert all(ui.ui("rank", key) is not None for key in ("ss", "ssp", "sss", "sssp"))
-    assert ui.ui("combo", "alljustice") is not None
+    assert all(ui.ui("combo", key) is not None for key in ("fullcombo", "alljustice", "alljusticecritical"))
+    assert all(ui.ui("clear", key) is not None for key in ("clear", "hard", "brave", "absolute", "catastrophy"))
     art = {}
     for sid in YADI_IDS:
         path = jacket_dir / f"{sid}.png"
@@ -90,7 +92,8 @@ async def render(public_catalog, jacket_dir, output_dir):
         "recommendation_op": select(high, catalog, "op", None, rng=Random(19)),
         "recommendation_long_title": select(high, catalog, "score", "15.2", rng=Random(19)),
         "recommendation_unplayed": select(high, catalog, "op", "15.1", rng=Random(19)),
-        "recommendation_combo": select(high, catalog, "aj", None, rng=Random(19)),
+        **{f"recommendation_{mode}": select(high, catalog, mode, None, rng=Random(19))
+           for mode in ("fc", "aj", "ajc")},
         "recommendation_beginner": demos["基础"],
         "recommendation_intermediate": demos["进阶"],
     }
@@ -101,6 +104,33 @@ async def render(public_catalog, jacket_dir, output_dir):
     for name, selected in picks.items():
         assert selected, name
         outputs[name] = recommendation.render_recommendation_image(selected, rec_art)
+
+    score_card, op_card = picks["recommendation_default"]
+
+    def with_status(card, clear, combo):
+        mode, candidate = card
+        points = 1_010_000 if combo == "alljusticecritical" else candidate.record["score"]
+        rank = "sssp" if combo == "alljusticecritical" else candidate.record["rank"]
+        return mode, replace(candidate, record=dict(candidate.record, score=points, rank=rank,
+                                                    clear=clear, full_combo=combo))
+
+    for name, cards in {
+        "recommendation_clear_fc_aj": [with_status(score_card, "clear", "fullcombo"),
+                                       with_status(op_card, "absolute", "alljustice")],
+        "recommendation_clear_ajc": [with_status(score_card, "hard", None),
+                                     with_status(op_card, "catastrophy", "alljusticecritical")],
+        "recommendation_rank_only": [score_card, op_card],
+    }.items():
+        outputs[name] = recommendation.render_recommendation_image(cards, rec_art)
+
+    ui.ui.cache_clear()
+    try:
+        with patch.object(ui.resources, "load_static_asset", return_value=None):
+            outputs["recommendation_fallback"] = recommendation.render_recommendation_image(
+                [with_status(score_card, "clear", "fullcombo"), with_status(op_card, "brave", "alljustice")], rec_art)
+    finally:
+        ui.ui.cache_clear()
+
 
     regular = Catalog({"songs": [{"id": index, "title": title, "aliases": [alias], "difficulties": []}
         for index, title, alias in [(120, TITLE, "星之旅"), (121, LONG_TITLE, "旅星"),

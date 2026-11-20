@@ -113,6 +113,9 @@ def _aliases(values):
     return canvas
 
 
+COMPACT_LEVEL_HEIGHT = 73
+
+
 def _difficulty(canvas, x, y, index, *, compact=False):
     width, height = (181, 44) if compact else (272, 66)
     box = (x, y, x + width, y + height)
@@ -131,7 +134,7 @@ def _chart_label(chart):
 
 def _level(canvas, x, y, chart, *, compact=False):
     we = chart["difficulty"] == 5
-    width, height = (70, 73) if compact else (105, 110)
+    width, height = (70, COMPACT_LEVEL_HEIGHT) if compact else (105, 110)
     box = (x, y, x + width, y + height)
     value = _chart_label(chart)
     plus = not we and str(chart.get("level", "")).endswith("+") and not value.endswith("+")
@@ -172,6 +175,12 @@ def _level(canvas, x, y, chart, *, compact=False):
         else:
             label(board, body, fallback, 42, PAPER, "center", fit=True)
     contain(canvas, board, box)
+
+
+def compact_difficulty(canvas, x, y, index, chart=None):
+    _difficulty(canvas, x, y + 14, index, compact=True)
+    if chart is not None:
+        _level(canvas, x + 176, y, chart, compact=True)
 
 
 def _added(canvas, y, song, chart):
@@ -291,10 +300,8 @@ def render_song_scores(song, jacket, player, images, rows, song_op, maxima):
         rounded(canvas, (19, y, 941, y + 191), 17, PAPER, LINE)
         y += 6
         index, charts = row["level_index"], row["charts"]
-        _difficulty(canvas, 32, y + 14, index, compact=True)
-        if len(charts) == 1:
-            _level(canvas, 208, y, charts[0], compact=True)
-        else:
+        compact_difficulty(canvas, 32, y, index, charts[0] if len(charts) == 1 else None)
+        if len(charts) != 1:
             right = 765 if row.get("full_chain") else 920
             label(canvas, (290, y + 5, right, y + 64), " / ".join(map(_chart_label, charts)), 30, INK, fit=True)
         score_digits(canvas, (34, y + 81, 430, y + 135), row["score"])
