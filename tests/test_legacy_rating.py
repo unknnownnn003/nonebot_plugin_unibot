@@ -64,6 +64,15 @@ class LegacyRatingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             l.parse_history(data)
 
+    def test_fingerprint_rejects_changed_note_counts_but_accepts_key_order(self):
+        l = self.legacy
+        song = dict(title="Demo", artist="Author", version=15500)
+        chart = dict(version=15500, note_designer="Fixture", notes={"total": 120, "tap": 100})
+        signature = l.chart_identity(song, chart)
+        self.assertEqual(signature, l.chart_identity(song, dict(chart, notes={"tap": 100, "total": 120})))
+        self.assertNotEqual(signature, l.chart_identity(song, dict(chart, notes={"tap": 99, "total": 120})))
+        self.assertNotEqual(signature, l.chart_identity(song, dict(chart, notes=None)))
+
     def test_id_difficulty_matching_deduplication_and_fingerprint(self):
         l = self.legacy
         def song(sid):

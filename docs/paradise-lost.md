@@ -28,11 +28,11 @@
 
 ## 重建与检查
 
-将历史固定提交的 `index.html` 和落雪公开曲库 JSON 下载到 `.tools/`。原始输入及发布 JSON 的来源 SHA-256 见 `assets/historical/paradise_lost.json`。重建工具只接受已固定 SHA-256 的历史 HTML，更新国服映射时请复核统计和差异。
+将历史固定提交的 `index.html` 和带 `version=24000&notes=true` 的落雪公开曲库 JSON 下载到 `.tools/`。原始输入及发布 JSON 的来源 SHA-256 见 `assets/historical/paradise_lost.json`。重建工具只接受已固定 SHA-256 的历史 HTML，更新国服映射时请复核统计和差异。
 
 ```powershell
-python tools/import_paradise_lost.py --html .tools/paradise/index.html --lxns .tools/paradise/lxns.json
-python tools/import_paradise_lost.py --html .tools/paradise/index.html --lxns .tools/paradise/lxns.json --check
+python tools/import_paradise_lost.py --html .tools/paradise/index.html --lxns .tools/paradise/lxns-24000.json
+python tools/import_paradise_lost.py --html .tools/paradise/index.html --lxns .tools/paradise/lxns-24000.json --check
 python tools/import_paradise_lost.py --check
 python tools/check_ui_assets.py
 python tools/export_native_catalog.py --check

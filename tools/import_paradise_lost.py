@@ -18,7 +18,7 @@ sys.modules[package.__name__] = package
 from _unibot_history import legacy_rating as legacy
 
 SOURCE = f"https://github.com/MAX-eipi/ChunithmMusicDataTable/blob/{legacy.SOURCE_COMMIT}/index.html"
-LXNS = "https://maimai.lxns.net/api/v0/chunithm/song/list"
+LXNS = "https://maimai.lxns.net/api/v0/chunithm/song/list?version=24000&notes=true"
 # https://info-chunithm.sega.jp/2007/ confirms the layout changed even though
 # the note total did not. An ID, creator or note count match cannot prove sameness.
 CHANGED_CHARTS = {1086: {3: "SEGA 2022-04-14 chart change (https://info-chunithm.sega.jp/2007/)"}}
@@ -69,6 +69,9 @@ def build(html, catalog):
     parser.close()
     data = json.loads(catalog)
     songs = data.get("data", data)["songs"]
+    if any(not isinstance(chart.get("notes"), dict)
+           for song in songs for chart in song["difficulties"] if chart["difficulty"] in range(4)):
+        raise ValueError("Use the public catalog with notes=true, as in the production refresh")
     titles, aliases, by_id = defaultdict(list), defaultdict(set), {}
     for song in songs:
         if not any(c["difficulty"] in range(4) for c in song["difficulties"]):

@@ -24,7 +24,7 @@ def chart_identity(song, chart):
     """Guard pinned IDs against subsequent title, author or chart identity changes."""
     attributes = (song.get("title"), song.get("artist"), song.get("version"),
                   chart.get("version"), chart.get("note_designer"), chart.get("notes"))
-    packed = json.dumps(attributes, ensure_ascii=False, separators=(",", ":"))
+    packed = json.dumps(attributes, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(packed.encode("utf-8")).hexdigest()
 
 
