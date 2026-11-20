@@ -1,6 +1,6 @@
 """Select practice targets from actual CN chart records and one OAuth snapshot."""
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 from functools import lru_cache
@@ -53,6 +53,7 @@ class Candidate:
     fit: float
     reach: float
     op_priority: float
+    op_target: tuple[int, str, str] | None = None
 
     @property
     def key(self):
@@ -143,6 +144,64 @@ def _target(record, nearby, mode):
     return target, (rank if target == milestone else "提高最高分"), reason + "。", fit, reach
 
 
+def _target_power(constant, points, combo=0):
+    """Estimate a goal’s chart OP using the public LXNS calculator rules."""
+    # Lxns-Network/maimai-prober-frontend@fffe514, src/utils/chunithm/overPower.ts
+    if points > 1_007_500:
+        base = (constant + 2) * 5 + (points - 1_007_500) * .0015
+    elif points >= 1_005_000:
+        base = (constant + 1.5) * 5 + (points - 1_005_000) / 1000
+    elif points >= 1_000_000:
+        base = (constant + 1) * 5 + (points - 1_000_000) / 2000
+    elif points >= 975_000:
+        base = constant * 5 + (points - 975_000) / 5000
+    elif points >= 925_000:
+        base = (constant - 3 + (points - 925_000) * 3 / 50_000) * 5
+    elif points >= 900_000:
+        base = (constant - 5 + (points - 900_000) / 12_500) * 5
+    elif points >= 800_000:
+        base = (constant - 5) * 2.5 * (1 + (points - 800_000) / 100_000)
+    else:
+        base = (constant - 5) * 2.5 * max(0, points - 500_000) / 300_000
+    bonus = (0, .5, 1, 1)[combo] if points >= 975_000 else 0
+    return max(0, base) + bonus + (.25 if points == 1_010_000 else 0)
+
+
+def _op_target(constant, song_op, record, points, objective):
+    if song_op is None or points is None:
+        return None
+
+    # Compare at the displayed precision against the observed song-wide OP.
+    # The calculator truncates displayed OP rather than rounding it.
+    def beats_song(score, combo=0):
+        power = _target_power(constant, score, combo)
+        return int(power * 100 + 1e-8) > int(song_op * 100 + 1e-8)
+
+    if points == 1_010_000 and beats_song(points, 3):
+        return points, "AJC", "尝试理论值，按落雪计算器口径可超过当前歌曲 OP。"
+    if points < 1_010_000 and beats_song(points):
+        return points, objective, "该分数按无连击加成计算，仍可超过当前歌曲 OP。"
+
+    if record is None or "full_combo" not in record:
+        return None
+    combo = COMBOS.get((record.get("full_combo") or "").lower())
+    if combo is None:
+        return None
+    score = record["score"]
+    if 975_000 <= points < 1_010_000 and combo in (1, 2) and beats_song(points, combo):
+        marker = "FC" if combo == 1 else "AJ"
+        return points, marker, f"提分至 {points:,} 并保持 {marker}，按落雪计算器口径可超过当前歌曲 OP。"
+    for mode, (required, reference) in COMBO_TARGETS.items():
+        if combo >= required or score < reference:
+            continue
+        goals = (1_010_000,) if mode == "ajc" else (score, min(points, 1_009_999))
+        for goal in goals:
+            if beats_song(goal, required):
+                marker = mode.upper()
+                return goal, marker, f"以 {goal:,} 分及 {marker} 为目标，按落雪计算器口径可超过当前歌曲 OP。"
+    return None
+
+
 def candidates(snapshot, catalog, mode, level, stopped=None):
     records = {(row["id"], row["level_index"]): row for row in snapshot.scores}
     now = datetime.now(CN)
@@ -204,8 +263,9 @@ def candidates(snapshot, catalog, mode, level, stopped=None):
                 if record and record["over_power"] < song_op:
                     deficit = song_op - record["over_power"]
                     op_priority *= 1 / (1 + deficit / 4)
+            op_target = _op_target(constant, song_op, record, points, objective) if room and mode in {"auto", "op"} else None
             yield Candidate(song, chart, record, song_op, ceiling, song_ceiling, room,
-                            points, objective, reason, fit, reach, op_priority)
+                            points, objective, reason, fit, reach, op_priority, op_target)
 
 
 def _ceiling(chart):
@@ -233,7 +293,7 @@ def select(snapshot, catalog, mode, level, previous=(), stopped=None, *, rng=ran
     """Sample a small high-ranked pool with one chart per song."""
     options = list(candidates(snapshot, catalog, mode, level, stopped))
     modes = ("score", "op") if mode == "auto" else (mode, mode)
-    pools = {kind: [c for c in options if (kind != "op" or c.headroom)
+    pools = {kind: [c for c in options if (kind != "op" or c.op_target)
                     and (kind != "score" or c.record is not None)] for kind in modes}
     picked = []
     used = set()
@@ -250,6 +310,9 @@ def select(snapshot, catalog, mode, level, previous=(), stopped=None, *, rng=ran
             alternatives = [pair for pair in pool if pair[1].key not in previous]
             pool = alternatives or pool
         chosen = rng.choices([c for _, c in pool], weights=[weight ** 3 for weight, _ in pool])[0]
+        if kind == "op":
+            points, objective, reason = chosen.op_target
+            chosen = replace(chosen, target=points, objective=objective, reason=reason)
         picked.append((kind, chosen))
         used.add(chosen.song.id)
     return sorted(picked, key=lambda pair: modes.index(pair[0]))

@@ -59,7 +59,7 @@ class RecommendationTests(unittest.TestCase):
 
     def test_two_slots_and_scarce_songs(self):
         songs = [song(1, chart(14.8), chart(14.9, 4)), song(2, chart(14.8)), song(3, chart(14.8))]
-        scores = [score(1, 1_008_000, 85), score(1, 1_008_500, 87, 4),
+        scores = [score(1, 1_008_000, 84.75), score(1, 1_008_500, 86, 4),
                   score(2, 1_007_000, 89), score(3, 1_006_900, 89)]
         for seed in range(12):
             default = self.select(songs, scores, "auto", seed=seed)
@@ -107,8 +107,12 @@ class RecommendationTests(unittest.TestCase):
                  for i in range(12)]
         for group, (level, difficulty, points) in enumerate(((9.2, 2, 978_000), (12.5, 3, 998_500),
                                                            (14.7, 4, 1_008_200)), start=1):
-            records = [score(group * 100 + i, points + i * 100, (level + 3) * 5 - 4 + i * .1,
-                             difficulty) for i in range(8)]
+            records = []
+            for i in range(8):
+                current = points + i * 100
+                constant = round(level + .1 * (i % 3), 1)
+                power = self.rules._target_power(constant, current)
+                records.append(score(group * 100 + i, current, power, difficulty))
             previous = ()
             for seed in range(24):
                 picks = self.select(songs, records, "auto", seed=seed, previous=previous)
@@ -118,7 +122,7 @@ class RecommendationTests(unittest.TestCase):
                 self.assertNotEqual(set(previous), set(keys))
                 self.assertTrue(all(level <= c.chart.attributes["level_value"] <= level + .21
                                     for _, c in picks))
-                self.assertTrue(all(c.target > c.record["score"] for _, c in picks if c.record))
+                self.assertTrue(all(c.target > c.record["score"] for mode, c in picks if mode == "score"))
                 previous = keys
 
     def test_empty_support_theory_and_combo_modes(self):
@@ -136,3 +140,35 @@ class RecommendationTests(unittest.TestCase):
             self.assertTrue(all(c.objective == mode.upper() for c in candidates))
         self.assertEqual(self.select(songs, scores, "auto", "9"), [])
         self.assertEqual(len(self.select(songs, scores[:1], "auto")), 1)
+
+    def test_lxns_op_calculator_boundaries(self):
+        power = self.rules._target_power
+        for points, expected in ((500_000, 0), (800_000, 24.5), (900_000, 49), (925_000, 59),
+                                 (975_000, 74), (1_000_000, 79), (1_005_000, 81.5),
+                                 (1_007_500, 84), (1_009_000, 86.25), (1_010_000, 88)):
+            self.assertAlmostEqual(power(14.8, points), expected)
+        self.assertAlmostEqual(power(14.8, 974_999, 2), power(14.8, 974_999))
+        self.assertAlmostEqual(power(14.8, 1_007_500, 1), 84.5)
+        self.assertAlmostEqual(power(14.8, 1_007_500, 2), 85)
+        self.assertAlmostEqual(power(14.8, 1_010_000, 3), 89)
+
+    def test_op_targets_require_a_song_wide_improvement(self):
+        songs = [song(1, chart(14.8), chart(15.0, 4))]
+        for points, existing, other_op, expected in (
+            (1_007_300, None, 84, (1_007_300, "FC")),
+            (1_007_300, None, 84.35, (1_007_500, "FC")),
+            (1_007_300, "fullcombo", 84.6, (1_007_300, "AJ")),
+            (1_007_300, "alljustice", 84.9, (1_007_500, "AJ")),
+            (1_009_600, "alljustice", 88.95, (1_010_000, "AJC")),
+            (1_007_300, "alljustice", 87, None),
+        ):
+            combo = self.rules.COMBOS[existing or ""]
+            records = [score(1, points, self.rules._target_power(14.8, points, combo), full_combo=existing),
+                       score(1, 1_009_500, other_op, 4)]
+            picks = self.select(songs, records, "op", "14.8")
+            target = (picks[0][1].target, picks[0][1].objective) if picks else None
+            self.assertEqual(target, expected)
+            self.assertEqual(len(self.select(songs, records, "score", "14.8")), 1)
+        record = score(1, 1_007_300, 83.8)
+        record.pop("full_combo")
+        self.assertIsNone(self.rules._op_target(14.8, 84, record, 1_007_500, "SSS"))

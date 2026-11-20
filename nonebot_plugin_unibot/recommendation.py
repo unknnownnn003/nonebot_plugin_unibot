@@ -20,6 +20,7 @@ recommend_cmd = on_regex(r"^推什么\s*(.+)?$", priority=5, block=True)
 _recent = OrderedDict()
 TARGET_COMBOS = {"FC": "fullcombo", "AJ": "alljustice", "AJC": "alljusticecritical"}
 TARGET_RANKS = dict(RANK_TARGETS[:-1])
+STATUS_WIDTH, STATUS_HEIGHT, STATUS_STEP = 112, 22, 25
 
 
 def remember(scope, mode, level, rows):
@@ -34,17 +35,17 @@ def _op(value):
     return "未知" if value is None else f"{value:.2f}"
 
 
-def _draw_target(canvas, x, top, candidate):
+def _draw_target(canvas, x, top, candidate, *, combo_badge=True):
     score, objective = candidate.target, candidate.objective
     combo = TARGET_COMBOS.get(objective)
     rank = TARGET_RANKS.get(score)
     heading = "连击目标" if score is None else "目标成绩"
-    if not combo and rank != objective:
+    if (combo and not combo_badge) or (not combo and rank != objective):
         heading += f" · {objective}"
     label(canvas, (x, top, x + 328, top + 29), heading, 22, TEAL)
     if score is not None:
         score_digits(canvas, (x, top + 33, x + 220, top + 77), score)
-    if combo:
+    if combo and combo_badge:
         left = x if score is None else x + 231
         badge(canvas, (left, top + 39, x + 328, top + 72), "combo", combo)
     elif rank == objective:
@@ -79,8 +80,10 @@ def _wrap_title(name):
 def _statuses(record):
     if record is None:
         return []
-    return [(group, record[field]) for group, field in (("clear", "clear"), ("combo", "full_combo"))
-            if (record.get(field) or "").strip().lower() in BADGES[group]]
+    badges = [("rank", record["rank"])] if record.get("rank") else []
+    badges.extend((group, record[field]) for group, field in (("clear", "clear"), ("combo", "full_combo"))
+                  if (record.get(field) or "").strip().lower() in BADGES[group])
+    return badges
 
 
 def _draw_current(canvas, top, record, statuses, *, compact=False):
@@ -91,16 +94,9 @@ def _draw_current(canvas, top, record, statuses, *, compact=False):
     right, bottom = (230, top + 69) if compact else (269, top + 82)
     score_digits(canvas, (49, top + 36, right, bottom), record["score"])
     status_x = right + 11
-    rank = record.get("rank")
-    if rank:
-        badge(canvas, (status_x, top + 40, status_x + 97, top + 62), "rank", rank)
-    status_y = top + (66 if compact and rank else 83 if rank else 44)
-    if len(statuses) == 2 and not compact:
-        status_x = 207
-    for group, value in statuses:
-        width = 57 if group == "clear" and len(statuses) == 2 else 112
-        badge(canvas, (status_x, status_y, status_x + width, status_y + 20), group, value)
-        status_x += width + 4
+    for index, (group, value) in enumerate(statuses):
+        status_y = top + 36 + index * STATUS_STEP
+        badge(canvas, (status_x, status_y, status_x + STATUS_WIDTH, status_y + STATUS_HEIGHT), group, value)
 
 
 def render_recommendation_image(picks, jackets, stopped=None):
@@ -112,10 +108,11 @@ def render_recommendation_image(picks, jackets, stopped=None):
         step = size + 8
         head = max(168, 43 + step * len(title) + COMPACT_LEVEL_HEIGHT + 10)
         statuses = _statuses(candidate.record)
-        panel = 110 if mode != "op" and statuses and candidate.record.get("rank") else 96
+        status_bottom = 36 + max(0, len(statuses) - 1) * STATUS_STEP + STATUS_HEIGHT
+        panel = 96 if mode == "op" else max(96, status_bottom + 8)
         body = panel
         if mode == "op" and candidate.record is not None:
-            body += 87 if statuses else 72
+            body += max(72, status_bottom)
         height = head + body + padding
         cards.append((mode, candidate, title, size, step, head, statuses, panel, height))
 
@@ -136,7 +133,7 @@ def render_recommendation_image(picks, jackets, stopped=None):
         top = y + head
         rounded(canvas, (36, top, 764, top + panel), 10, "#eff6f6")
         if mode == "op":
-            _draw_target(canvas, 49, top + 5, candidate)
+            _draw_target(canvas, 49, top + 5, candidate, combo_badge=False)
             if candidate.record is None:
                 label(canvas, (211, top + 5, 377, top + 34), "落雪无本谱成绩", 20, MUTED, "right")
             else:
@@ -153,10 +150,10 @@ def render_recommendation_image(picks, jackets, stopped=None):
                 diff = candidate.target - candidate.record["score"]
                 if diff > 0:
                     label(canvas, (619, top + 5, 748, top + 34), f"还差 {diff:,} 分", 22, TEAL, "right")
-            _draw_target(canvas, 405, top + 5, candidate)
+            _draw_target(canvas, 405, top + 5, candidate, combo_badge=mode in {"fc", "aj", "ajc"})
         y += height + gap
     if show_op_note:
-        label(canvas, (28, y - 4, 772, y + 30), "同曲取最高 OP · 理论空间是上界，实际提升未知", 22, MUTED)
+        label(canvas, (28, y - 4, 772, y + 30), "同曲取最高 OP · 理论空间是上界，实绩以落雪为准", 22, MUTED)
     check_render_cancelled(stopped)
     return png(canvas)
 

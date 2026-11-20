@@ -315,11 +315,12 @@ def check_recommendation_image():
             current_states = [call for call in badges.call_args_list if call.args[2] in ("clear", "combo")]
             assert [call.args[2:] for call in current_states] == (
                 ([("clear", clear)] if clear else []) + ([("combo", combo)] if combo != "none" else []))
-            assert all(call.args[1][1] > current_rank.args[1][3] for call in current_states)
+            boxes = [call.args[1] for call in [current_rank, *current_states]]
+            assert all(box[0] == boxes[0][0] and box[2] == boxes[0][2] for box in boxes)
+            assert all(box[3] - box[1] == 22 for box in boxes)
+            assert all(current[1] - prior[1] == 25 for prior, current in zip(boxes, boxes[1:]))
             if mode == "score":
-                assert all(call.args[1][2] < 405 for call in current_states)
-            if len(current_states) == 1:
-                assert current_states[0].args[1][0] == current_rank.args[1][0]
+                assert all(box[2] < 405 for box in boxes)
 
 
 async def run():

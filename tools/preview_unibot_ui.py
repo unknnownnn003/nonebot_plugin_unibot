@@ -28,6 +28,7 @@ PROFILES = {"基础": (9.5, 977_000), "进阶": (12.5, 997_500), "高阶": (14.8
 def recommendation_fixture():
     from nonebot_plugin_unibot.services.song_model import Catalog
     from nonebot_plugin_unibot.services.player_data import Snapshot
+    from nonebot_plugin_unibot.services.recommendation import _target_power
 
     songs, snapshots = [], {}
     for group, (name, (constant, score)) in enumerate(PROFILES.items()):
@@ -45,13 +46,13 @@ def recommendation_fixture():
             if group == 2 and i == 11:
                 songs[-1]["difficulties"].append(dict(difficulty=2, level="14", level_value=14.3))
                 scores.append(dict(id=sid, level_index=2, score=1_007_500, rating=16.3,
-                                   over_power=84.4, rank="sss", full_combo="none"))
+                                   over_power=81.5, rank="sss", full_combo="none"))
             if i < 8 or (group == 2 and i == 10):
                 points = 1_009_240 if i == 10 else score + (i - 3) * (250 if group < 2 else 100)
                 rank = next(rank for cutoff, rank in ((1_009_000, "sssp"), (1_007_500, "sss"), (1_005_000, "ssp"),
                             (1_000_000, "ss"), (990_000, "sp"), (975_000, "s"), (0, "aaa"))
                             if points >= cutoff)
-                op = round((value + 3) * 5 - (5.5 - group * 1.5) + i * .12, 2)
+                op = int(_target_power(value, points) * 100 + 1e-8) / 100
                 scores.append(dict(id=sid, level_index=diff, score=points, rating=value + group * .75,
                                    over_power=op, rank=rank, full_combo="none"))
         snapshots[name] = Snapshot({"name": name, "rating": constant + group * .75}, scores, "demo", 0)
@@ -61,6 +62,7 @@ def recommendation_fixture():
 async def render(public_catalog, jacket_dir, output_dir):
     from nonebot_plugin_unibot import chuguess, help, recommendation, song
     from nonebot_plugin_unibot.services import image_components as ui
+    from nonebot_plugin_unibot.services.chat_cards import frame
     from nonebot_plugin_unibot.services import song as song_service
     from nonebot_plugin_unibot.services.recommendation import select
     from nonebot_plugin_unibot.services.song_model import Catalog
@@ -109,19 +111,21 @@ async def render(public_catalog, jacket_dir, output_dir):
 
     def with_status(card, clear, combo):
         mode, candidate = card
-        points = 1_010_000 if combo == "alljusticecritical" else candidate.record["score"]
-        rank = "sssp" if combo == "alljusticecritical" else candidate.record["rank"]
-        return mode, replace(candidate, record=dict(candidate.record, score=points, rank=rank,
-                                                    clear=clear, full_combo=combo))
+        return mode, replace(candidate, record=dict(candidate.record, clear=clear, full_combo=combo))
 
     for name, cards in {
         "recommendation_clear_fc_aj": [with_status(score_card, "clear", "fullcombo"),
                                        with_status(op_card, "absolute", "alljustice")],
-        "recommendation_clear_ajc": [with_status(score_card, "hard", None),
-                                     with_status(op_card, "catastrophy", "alljusticecritical")],
         "recommendation_rank_only": [score_card, op_card],
     }.items():
         outputs[name] = recommendation.render_recommendation_image(cards, rec_art)
+
+    # A perfect score cannot be an OP recommendation. Render its existing score
+    # component directly to show the three recorded badges without a false goal.
+    canvas = frame("推什么 · 理论值状态示例", 220)
+    record = dict(score=1_010_000, rank="sssp", clear="catastrophy", full_combo="alljusticecritical")
+    recommendation._draw_current(canvas, 85, record, recommendation._statuses(record))
+    outputs["recommendation_clear_ajc"] = ui.png(canvas)
 
     ui.ui.cache_clear()
     try:
