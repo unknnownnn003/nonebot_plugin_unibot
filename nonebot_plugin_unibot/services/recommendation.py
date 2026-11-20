@@ -54,7 +54,7 @@ class Candidate:
     reach: float
     op_priority: float
     op_target: tuple[int, str, str] | None = None
-    score_target: tuple[int, str, dict[str, float]] | None = None
+    score_target: tuple[int, str, float] | None = None
 
     @property
     def key(self):
@@ -203,27 +203,26 @@ def _rating_cutoffs(catalog, charts, records):
     """Find replacement cutoffs from all eligible scores before applying the user's filter."""
     try:
         version = current_version(catalog)
-        versions = {row.get("version") for row in catalog.metadata["versions"] if isinstance(row, dict)}
     except ValueError:
-        version, versions = None, set()
+        return {}, {}
+    versions = {row.get("version") for row in catalog.metadata["versions"] if isinstance(row, dict)}
     partitions = {}
     buckets = defaultdict(list)
     for sid, entries in charts.items():
-        partition = b50_partition(catalog.songs[sid].attributes.get("version"), version, versions) if version is not None else None
+        partition = b50_partition(catalog.songs[sid].attributes.get("version"), version, versions)
+        if partition is None:
+            continue
         partitions[sid] = partition
         for chart in entries:
             record = records.get((sid, chart.difficulty))
             if record is not None:
-                rating = Decimal(str(record["rating"]))
-                buckets["b30"].append(rating)
-                if partition is not None:
-                    buckets[partition].append(rating)
+                buckets[partition].append(Decimal(str(record["rating"])))
     cutoffs = {key: sorted(buckets[key], reverse=True)[limit - 1] if len(buckets[key]) >= limit else Decimal(0)
-               for key, limit in (("b30", 30), ("old", 30), ("new", 20))}
+               for key, limit in (("old", 30), ("new", 20))}
     return cutoffs, partitions
 
 
-def _score_target(constant, record, preferred, nearby, cutoffs, partition):
+def _score_target(constant, record, preferred, nearby, partition_cutoff):
     current_score = record["score"]
     if current_score >= RATING_CAP_SCORE:
         return None
@@ -231,10 +230,8 @@ def _score_target(constant, record, preferred, nearby, cutoffs, partition):
     # against claiming an increase on a plateau if the API rounded that value.
     current_rating = Decimal(str(record["rating"]))
     modeled_current = chart_rating(constant, current_score)
-    thresholds = {"b30": max(current_rating, cutoffs["b30"])}
-    if partition is not None:
-        thresholds["b50"] = max(current_rating, cutoffs[partition])
-    cutoff = max(modeled_current, min(thresholds.values()))
+    replaced_rating = max(current_rating, partition_cutoff)
+    cutoff = max(modeled_current, replaced_rating)
     points = min(preferred, RATING_CAP_SCORE)
     if chart_rating(constant, points) <= cutoff:
         observed = round(median(-row[1] for row in nearby)) if nearby else None
@@ -249,10 +246,9 @@ def _score_target(constant, record, preferred, nearby, cutoffs, partition):
                 low = mid + 1
         points = low
     goal = chart_rating(constant, points)
-    gains = {name: float((goal - threshold) / (30 if name == "b30" else 50))
-             for name, threshold in thresholds.items() if goal > threshold}
+    gain = float((goal - replaced_rating) / 50)
     objective = dict(RANK_TARGETS).get(points, "提高最高分")
-    return points, objective, gains
+    return points, objective, gain
 
 
 def candidates(snapshot, catalog, mode, level, stopped=None):
@@ -319,8 +315,9 @@ def candidates(snapshot, catalog, mode, level, stopped=None):
                     deficit = song_op - record["over_power"]
                     op_priority *= 1 / (1 + deficit / 4)
             op_target = _op_target(constant, song_op, record, points, objective) if room and mode in {"auto", "op"} else None
-            score_target = (_score_target(constant, record, points, nearby, cutoffs, partitions[song.id])
-                            if score_mode and record is not None else None)
+            partition = partitions.get(song.id)
+            score_target = (_score_target(constant, record, points, nearby, cutoffs[partition])
+                            if partition is not None and record is not None else None)
             yield Candidate(song, chart, record, song_op, ceiling, song_ceiling, room,
                             points, objective, reason, fit, reach, op_priority, op_target, score_target)
 
@@ -374,7 +371,7 @@ def select(snapshot, catalog, mode, level, previous=(), stopped=None, *, rng=ran
             points, objective, _ = chosen.score_target
             gap = points - chosen.record["score"]
             chosen = replace(chosen, target=points, objective=objective,
-                             reason=f"本谱距目标 {gap:,} 分，达成可提高榜单均值。")
+                             reason=f"本谱距目标 {gap:,} 分，达成预计可提高总 Rating。")
         picked.append((kind, chosen))
         used.add(chosen.song.id)
     return sorted(picked, key=lambda pair: modes.index(pair[0]))

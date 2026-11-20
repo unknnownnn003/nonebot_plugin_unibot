@@ -42,7 +42,7 @@ def recommendation_fixture():
             title = LONG_TITLE if group == 2 and i == 10 else f"{TITLE} · {i + 1:02}"
             diff = 2 if group == 0 else 3 + (i % 4 == 3)
             display = f"{int(value)}" + ("+" if round(value * 10) % 10 >= 5 else "")
-            songs.append(dict(id=sid, title=title,
+            songs.append(dict(id=sid, title=title, version=2 if i % 2 else 1,
                               difficulties=[dict(difficulty=diff, level=display, level_value=value)]))
             if group == 2 and i == 11:
                 songs[-1]["difficulties"].append(dict(difficulty=2, level="14", level_value=14.3))
@@ -57,7 +57,7 @@ def recommendation_fixture():
                 scores.append(dict(id=sid, level_index=diff, score=points, rating=float(chart_rating(value, points)),
                                    over_power=op, rank=rank, full_combo="none"))
         snapshots[name] = Snapshot({"name": name, "rating": constant + group * .75}, scores, "demo", 0)
-    return Catalog({"songs": songs}), snapshots
+    return Catalog({"songs": songs, "rating_version": 2, "versions": [{"version": 1}, {"version": 2}]}), snapshots
 
 
 async def render(public_catalog, jacket_dir, output_dir):

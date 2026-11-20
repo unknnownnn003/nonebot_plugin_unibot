@@ -9,7 +9,7 @@ from .services import group_policy
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "4.4.0"
+CAPABILITY_VERSION = "4.5.0"
 
 
 class SearchArgs(BaseModel):
@@ -95,7 +95,7 @@ def _describe_capabilities():
                  parameters=SongScoreArgs.model_json_schema(), effect="none", long_task=True, keywords=["单曲成绩", "chu成绩", "这首成绩"]),
             dict(id="player.progress", name="nb_unibot_progress", description="本人OAuth MASTER/ULTIMA筛选进度；OP按筛选谱面逐张合计，非游戏内总OP，WE不参与；query为难度/定数/版本/分类条件。",
                  parameters=SearchArgs.model_json_schema(), effect="none", long_task=True, keywords=["进度", "chulist", "完成率"]),
-            dict(id="player.recommend", name="nb_unibot_recommend", description="依据本人落雪 OAuth 成绩推荐最多两首不同歌曲。默认推分、推OP各一首，也可指定方向或连击目标。推分目标须提高 B30 或 B50 均值，含不足 0.01 的增量。同曲取最高OP，有效理论空间为上界，实际提升未知。",
+            dict(id="player.recommend", name="nb_unibot_recommend", description="依据本人落雪 OAuth 成绩推荐最多两首不同歌曲。默认推分、推OP各一首，也可指定方向或连击目标。推分目标须提高总 Rating，含不足 0.01 的增量。同曲取最高OP，有效理论空间为上界，实际提升未知。",
                  parameters=RecommendArgs.model_json_schema(), effect="none", long_task=True, keywords=["推荐", "推什么", "推分", "推OP"]),
             dict(id="song.aliases", name="nb_unibot_aliases", description="查询中二歌曲原本地别名；歧义时返回候选。",
                  parameters=SearchArgs.model_json_schema(), effect="none", keywords=["别名", "外号"]),

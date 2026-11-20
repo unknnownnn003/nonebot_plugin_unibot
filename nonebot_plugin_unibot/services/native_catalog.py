@@ -240,7 +240,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
     "native_commands": [
       {
-        "line": 19,
+        "line": 20,
         "matcher": "recommend_cmd",
         "module": "recommendation",
         "pattern": "^推什么\\s*(.+)?$",

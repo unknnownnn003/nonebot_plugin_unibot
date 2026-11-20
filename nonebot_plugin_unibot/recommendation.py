@@ -10,6 +10,7 @@ from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 from .services.chat_cards import INK, LINE, MUTED, PAPER, TEAL, artwork, frame
 from .services.image_components import BADGES, badge, label, measure, png, rounded, score_digits, wrap
 from .services.job_store import async_render, check_render_cancelled
+from .services.rating import current_version
 from .services.recommendation import MODES, RANK_TARGETS, parse_filter, select
 from .services.results import image, outcome
 from .services.song_images import COMPACT_LEVEL_HEIGHT, compact_difficulty
@@ -86,14 +87,13 @@ def _statuses(record):
     return badges
 
 
-def _draw_current(canvas, top, record, statuses, *, compact=False):
+def _draw_current(canvas, top, record, statuses):
     if record is None:
         label(canvas, (49, top + 5, 377, top + 80), "落雪无本谱成绩", 25, MUTED)
         return
-    label(canvas, (49, top + 5, 269, top + 34), "当前成绩", 19 if compact else 22, MUTED)
-    right, bottom = (230, top + 69) if compact else (269, top + 82)
-    score_digits(canvas, (49, top + 36, right, bottom), record["score"])
-    status_x = right + 11
+    label(canvas, (49, top + 5, 269, top + 34), "当前成绩", 22, MUTED)
+    score_digits(canvas, (49, top + 36, 269, top + 82), record["score"])
+    status_x = 280
     for index, (group, value) in enumerate(statuses):
         status_y = top + 36 + index * STATUS_STEP
         badge(canvas, (status_x, status_y, status_x + STATUS_WIDTH, status_y + STATUS_HEIGHT), group, value)
@@ -109,12 +109,10 @@ def render_recommendation_image(picks, jackets, stopped=None):
         head = max(168, 43 + step * len(title) + COMPACT_LEVEL_HEIGHT + 10)
         statuses = _statuses(candidate.record)
         status_bottom = 36 + max(0, len(statuses) - 1) * STATUS_STEP + STATUS_HEIGHT
-        panel = 96 if mode == "op" else max(96, status_bottom + 8)
+        panel = max(96, status_bottom + 8)
         body = panel
         if mode == "score" and candidate.score_target:
             body += 34
-        if mode == "op" and candidate.record is not None:
-            body += max(72, status_bottom)
         height = head + body + padding
         cards.append((mode, candidate, title, size, step, head, statuses, panel, height))
 
@@ -134,12 +132,8 @@ def render_recommendation_image(picks, jackets, stopped=None):
 
         top = y + head
         rounded(canvas, (36, top, 764, top + panel), 10, "#eff6f6")
+        _draw_current(canvas, top, candidate.record, statuses)
         if mode == "op":
-            _draw_target(canvas, 49, top + 5, candidate, combo_badge=False)
-            if candidate.record is None:
-                label(canvas, (211, top + 5, 377, top + 34), "落雪无本谱成绩", 20, MUTED, "right")
-            else:
-                _draw_current(canvas, top + 94, candidate.record, statuses, compact=True)
             for x, caption, value in (
                 (405, "当前歌曲有效 OP", candidate.song_op),
                 (586, "本谱理论有效空间", candidate.headroom),
@@ -147,15 +141,15 @@ def render_recommendation_image(picks, jackets, stopped=None):
                 label(canvas, (x, top + 10, x + 171, top + 35), caption, 22, MUTED, fit=True)
                 label(canvas, (x, top + 40, x + 171, top + 81), _op(value), 34, TEAL)
         else:
-            _draw_current(canvas, top, candidate.record, statuses)
             if candidate.record is not None and candidate.target is not None:
                 diff = candidate.target - candidate.record["score"]
                 if diff > 0:
                     label(canvas, (619, top + 5, 748, top + 34), f"还差 {diff:,} 分", 22, TEAL, "right")
             _draw_target(canvas, 405, top + 5, candidate, combo_badge=mode in {"fc", "aj", "ajc"})
         if mode == "score" and candidate.score_target:
-            summary = "  ·  ".join(f"{name.upper()} +{gain:.6g}" for name, gain in candidate.score_target[2].items())
-            label(canvas, (49, top + panel + 5, 750, top + panel + 33), f"达成后预计  {summary}", 22, TEAL, fit=True)
+            gain = f"{candidate.score_target[2]:.9f}".rstrip("0").rstrip(".")
+            label(canvas, (49, top + panel + 5, 750, top + panel + 33),
+                  f"达成后预计 Rating +{gain}", 22, TEAL, fit=True)
         y += height + gap
     if show_op_note:
         label(canvas, (28, y - 4, 772, y + 30), "同曲取最高 OP · 理论空间是上界，实绩以落雪为准", 22, MUTED)
@@ -169,7 +163,12 @@ async def recommend_chart(snapshot, catalog, mode, level, scope):
                                previous if time.monotonic() - timestamp < 300 else ())
     if not picks:
         if mode == "score":
-            return outcome("NOT_FOUND", "当前筛选范围内没有能在合理练习幅度内提高 B30 或 B50 的谱面。",
+            try:
+                current_version(catalog)
+            except ValueError:
+                return outcome("RATING_VERSION_UNAVAILABLE", "当前曲库缺少国服版本信息，暂时无法计算 Rating 增量。",
+                               status="unavailable")
+            return outcome("NOT_FOUND", "当前筛选范围内没有能在合理练习幅度内提高总 Rating 的谱面。",
                            status="needs_input")
         return outcome("NOT_FOUND", "没有符合筛选条件且有足够成绩依据的谱面。"
                        "可以放宽筛选，或先在落雪记录几首同定数附近的成绩。", status="needs_input")

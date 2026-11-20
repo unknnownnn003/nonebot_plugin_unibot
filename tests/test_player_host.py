@@ -293,9 +293,18 @@ def check_recommendation_image():
         assert [call.args[2:] for call in badges.call_args_list] == [("rank", "sp"), ("combo", marker)]
     with patch.object(rec, "label", wraps=rec.label) as labels, patch.object(rec, "score_digits", wraps=rec.score_digits) as digits:
         rec.render_recommendation_image([("op", replace(candidate, record=None))], {})
-    assert [call.args[2] for call in digits.call_args_list] == [1_000_000]
+    assert not digits.call_args_list
     assert {"落雪无本谱成绩", "当前歌曲有效 OP", "本谱理论有效空间"} <= {call.args[2] for call in labels.call_args_list}
     assert not any("当前谱面 OP" in call.args[2] or "理论上限" in call.args[2] for call in labels.call_args_list)
+    with patch.object(rec, "label", wraps=rec.label) as labels, patch.object(rec, "score_digits", wraps=rec.score_digits) as digits:
+        rec.render_recommendation_image([("op", candidate)], {})
+    assert [call.args[2] for call in digits.call_args_list] == [record["score"]]
+    assert "当前成绩" in {call.args[2] for call in labels.call_args_list}
+    assert not any("目标" in call.args[2] for call in labels.call_args_list)
+    rating_pick = replace(candidate, score_target=(1_000_000, "SS", .000002))
+    with patch.object(rec, "label", wraps=rec.label) as labels:
+        rec.render_recommendation_image([("score", rating_pick)], {})
+    assert "达成后预计 Rating +0.000002" in {call.args[2] for call in labels.call_args_list}
 
     for title in ("星を追いかけて ～ 夜航列车 / Beyond the Horizon ♫ × Ω ～ · 03",
                   "空へ飛ぶ銀河鉄道 – Beyond the Sky / 星空列车 ♯ Ω · 05",
@@ -419,7 +428,7 @@ async def run():
         assert rendered['full_combo']=='' and rendered['full_chain']=='fullchain'
         result=await player.query(bot,e,'player.song_scores',{'query':'Same title'})
         assert result['code']=='AMBIGUOUS_TARGET'
-        specs=llm_api.describe_capabilities();assert len(specs)==25 and llm_api.CAPABILITY_VERSION=='4.4.0'
+        specs=llm_api.describe_capabilities();assert len(specs)==25 and llm_api.CAPABILITY_VERSION=='4.5.0'
         assert not {'player.bind','score.submit','score.sync','score.import_file'} & {s['id'] for s in specs}
         assert next(s for s in specs if s['id']=='player.best')['native_commands'][0].get('aliases',[])==[]
         for method in [llm_api.prepare_capability,llm_api.invoke_capability]:

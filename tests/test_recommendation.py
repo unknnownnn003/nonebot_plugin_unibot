@@ -16,8 +16,8 @@ def chart(constant, difficulty=3, **attributes):
     return dict(level_value=constant, level=level, difficulty=difficulty, **attributes)
 
 
-def song(sid, *charts, **attributes):
-    return dict(id=sid, title=f"Chart {sid}", difficulties=list(charts), **attributes)
+def song(sid, *charts, version=1, **attributes):
+    return dict(id=sid, title=f"Chart {sid}", difficulties=list(charts), version=version, **attributes)
 
 
 def score(sid, points, op, difficulty=3, **attributes):
@@ -38,7 +38,8 @@ class RecommendationTests(unittest.TestCase):
 
     def select(self, songs, scores, mode, level=None, *, seed=19, previous=()):
         return self.rules.select(SimpleNamespace(player={"rating": 13}, scores=scores),
-                                 self.catalog({"songs": songs}), mode, level,
+                                 self.catalog({"songs": songs, "rating_version": 2,
+                                               "versions": [{"version": 1}, {"version": 2}]}), mode, level,
                                  previous=previous, rng=Random(seed))
 
     def test_command_modes_and_strict_filters(self):
@@ -186,14 +187,29 @@ class RecommendationTests(unittest.TestCase):
         snapshot = SimpleNamespace(player={"rating": 17}, scores=[record, *records])
         [(mode, pick)] = self.rules.select(snapshot, catalog, "score", "14.8", rng=Random(1))
         self.assertEqual(pick.target, 1_009_000)
-        self.assertEqual(pick.data(mode)["rating_gain"], {"b50": .000002})
+        self.assertEqual(pick.data(mode)["rating_gain"], .000002)
 
     def test_score_target_crosses_cutoff_or_excludes_rating_plateau(self):
         records = [score(i, 1_007_500, 84, rating=16.82) for i in range(2, 32)]
         songs = [song(1, chart(14.8)), *(song(i, chart(14.9)) for i in range(2, 32))]
         picks = self.select(songs, [score(1, 1_007_400, 83, rating=16.78), *records], "score", "14.8")
         self.assertEqual(picks[0][1].target, 1_007_701)
-        gain = picks[0][1].data("score")["rating_gain"]["b30"]
+        gain = picks[0][1].data("score")["rating_gain"]
         self.assertGreater(gain, 0)
         self.assertLess(gain, .01)
         self.assertEqual(self.select(songs, [score(1, 1_009_000, 86, rating=16.94), *records], "score", "14.8"), [])
+
+    def test_score_target_requires_a_gain_in_the_correct_version_partition(self):
+        target = song(1, chart(14.8), version=2)
+        new = [song(i, chart(15), version=2) for i in range(2, 22)]
+        old = [song(i, chart(12), version=1) for i in range(22, 52)]
+        current = score(1, 1_007_400, 83, rating=16.78)
+        records = [current, *(score(i, 1_009_000, 90, rating=17.15) for i in range(2, 22)),
+                   *(score(i, 1_000_000, 65, rating=13) for i in range(22, 52))]
+        self.assertEqual(self.select([target, *new, *old], records, "score", "14.8"), [])
+        target["version"] = 1
+        [(_, pick)] = self.select([target, *new, *old], records, "score", "14.8")
+        self.assertEqual(pick.data("score")["rating_gain"], .0004)
+        missing_version = self.catalog({"songs": [target]})
+        snapshot = SimpleNamespace(player={"rating": 17}, scores=[current])
+        self.assertEqual(self.rules.select(snapshot, missing_version, "score", "14.8"), [])
