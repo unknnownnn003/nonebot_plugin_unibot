@@ -111,6 +111,8 @@ def render_recommendation_image(picks, jackets, stopped=None):
         status_bottom = 36 + max(0, len(statuses) - 1) * STATUS_STEP + STATUS_HEIGHT
         panel = 96 if mode == "op" else max(96, status_bottom + 8)
         body = panel
+        if mode == "score" and candidate.score_target:
+            body += 34
         if mode == "op" and candidate.record is not None:
             body += max(72, status_bottom)
         height = head + body + padding
@@ -151,6 +153,9 @@ def render_recommendation_image(picks, jackets, stopped=None):
                 if diff > 0:
                     label(canvas, (619, top + 5, 748, top + 34), f"还差 {diff:,} 分", 22, TEAL, "right")
             _draw_target(canvas, 405, top + 5, candidate, combo_badge=mode in {"fc", "aj", "ajc"})
+        if mode == "score" and candidate.score_target:
+            summary = "  ·  ".join(f"{name.upper()} +{gain:.6g}" for name, gain in candidate.score_target[2].items())
+            label(canvas, (49, top + panel + 5, 750, top + panel + 33), f"达成后预计  {summary}", 22, TEAL, fit=True)
         y += height + gap
     if show_op_note:
         label(canvas, (28, y - 4, 772, y + 30), "同曲取最高 OP · 理论空间是上界，实绩以落雪为准", 22, MUTED)
@@ -163,6 +168,9 @@ async def recommend_chart(snapshot, catalog, mode, level, scope):
     picks = await async_render(select, snapshot, catalog, mode, level,
                                previous if time.monotonic() - timestamp < 300 else ())
     if not picks:
+        if mode == "score":
+            return outcome("NOT_FOUND", "当前筛选范围内没有能在合理练习幅度内提高 B30 或 B50 的谱面。",
+                           status="needs_input")
         return outcome("NOT_FOUND", "没有符合筛选条件且有足够成绩依据的谱面。"
                        "可以放宽筛选，或先在落雪记录几首同定数附近的成绩。", status="needs_input")
     song_ids = [candidate.song.id for _, candidate in picks]

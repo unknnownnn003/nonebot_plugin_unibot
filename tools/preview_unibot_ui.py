@@ -28,6 +28,7 @@ PROFILES = {"基础": (9.5, 977_000), "进阶": (12.5, 997_500), "高阶": (14.8
 def recommendation_fixture():
     from nonebot_plugin_unibot.services.song_model import Catalog
     from nonebot_plugin_unibot.services.player_data import Snapshot
+    from nonebot_plugin_unibot.services.rating import chart_rating
     from nonebot_plugin_unibot.services.recommendation import _target_power
 
     songs, snapshots = [], {}
@@ -47,13 +48,13 @@ def recommendation_fixture():
                 songs[-1]["difficulties"].append(dict(difficulty=2, level="14", level_value=14.3))
                 scores.append(dict(id=sid, level_index=2, score=1_007_500, rating=16.3,
                                    over_power=81.5, rank="sss", full_combo="none"))
-            if i < 8 or (group == 2 and i == 10):
-                points = 1_009_240 if i == 10 else score + (i - 3) * (250 if group < 2 else 100)
+            if i < 8 or (group == 2 and i in (9, 10)):
+                points = {9: 1_009_240, 10: 1_008_640}.get(i, score + (i - 3) * (250 if group < 2 else 100))
                 rank = next(rank for cutoff, rank in ((1_009_000, "sssp"), (1_007_500, "sss"), (1_005_000, "ssp"),
                             (1_000_000, "ss"), (990_000, "sp"), (975_000, "s"), (0, "aaa"))
                             if points >= cutoff)
                 op = int(_target_power(value, points) * 100 + 1e-8) / 100
-                scores.append(dict(id=sid, level_index=diff, score=points, rating=value + group * .75,
+                scores.append(dict(id=sid, level_index=diff, score=points, rating=float(chart_rating(value, points)),
                                    over_power=op, rank=rank, full_combo="none"))
         snapshots[name] = Snapshot({"name": name, "rating": constant + group * .75}, scores, "demo", 0)
     return Catalog({"songs": songs}), snapshots

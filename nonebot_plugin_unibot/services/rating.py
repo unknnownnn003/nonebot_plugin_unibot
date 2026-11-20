@@ -28,6 +28,40 @@ def current_version(catalog):
     return version
 
 
+RATING_CAP_SCORE = 1_009_000
+
+
+def chart_rating(constant, score):
+    """Unrounded goal Rating from the public LXNS settlement calculator."""
+    # Lxns-Network/maimai-prober-frontend@fffe514, src/utils/chunithm/rating.ts
+    constant = Decimal(str(constant))
+    if score >= RATING_CAP_SCORE:
+        value = constant + Decimal("2.15")
+    elif score >= 1_007_500:
+        value = constant + 2 + Decimal(score - 1_007_500) / 10_000
+    elif score >= 1_005_000:
+        value = constant + Decimal("1.5") + Decimal(score - 1_005_000) / 5_000
+    elif score >= 1_000_000:
+        value = constant + 1 + Decimal(score - 1_000_000) / 10_000
+    elif score >= 975_000:
+        value = constant + Decimal(score - 975_000) / 25_000
+    elif score >= 925_000:
+        value = constant - 3 + Decimal((score - 925_000) * 3) / 50_000
+    elif score >= 900_000:
+        value = constant - 5 + Decimal(score - 900_000) / 12_500
+    elif score >= 800_000:
+        value = (constant - 5) * Decimal(score - 700_000) / 200_000
+    else:
+        value = (constant - 5) * Decimal(max(0, score - 500_000)) / 600_000
+    return max(Decimal(0), value)
+
+
+def b50_partition(song_version, version, valid_versions):
+    if type(song_version) is not int or song_version not in valid_versions or song_version > version:
+        return None
+    return "new" if song_version == version else "old"
+
+
 def average(items, divisor):
     return float(sum((Decimal(str(row["rating"])) for row in items), Decimal(0)) / divisor)
 
@@ -47,10 +81,10 @@ def select(snapshot, catalog, *, b50=False, now=None):
     old, new, unknown = [], [], 0
     valid_versions = {v.get("version") for v in catalog.metadata["versions"] if isinstance(v, dict)}
     for row in items:
-        song_version = row["song_version"]
-        if type(song_version) is not int or song_version not in valid_versions or song_version > version:
+        partition = b50_partition(row["song_version"], version, valid_versions)
+        if partition is None:
             unknown += 1
-        elif song_version == version:
+        elif partition == "new":
             new.append(row)
         else:
             old.append(row)

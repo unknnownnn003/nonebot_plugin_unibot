@@ -419,7 +419,7 @@ async def run():
         assert rendered['full_combo']=='' and rendered['full_chain']=='fullchain'
         result=await player.query(bot,e,'player.song_scores',{'query':'Same title'})
         assert result['code']=='AMBIGUOUS_TARGET'
-        specs=llm_api.describe_capabilities();assert len(specs)==25 and llm_api.CAPABILITY_VERSION=='4.3.0'
+        specs=llm_api.describe_capabilities();assert len(specs)==25 and llm_api.CAPABILITY_VERSION=='4.4.0'
         assert not {'player.bind','score.submit','score.sync','score.import_file'} & {s['id'] for s in specs}
         assert next(s for s in specs if s['id']=='player.best')['native_commands'][0].get('aliases',[])==[]
         for method in [llm_api.prepare_capability,llm_api.invoke_capability]:

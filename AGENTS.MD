@@ -55,7 +55,7 @@ OAuth群内授权链接使用Bot自己的成功发送回执，按Bot/QQ/本次�
 
 ## LLM 接口与三插件依赖
 
-- 当前 API_VERSION=1、CAPABILITY_VERSION=4.3.0，公开25项能力。玩家能力为 `player.best/profile/progress/recommend/song_scores`，均为真实请求人的OAuth查询；OAuth授权/确认/解绑保持原生，不交给模型代理。
+- 当前 API_VERSION=1、CAPABILITY_VERSION=4.4.0，公开25项能力。玩家能力为 `player.best/profile/progress/recommend/song_scores`，均为真实请求人的OAuth查询；OAuth授权/确认/解绑保持原生，不交给模型代理。
 - 参数schema、ID、nb_unibot名称、effect、long_task、结果码与制品是跨插件契约。变更须核对LLMChat调用方、动态发现、静态快照及综合面板，按语义调整版本。当前移除 `player.bind`、`score.submit/sync/import_file`，旧缓存明确拒绝；`player.best`不再接收mode/version。
 - 保留 `describe_capabilities/context`、prepare/invoke、任务通知、材料及表达接口。结果统一 `services/results.outcome`，拒绝/缺配置/未知结果不能假报成功。写入继续真实用户确认和执行时重查权限。
 - `services/native_catalog.py` 由**本仓** `tools/export_native_catalog.py` 生成；命令改动后生成并运行 `--check`。OAuth单独列入NATIVE_ONLY_COMMANDS，不作为模型工具。不能运行旧邻仓生成器覆盖。

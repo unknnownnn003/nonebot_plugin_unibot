@@ -10,7 +10,7 @@ from statistics import median
 import unicodedata
 
 from .job_store import check_render_cancelled
-from .rating import CN, eligible
+from .rating import CN, RATING_CAP_SCORE, b50_partition, chart_rating, current_version, eligible
 from .song_model import Chart, Song
 
 MODES = {"score": "推分", "op": "推 OP", "fc": "FC", "aj": "AJ", "ajc": "AJC"}
@@ -54,6 +54,7 @@ class Candidate:
     reach: float
     op_priority: float
     op_target: tuple[int, str, str] | None = None
+    score_target: tuple[int, str, dict[str, float]] | None = None
 
     @property
     def key(self):
@@ -64,7 +65,7 @@ class Candidate:
         if mode == "op" and self.song_op is not None and (
                 self.record is None or self.record["over_power"] < self.song_op):
             reason += f"本谱需超过同曲已记录的 {self.song_op:.2f} OP 才有有效提升。"
-        return dict(song_id=self.song.id, title=self.song.attributes["title"], mode=mode,
+        result = dict(song_id=self.song.id, title=self.song.attributes["title"], mode=mode,
                     level_index=self.chart.difficulty, level=self.chart.attributes.get("level"),
                     level_value=self.chart.attributes["level_value"],
                     score=self.record["score"] if self.record else None,
@@ -74,6 +75,9 @@ class Candidate:
                     theoretical_song_op=self.song_ceiling, theoretical_effective_room=self.headroom,
                     predicted_effective_gain=None, target_score=self.target, objective=self.objective,
                     reason=reason)
+        if mode == "score" and self.score_target:
+            result["rating_gain"] = self.score_target[2]
+        return result
 
 
 def _neighbors(bands, constant):
@@ -89,6 +93,13 @@ def _neighbors(bands, constant):
             if old is None or (distance, -score) < old[:2]:
                 nearby[other_id] = (distance, -score, op_gap)
     return sorted(nearby.items(), key=lambda pair: pair[1])[:9]
+
+
+def _practice_step(score, observed):
+    step = max(500, min(5000, round((1_010_000 - score) / 8 / 100) * 100))
+    if observed is not None and observed > score:
+        step = min(step, max(500, observed - score))
+    return step
 
 
 def _target(record, nearby, mode):
@@ -127,9 +138,7 @@ def _target(record, nearby, mode):
     milestone, rank = next((points, label) for points, label in RANK_TARGETS if points > score)
     # Break large jumps into practice steps. Near the top, prefer the next
     # achievable rank over a distant ceiling.
-    step = max(500, min(5000, round((1_010_000 - score) / 8 / 100) * 100))
-    if observed is not None and observed > score:
-        step = min(step, max(500, observed - score))
+    step = _practice_step(score, observed)
     target = min(milestone, score + step)
     gap = target - score
     stretch = max(0, target - observed) if observed is not None else gap
@@ -149,20 +158,8 @@ def _target_power(constant, points, combo=0):
     # Lxns-Network/maimai-prober-frontend@fffe514, src/utils/chunithm/overPower.ts
     if points > 1_007_500:
         base = (constant + 2) * 5 + (points - 1_007_500) * .0015
-    elif points >= 1_005_000:
-        base = (constant + 1.5) * 5 + (points - 1_005_000) / 1000
-    elif points >= 1_000_000:
-        base = (constant + 1) * 5 + (points - 1_000_000) / 2000
-    elif points >= 975_000:
-        base = constant * 5 + (points - 975_000) / 5000
-    elif points >= 925_000:
-        base = (constant - 3 + (points - 925_000) * 3 / 50_000) * 5
-    elif points >= 900_000:
-        base = (constant - 5 + (points - 900_000) / 12_500) * 5
-    elif points >= 800_000:
-        base = (constant - 5) * 2.5 * (1 + (points - 800_000) / 100_000)
     else:
-        base = (constant - 5) * 2.5 * max(0, points - 500_000) / 300_000
+        base = float(chart_rating(constant, points) * 5)
     bonus = (0, .5, 1, 1)[combo] if points >= 975_000 else 0
     return max(0, base) + bonus + (.25 if points == 1_010_000 else 0)
 
@@ -202,6 +199,62 @@ def _op_target(constant, song_op, record, points, objective):
     return None
 
 
+def _rating_cutoffs(catalog, charts, records):
+    """Find replacement cutoffs from all eligible scores before applying the user's filter."""
+    try:
+        version = current_version(catalog)
+        versions = {row.get("version") for row in catalog.metadata["versions"] if isinstance(row, dict)}
+    except ValueError:
+        version, versions = None, set()
+    partitions = {}
+    buckets = defaultdict(list)
+    for sid, entries in charts.items():
+        partition = b50_partition(catalog.songs[sid].attributes.get("version"), version, versions) if version is not None else None
+        partitions[sid] = partition
+        for chart in entries:
+            record = records.get((sid, chart.difficulty))
+            if record is not None:
+                rating = Decimal(str(record["rating"]))
+                buckets["b30"].append(rating)
+                if partition is not None:
+                    buckets[partition].append(rating)
+    cutoffs = {key: sorted(buckets[key], reverse=True)[limit - 1] if len(buckets[key]) >= limit else Decimal(0)
+               for key, limit in (("b30", 30), ("old", 30), ("new", 20))}
+    return cutoffs, partitions
+
+
+def _score_target(constant, record, preferred, nearby, cutoffs, partition):
+    current_score = record["score"]
+    if current_score >= RATING_CAP_SCORE:
+        return None
+    # The observed Rating governs the live board. A modeled baseline also guards
+    # against claiming an increase on a plateau if the API rounded that value.
+    current_rating = Decimal(str(record["rating"]))
+    modeled_current = chart_rating(constant, current_score)
+    thresholds = {"b30": max(current_rating, cutoffs["b30"])}
+    if partition is not None:
+        thresholds["b50"] = max(current_rating, cutoffs[partition])
+    cutoff = max(modeled_current, min(thresholds.values()))
+    points = min(preferred, RATING_CAP_SCORE)
+    if chart_rating(constant, points) <= cutoff:
+        observed = round(median(-row[1] for row in nearby)) if nearby else None
+        low, high = points + 1, min(current_score + _practice_step(current_score, observed), RATING_CAP_SCORE)
+        if low > high or chart_rating(constant, high) <= cutoff:
+            return None
+        while low < high:
+            mid = (low + high) // 2
+            if chart_rating(constant, mid) > cutoff:
+                high = mid
+            else:
+                low = mid + 1
+        points = low
+    goal = chart_rating(constant, points)
+    gains = {name: float((goal - threshold) / (30 if name == "b30" else 50))
+             for name, threshold in thresholds.items() if goal > threshold}
+    objective = dict(RANK_TARGETS).get(points, "提高最高分")
+    return points, objective, gains
+
+
 def candidates(snapshot, catalog, mode, level, stopped=None):
     records = {(row["id"], row["level_index"]): row for row in snapshot.scores}
     now = datetime.now(CN)
@@ -223,6 +276,8 @@ def candidates(snapshot, catalog, mode, level, stopped=None):
     def neighbors(constant):
         return _neighbors(bands, constant)
 
+    score_mode = mode in {"auto", "score"}
+    cutoffs, partitions = _rating_cutoffs(catalog, charts, records) if score_mode else ({}, {})
     exact = Decimal(level) if level and "." in level else None
     for song in catalog.songs.values():
         check_render_cancelled(stopped)
@@ -264,8 +319,10 @@ def candidates(snapshot, catalog, mode, level, stopped=None):
                     deficit = song_op - record["over_power"]
                     op_priority *= 1 / (1 + deficit / 4)
             op_target = _op_target(constant, song_op, record, points, objective) if room and mode in {"auto", "op"} else None
+            score_target = (_score_target(constant, record, points, nearby, cutoffs, partitions[song.id])
+                            if score_mode and record is not None else None)
             yield Candidate(song, chart, record, song_op, ceiling, song_ceiling, room,
-                            points, objective, reason, fit, reach, op_priority, op_target)
+                            points, objective, reason, fit, reach, op_priority, op_target, score_target)
 
 
 def _ceiling(chart):
@@ -294,7 +351,7 @@ def select(snapshot, catalog, mode, level, previous=(), stopped=None, *, rng=ran
     options = list(candidates(snapshot, catalog, mode, level, stopped))
     modes = ("score", "op") if mode == "auto" else (mode, mode)
     pools = {kind: [c for c in options if (kind != "op" or c.op_target)
-                    and (kind != "score" or c.record is not None)] for kind in modes}
+                    and (kind != "score" or c.score_target)] for kind in modes}
     picked = []
     used = set()
     recent = {song_id for song_id, _ in previous}
@@ -313,6 +370,11 @@ def select(snapshot, catalog, mode, level, previous=(), stopped=None, *, rng=ran
         if kind == "op":
             points, objective, reason = chosen.op_target
             chosen = replace(chosen, target=points, objective=objective, reason=reason)
+        elif kind == "score":
+            points, objective, _ = chosen.score_target
+            gap = points - chosen.record["score"]
+            chosen = replace(chosen, target=points, objective=objective,
+                             reason=f"本谱距目标 {gap:,} 分，达成可提高榜单均值。")
         picked.append((kind, chosen))
         used.add(chosen.song.id)
     return sorted(picked, key=lambda pair: modes.index(pair[0]))

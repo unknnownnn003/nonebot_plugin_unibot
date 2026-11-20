@@ -22,7 +22,7 @@ def song(sid, *charts, **attributes):
 
 def score(sid, points, op, difficulty=3, **attributes):
     return dict(id=sid, score=points, over_power=op, level_index=difficulty,
-                rating=13, full_combo=attributes.get("full_combo"))
+                rating=attributes.get("rating", 0), full_combo=attributes.get("full_combo"))
 
 
 class RecommendationTests(unittest.TestCase):
@@ -168,7 +168,32 @@ class RecommendationTests(unittest.TestCase):
             picks = self.select(songs, records, "op", "14.8")
             target = (picks[0][1].target, picks[0][1].objective) if picks else None
             self.assertEqual(target, expected)
-            self.assertEqual(len(self.select(songs, records, "score", "14.8")), 1)
+            self.assertEqual(len(self.select(songs, records, "score", "14.8")), int(points < 1_009_000))
         record = score(1, 1_007_300, 83.8)
         record.pop("full_combo")
         self.assertIsNone(self.rules._op_target(14.8, 84, record, 1_007_500, "SSS"))
+
+    def test_score_target_must_move_a_full_board(self):
+        filler = [song(i, chart(15.0), version=1) for i in range(2, 32)]
+        records = [score(i, 1_009_000, 90, rating=17.15) for i in range(2, 32)]
+        target = song(1, chart(14.8, version=2), version=1)
+        record = score(1, 1_008_999, 84, rating=16.9499)
+        self.assertEqual(self.select([target, *filler], [record, *records], "score", "14.8"), [])
+        target["version"] = 2
+        target["difficulties"][0]["version"] = 1
+        catalog = self.catalog({"songs": [target, *filler], "versions": [{"version": 1}, {"version": 2}],
+                                "rating_version": 2})
+        snapshot = SimpleNamespace(player={"rating": 17}, scores=[record, *records])
+        [(mode, pick)] = self.rules.select(snapshot, catalog, "score", "14.8", rng=Random(1))
+        self.assertEqual(pick.target, 1_009_000)
+        self.assertEqual(pick.data(mode)["rating_gain"], {"b50": .000002})
+
+    def test_score_target_crosses_cutoff_or_excludes_rating_plateau(self):
+        records = [score(i, 1_007_500, 84, rating=16.82) for i in range(2, 32)]
+        songs = [song(1, chart(14.8)), *(song(i, chart(14.9)) for i in range(2, 32))]
+        picks = self.select(songs, [score(1, 1_007_400, 83, rating=16.78), *records], "score", "14.8")
+        self.assertEqual(picks[0][1].target, 1_007_701)
+        gain = picks[0][1].data("score")["rating_gain"]["b30"]
+        self.assertGreater(gain, 0)
+        self.assertLess(gain, .01)
+        self.assertEqual(self.select(songs, [score(1, 1_009_000, 86, rating=16.94), *records], "score", "14.8"), [])
