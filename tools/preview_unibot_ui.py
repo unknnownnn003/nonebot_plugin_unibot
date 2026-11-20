@@ -60,6 +60,40 @@ def recommendation_fixture():
     return Catalog({"songs": songs, "rating_version": 2, "versions": [{"version": 1}, {"version": 2}]}), snapshots
 
 
+def legacy_previews(raw, images, player_assets):
+    from nonebot_plugin_unibot import best_rating as b
+    from nonebot_plugin_unibot.services import image_components as ui, legacy_rating as legacy
+    from nonebot_plugin_unibot.services.player_data import Snapshot
+    from nonebot_plugin_unibot.services.song_model import Catalog
+
+    catalog = Catalog(raw.get("data", raw))
+    history = legacy.load_history()
+    keys = sorted(history, key=lambda key: (-history[key].constant, key))[:30]
+    scores = (1_009_900, 1_007_500, 1_005_100, 1_000_430, 990_000, 975_000, 939_000, 900_000, 800_000)
+    rows = [dict(id=sid, level_index=difficulty, score=scores[i % len(scores)], rank="sssp",
+                 rating=17.0, clear="clear", full_combo=("alljusticecritical", "alljustice", "fullcombo")[i % 3])
+            for i, (sid, difficulty) in enumerate(keys)]
+    items = legacy.select(Snapshot({}, rows, "demo", 0), catalog, history)
+    assert len(items) == 30
+    items[3] = dict(items[3], song_name=LONG_TITLE)
+    items[4] = dict(items[4], song_name=TITLE)
+    jackets = {item["jacket_id"]: images[i % len(images)] for i, item in enumerate(items)}
+    player = dict(name="旧框演示玩家", level=39, rating=17.9, rating_possession="rainbow")
+
+    def draw(selected):
+        summary = legacy.simulate(item["rating"] for item in selected)
+        return b.draw_legacy_rating_image(player, selected, jackets, player_assets, summary)
+
+    previews = {"legacy_full": draw(items), "legacy_sparse": draw(items[:7]), "legacy_empty": draw([])}
+    ui.ui.cache_clear()
+    try:
+        with patch.object(ui.resources, "load_static_asset", return_value=None):
+            previews["legacy_fallback"] = draw(items[:7])
+    finally:
+        ui.ui.cache_clear()
+    return previews
+
+
 async def render(public_catalog, jacket_dir, output_dir):
     from nonebot_plugin_unibot import chuguess, help, recommendation, song
     from nonebot_plugin_unibot.services import image_components as ui
@@ -141,6 +175,8 @@ async def render(public_catalog, jacket_dir, output_dir):
         for index, title, alias in [(120, TITLE, "星之旅"), (121, LONG_TITLE, "旅星"),
                                     (122, "Signal × Resonance [Re:Mix]", "星への信号")]]})
     raw = json.loads(public_catalog.read_text(encoding="utf-8-sig"))
+    assets = {"character": ui.png(cover.resize((104, 104), Image.Resampling.LANCZOS))}
+    outputs.update(legacy_previews(raw, images, assets))
     yadi = Catalog({"songs": [dict(s, aliases=["雅迪"]) for s in raw.get("data", raw)["songs"] if s["id"] in YADI_IDS]})
     demo_art = dict(zip(regular.songs, images, strict=False))
     with patch.object(song, "download_match_jacket",

@@ -12,6 +12,7 @@ class ThreePluginHostTests(unittest.TestCase):
     def test_real_discovery_policy_oauth_and_jobs(self):
         script=r'''
 import asyncio,hashlib,json,shutil,sys,time
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock,patch
@@ -32,7 +33,7 @@ sys.path.insert(0,str(SOURCE/'tests'))
 from test_song_model import fixture
 from test_player_data import event,personal
 from nonebot_plugin_unibot import llm_api,best_rating as b
-from nonebot_plugin_unibot.services import player_data as pd,player,paths,oauth_runtime,sync,group_policy,media_jobs
+from nonebot_plugin_unibot.services import player_data as pd,player,paths,oauth_runtime,sync,group_policy,media_jobs,legacy_rating
 from nonebot_plugin_unibot.services.oauth import OAuthService,Settings
 from nonebot_plugin_unibot.services.oauth_store import OAuthStore
 from nonebot_plugin_unknnownnn import feature_manager as fm,settings_flow
@@ -42,6 +43,8 @@ from nonebot_plugin_llmchat import init_plugin,cleanup_plugin
 fm.config_data={'_policy_version':2,'123':{'_plugins':{'unibot':True,'llmchat':True,'unknnownnn':False},'_unibot':{key:True for key in fm.policy.UNIBOT_FEATURES}}}
 original=json.dumps(fm.config_data,sort_keys=True)
 assert fm.policy.capability_feature('oauth.manage')=='scores'
+assert fm.policy.capability_feature('player.legacy_rating')=='player'
+assert fm.policy.MODULE_FEATURES['best_rating']=='player'
 assert 'chunirec' not in dict(settings_flow.RESOURCES)
 catalog=fixture();catalog['rating_version']=24000
 catalog['versions'].append(dict(version=20000,title='CHUNITHM NEW'))
@@ -82,6 +85,13 @@ async def run():
     assert {'nb_unibot_best','nb_unibot_b50','nb_unibot_song_scores'} <= set(registry.specs)
     assert not {'nb_unibot_bind','nb_unibot_score_sync','nb_unibot_score_submit','nb_unibot_import_scores'} & set(registry.specs)
     assert 'nb_unibot_b50' in registry.select('/b50')
+    for text in ('/旧框','查一下我的旧框','我的 Paradise Lost rating 多少','给我看看旧框 B30','按旧定数计算一下成绩','旧框两种模拟 Rating 分别是多少'):
+        assert 'nb_unibot_legacy_rating' in registry.select(text), text
+    spec=next(s for s in llm_api.describe_capabilities() if s['id']=='player.legacy_rating')
+    assert [c['command'] for c in spec['native_commands']]==['旧框']
+    invalid=await llm_api.invoke_capability('player.legacy_rating',{'qq':'42'},dict(bot=bot,event=g))
+    assert invalid['code']=='INVALID_ARGUMENT' and not calls
+
     assert 'nb_unibot_song_scores' in registry.select('chu成绩')
     context=tools.ToolContext(bot,g,'explicit_mention','cross-plugin')
     view=await registry.context_catalog(context)
@@ -108,10 +118,24 @@ async def run():
             await terminal(search['data']['job_id'])
         assert transport.await_count==4 # Song lookup sends its image, no generation receipt.
         before=transport.await_count
+        historical_song=next(s for s in catalog['songs'] if s['id']==10)
+        historical_chart=next(c for c in historical_song['difficulties'] if c['difficulty']==3)
+        history={(10,3):legacy_rating.HistoricalChart(historical_song['title'],Decimal('13.7'),
+                            legacy_rating.chart_identity(historical_song,historical_chart))}
+        with patch.object(legacy_rating,'load_history',return_value=history):
+            legacy_event=g.model_copy(update={'message_id':909})
+            output=await llm_api.invoke_capability('player.legacy_rating',{},dict(bot=bot,event=legacy_event))
+            assert output['code']=='JOB_ACCEPTED',output
+            legacy_job=await terminal(output['data']['job_id'])
+            assert legacy_job.status=='succeeded' and legacy_job.result['data']['chart_count']==1,legacy_job.result
+            assert transport.await_count==before+1 and len(calls)==2
+        before=transport.await_count
         fm.config_data['123']['_unibot']['player']=False
         view=await registry.context_catalog(context)
         assert view['nb_unibot_b50'][1]['unavailable_code']=='FEATURE_DISABLED'
         output=await media_jobs.submit(bot,g.model_copy(update={'message_id':900}),'player.b50',{},origin='command')
+        assert output['code']=='FEATURE_DISABLED' and len(calls)==2 and transport.await_count==before
+        output=await media_jobs.submit(bot,g.model_copy(update={'message_id':901}),'player.legacy_rating',{},origin='command')
         assert output['code']=='FEATURE_DISABLED' and len(calls)==2 and transport.await_count==before
         # Private query shares the same owner snapshot; group selection does not affect private scopes.
         output=await player.query(bot,private,'player.b50',{})
@@ -120,6 +144,7 @@ async def run():
         await auth.unlink('1','7')
         view=await registry.context_catalog(context)
         assert view['nb_unibot_b50'][1]['unavailable_code']=='NOT_AUTHORIZED'
+        assert (await sync.replay(bot,g,legacy_job.job_id))['code']=='AUTHORIZATION_CHANGED'
         assert (await sync.replay(bot,g,job.job_id))['code']=='AUTHORIZATION_CHANGED'
         assert (await sync.query(bot,g,'get',job.job_id))['data']['result']['code']=='AUTHORIZATION_CHANGED'
         assert transport.await_count==before

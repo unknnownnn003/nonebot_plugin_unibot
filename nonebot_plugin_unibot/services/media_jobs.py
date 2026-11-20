@@ -10,7 +10,7 @@ from weakref import WeakValueDictionary
 
 _submission_locks = WeakValueDictionary()
 
-CAPABILITIES = {"player.b50", "player.best", "player.profile", "player.progress", "player.recommend",
+CAPABILITIES = {"player.b50", "player.best", "player.legacy_rating", "player.profile", "player.progress", "player.recommend",
                 "player.song_scores", "song.search", "song.detail", "help.read"}
 
 

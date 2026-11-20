@@ -223,14 +223,14 @@ def rating_frame(value):
     return 1 + bisect_right(RATING_BREAKS, value)
 
 
-def rating_number(canvas, box, value, places, *, group="player-rating", align="center"):
+def rating_number(canvas, box, value, places, *, group="player-rating", align="center", frame=None, ink=None):
     if value is None:
         label(canvas, box, "—", 24, "#45546a", align)
         return
-    frame = rating_frame(value)
+    frame = rating_frame(value) if frame is None else frame
     text = f"{value:.{places}f}"
     if not contain(canvas, digits(group, frame, text), box, trim=True):
-        label(canvas, box, text, box[3] - box[1], RATING_INKS[frame - 1], align, fit=True)
+        label(canvas, box, text, box[3] - box[1], ink or RATING_INKS[frame - 1], align, fit=True)
 
 
 def _rating_part(picture, text, size, ink):
@@ -243,10 +243,10 @@ def _rating_part(picture, text, size, ink):
     return picture.crop(picture.getbbox())
 
 
-def rating_pair(canvas, box, value, places, *, gap, group="player-rating", centered=False):
+def rating_pair(canvas, box, value, places, *, gap, group="player-rating", centered=False, frame=None, ink=None):
     """Lay out the visible title and number as one group."""
-    frame = rating_frame(value)
-    ink = RATING_INKS[frame - 1]
+    frame = rating_frame(value) if frame is None else frame
+    ink = ink or RATING_INKS[frame - 1]
     text = f"{value:.{places}f}"
     title = _rating_part(ui("rating-title", str(frame)), "RATING", 15, ink)
     number = _rating_part(digits(group, frame, text), text, 21, ink)
@@ -313,14 +313,14 @@ def _trophy_metadata(equipped):
     return equipped
 
 
-def playerbar(player, images):
+def playerbar(player, images, *, show_rating=True):
     canvas = Image.new("RGBA", (576, 228))
     if not contain(canvas, resources.decode_png(images.get("plate")), (0, 0, 576, 228)):
         rounded(canvas, (4, 4, 571, 221), 12, "#e4ecef", "#c7dce0")
     if not contain(canvas, ui("playerbar", "base"), (140, 83, 468, 173)):
         rounded(canvas, (140, 83, 468, 173), 7, "#f9fbfc", "#c7dce0")
     possession = player.get("rating_possession")
-    if possession in ("copper", "silver", "gold", "platina", "rainbow"):
+    if show_rating and possession in ("copper", "silver", "gold", "platina", "rainbow"):
         contain(canvas, ui("playerbar", f"field-{possession}"), (140, 83, 468, 173))
     trophy = images.get("trophy_metadata") or player.get("trophy") or {}
     trophy_box = (135, 39, 561, 89)
@@ -355,7 +355,7 @@ def playerbar(player, images):
         if not contain(canvas, digits("playerbar", "level", str(player["level"])), (168, 100, 228, 136)):
             label(canvas, (171, 100, 226, 136), player["level"], 27, "#182d43", fit=True)
     rating = player.get("rating")
-    if rating is not None:
+    if show_rating and rating is not None:
         rating_pair(canvas, (148, 142, 313, 172), rating, 2, gap=18)
     emblem = player.get("class_emblem") or {}
     base_drawn = False

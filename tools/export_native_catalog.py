@@ -9,6 +9,7 @@ UNI = {
     "maintenance.refresh": "songlist_update.update_songlist get_resource.update_jacket collection_update.update_collection story.cmd_update",
     "song.search": "song.song_query song.lookup_cmd", "song.detail": "song.song_query",
     "player.best": "best_rating.best_rating_cmd",
+    "player.legacy_rating": "best_rating.legacy_rating_cmd",
     "player.b50": "best_rating.best_rating_50_cmd",
     "player.profile": "get_player_songlist.get_score", "player.song_scores": "get_player_songlist.song_scores_cmd", "player.progress": "overpower_list_local.chulist_cmd",
     "player.recommend": "recommendation.recommend_cmd", "song.aliases": "song.view_alias_cmd",

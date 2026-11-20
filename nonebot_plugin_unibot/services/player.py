@@ -30,6 +30,8 @@ async def query(bot, event, capability, arguments, *, expected=None, checkpoint=
             unmatched = sum((row["id"], row["level_index"]) not in known for row in snapshot.scores)
         if capability in {"player.best", "player.b50"}:
             output = await best(snapshot, catalog, b50=capability == "player.b50")
+        elif capability == "player.legacy_rating":
+            output = await legacy_best(snapshot, catalog)
         elif capability == "player.profile":
             from ..get_player_songlist import query_player_profile
             output = await query_player_profile(snapshot, catalog)
@@ -100,6 +102,26 @@ async def best(snapshot, catalog, *, b50=False):
         data = {"b30_average": average(old, 30), "chart_count": len(old)}
         content = await async_render(b.draw_b30_image, snapshot.player, old, jackets, assets, data["b30_average"])
         hint = "B30：所有版本普通谱面按落雪单谱面 Rating 排序取30，缺位按零计；此均值不是个人总 Rating。"
+    return outcome(hint=hint, data=data, artifacts=[image(content)])
+
+
+async def legacy_best(snapshot, catalog):
+    from .. import best_rating as b
+    from . import legacy_rating as legacy
+    try:
+        history = await async_call(legacy.load_history)
+    except ValueError:
+        return outcome("HISTORICAL_CATALOG_UNAVAILABLE", "旧框历史定数不可用，请管理员检查安装文件。", status="unavailable")
+    items = legacy.select(snapshot, catalog, history)
+    summary = legacy.simulate([item["rating"] for item in items])
+    jackets, assets = await asyncio.gather(b.prepare_jackets(items), player_images(snapshot.player))
+    content = await async_render(b.draw_legacy_rating_image, snapshot.player, items, jackets, assets, summary)
+    data = {"version": legacy.VERSION, "chart_count": len(items), "b30_average": f"{summary.b30:.4f}",
+            "repeat_best": f"{summary.repeat_best:.4f}", "top_ten": f"{summary.top_ten:.4f}",
+            "difference": f"{summary.difference:.4f}"}
+    hint = (f"旧版定数模拟｜非真实历史 Rating。B30 均值 {data['b30_average']}，"
+            f"B1 × 10 {data['repeat_best']}，B1–B10 {data['top_ten']}，差值 {data['difference']}。"
+            if items else "没有可纳入旧框模拟的历史谱面成绩。")
     return outcome(hint=hint, data=data, artifacts=[image(content)])
 
 

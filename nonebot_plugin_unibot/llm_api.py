@@ -9,7 +9,7 @@ from .services import group_policy
 _job_notifier = None
 
 API_VERSION = 1
-CAPABILITY_VERSION = "4.5.0"
+CAPABILITY_VERSION = "4.6.0"
 
 
 class SearchArgs(BaseModel):
@@ -89,6 +89,9 @@ def _describe_capabilities():
                  parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["查分", "成绩", "b30", "rating", "最近打得"]),
             dict(id="player.b50", name="nb_unibot_b50", description="查询本人国服B50：旧版本BEST30与当前版本NEW20，按歌曲版本分区，缺位计零；共用OAuth快照。",
                  parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["b50", "best30", "new20", "国服rating"]),
+            dict(id="player.legacy_rating", name="nb_unibot_legacy_rating", description="用本人的当前 OAuth 成绩和 2021 日服 PARADISE LOST 历史定数模拟旧框 B30，一张图同时给出 B1×10 和 B1–B10 两种总 Rating。",
+                 parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True,
+                 keywords=["旧框", "paradise lost", "旧定数", "旧版rating", "旧版b30"]),
             dict(id="player.profile", name="nb_unibot_profile", description="当前真实发起人的完整落雪 OAuth 个人资料图。",
                  parameters=EmptyArgs.model_json_schema(), effect="none", long_task=True, keywords=["个人信息", "玩家信息", "个人资料"]),
             dict(id="player.song_scores", name="nb_unibot_song_scores", description="查询本人 OAuth 单曲全部已记录难度成绩，支持别名和可选难度；关联 WORLD'S END 保留真实ID，WE不计普通Rating/OP。",
@@ -252,8 +255,8 @@ async def invoke_capability(name, arguments, context):
             args = SearchArgs.model_validate(arguments)
             from .services.song import aliases
             output = await aliases(args.query)
-        elif name in {"player.b50", "player.best", "player.profile", "player.progress", "player.recommend", "player.song_scores"}:
-            model = {"player.b50": EmptyArgs, "player.best": EmptyArgs, "player.profile": EmptyArgs, "player.progress": SearchArgs,
+        elif name in {"player.b50", "player.best", "player.legacy_rating", "player.profile", "player.progress", "player.recommend", "player.song_scores"}:
+            model = {"player.b50": EmptyArgs, "player.best": EmptyArgs, "player.legacy_rating": EmptyArgs, "player.profile": EmptyArgs, "player.progress": SearchArgs,
                      "player.recommend": RecommendArgs, "player.song_scores": SongScoreArgs}[name]
             args = model.model_validate(arguments)
             from .services.media_jobs import submit

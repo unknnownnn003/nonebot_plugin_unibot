@@ -189,7 +189,7 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "b50",
-        "line": 16,
+        "line": 17,
         "matcher": "best_rating_50_cmd",
         "module": "best_rating",
         "registration": "on_command"
@@ -201,8 +201,20 @@ NATIVE_CATALOG = json.loads(r'''{
     "native_commands": [
       {
         "command": "b30",
-        "line": 15,
+        "line": 16,
         "matcher": "best_rating_cmd",
+        "module": "best_rating",
+        "registration": "on_command"
+      }
+    ]
+  },
+  "player.legacy_rating": {
+    "native_command_note": "原注册入口；参数语法和运行时命令前缀以原插件为准。",
+    "native_commands": [
+      {
+        "command": "旧框",
+        "line": 18,
+        "matcher": "legacy_rating_cmd",
         "module": "best_rating",
         "registration": "on_command"
       }

@@ -43,7 +43,7 @@ for name in plugin.module.__all__:
     module=getattr(plugin.module,name)
     if hasattr(module,'DATA_DIR'):
         assert Path(module.DATA_DIR)==(target/'story' if name=='story' else target),name
-assert llm_api.API_VERSION==1 and llm_api.CAPABILITY_VERSION=='4.5.0'
+assert llm_api.API_VERSION==1 and llm_api.CAPABILITY_VERSION=='4.6.0'
 assert len(llm_api.describe_capabilities()) > 20
 assert not group_policy.enabled(NS(group_id=7),'score.sync')
 assert group_policy.enabled(NS(),'score.sync')

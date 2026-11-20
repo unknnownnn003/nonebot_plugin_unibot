@@ -7,6 +7,7 @@
 | 入口 / 能力 | 选择规则 | 汇总与展示 |
 | --- | --- | --- |
 | `/b30` / `player.best` | 所有版本有效普通谱面，按个人 API 返回的单谱面 Rating 降序取30 | 单区域；缺位为零，除以30，称作 B30 均值，不当作游戏内玩家总 Rating |
+| `/旧框` / `player.legacy_rating` | 同一份本人落雪 OAuth 快照，按 2021 PARADISE LOST 的已核对历史谱面计算 | 旧框 B30 及两种模拟总 Rating。使用 `player` 群开关，无参数 |
 | `/b50` / `player.b50` | 歌曲属于旧版本的 BEST30，加当前版本歌曲的 NEW20；两个池互斥 | 双区域；缺位为零，合计除以50，显示估算值；个人资料仍显示落雪 Player.rating |
 
 `/b` 及其别名已完全删除。两个入口复用 PlayerData 的同一 OAuth 快照、授权代次、群权限、并发刷新与任务队列，不创建独立成绩文件或成绩模型。
@@ -27,7 +28,7 @@ B30、B50与进度图的说明文字和图片一起进入持久投递计划，�
 
 ## 三插件契约
 
-- UniBot API_VERSION=1，共25项公开能力；`nb_unibot_b50` 提供 B50，`nb_unibot_best` 提供 B30 单榜，`nb_unibot_song_scores` 提供单曲成绩。OAuth 操作仅通过原生命令。
+- UniBot API_VERSION=1，CAPABILITY_VERSION=4.6.0，共26项公开能力；`nb_unibot_b50` 提供 B50，`nb_unibot_best` 提供 B30 单榜，`nb_unibot_legacy_rating` 提供旧框模拟，`nb_unibot_song_scores` 提供单曲成绩。OAuth 操作仅通过原生命令。
 - 综合插件移除 `get_player_score` 模块映射，`scores` 显示为“OAuth 授权与账号管理”，维护菜单仅剩国服曲库、曲绘、收藏品、剧情。内部 `oauth.manage`映射到原`scores`；`player.*`继续映射`player`，推荐仍为`recommend`。不改变 `_policy_version=2`、八个功能键或持久用户选择。
 - LLMChat清理退役好友码、手动传分、同步、附件导入和日服维护的工具名称；动态发现当前已加载提供者，按真实身份和当前授权生成上下文目录。能力概览区分B30/B50/单曲。
 - LLMChat的 `tools/export_capabilities.py` 从公开schema生成现有 `docs/v3.1/CAPABILITIES.json` 审查快照（68项，UniBot25 + 综合43）。不加载宿主、不读取凭据或运行数据。旧v3.1过程文档保留为历史记录。
