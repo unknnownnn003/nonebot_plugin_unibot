@@ -246,9 +246,60 @@ def check_image_polish():
         assert rendered.size == (840, 1740)
 
 
+
+def check_recommendation_image():
+    from nonebot_plugin_unibot.services.recommendation import Candidate
+
+    title = "星を追いかけて × 夜航列车 / Beyond the Horizon ♫ " * 6 + "Étoile"
+    song = Catalog({"songs": [{"id": 1, "title": title, "difficulties": [
+        {"difficulty": 4, "level": "14+", "level_value": 14.8}]}]}).songs[1]
+    chart = song.charts[0]
+    record = {"score": 999_700, "rank": "sp"}
+    candidate = Candidate(song, chart, record, 85, 89, 89, 4, 1_000_000, "SS", "", 1, 1, 1)
+    assert rec._difficulty is song_images._difficulty and rec._level is song_images._level
+    assert rec.badge is image_components.badge and rec.score_digits is image_components.score_digits
+    with patch.object(rec, "_level", wraps=rec._level) as level, patch.object(rec, "label", wraps=rec.label) as labels:
+        content = rec.render_recommendation_image([("score", candidate)], {})
+    _, _, level_y, payload = level.call_args.args
+    assert payload is chart.attributes and level.call_args.kwargs == {"compact": True}
+    title_labels = [call for call in labels.call_args_list if call.args[1][0] == 193 and call.args[2] != "推分"]
+    rows = [call.args[2] for call in title_labels]
+    assert len(rows) > 3 and "".join("".join(rows).split()) == "".join(title.split())
+    for call in title_labels:
+        left, _, right, _ = call.args[1]
+        assert call.kwargs["fit"] and image_components.measure(call.args[2], call.args[3]) <= right - left
+    assert level_y == title_labels[-1].args[1][3]
+    score_box = next(call.args[1] for call in labels.call_args_list if call.args[2] == "当前成绩")
+    with Image.open(BytesIO(content)) as rendered:
+        assert rendered.format == "PNG" and rendered.width == 800
+        assert level_y + 73 < score_box[1] < rendered.height
+    for points, objective in ((1_000_000, "SS"), (1_005_000, "SS+"),
+                              (1_007_500, "SSS"), (1_009_000, "SSS+"),
+                              (1_008_000, "提高最高分"), (1_008_000, "SSS")):
+        pick = replace(candidate, target=points, objective=objective)
+        with patch.object(rec, "badge", wraps=rec.badge) as badges:
+            rec.render_recommendation_image([("score", pick)], {})
+        expected = [("rank", "sp")]
+        if points in (1_000_000, 1_005_000, 1_007_500, 1_009_000):
+            expected.append(("rank", objective))
+        assert [call.args[2:] for call in badges.call_args_list] == expected
+    for mode, points, marker in (("fc", None, "fullcombo"), ("aj", None, "alljustice"),
+                                 ("ajc", 1_010_000, "alljusticecritical")):
+        pick = replace(candidate, target=points, objective=mode.upper())
+        with patch.object(rec, "badge", wraps=rec.badge) as badges:
+            rec.render_recommendation_image([(mode, pick)], {})
+        assert [call.args[2:] for call in badges.call_args_list] == [("rank", "sp"), ("combo", marker)]
+    with patch.object(rec, "label", wraps=rec.label) as labels, patch.object(rec, "score_digits", wraps=rec.score_digits) as digits:
+        rec.render_recommendation_image([("op", replace(candidate, record=None))], {})
+    assert [call.args[2] for call in digits.call_args_list] == [1_000_000]
+    assert {"落雪无本谱成绩", "当前歌曲有效 OP", "本谱理论有效空间"} <= {call.args[2] for call in labels.call_args_list}
+    assert not any("当前谱面 OP" in call.args[2] or "理论上限" in call.args[2] for call in labels.call_args_list)
+
+
 async def run():
     global allowed,mode,started,release
     check_image_polish()
+    check_recommendation_image()
     bind();bind('8')
     with patch.object(group_policy,'enabled',side_effect=lambda *a:allowed or getattr(a[0],'group_id',None) is None),patch.object(group_policy,'scope',side_effect=lambda *a:nullcontext()),patch.object(b,'prepare_jackets',AsyncMock(return_value={})),patch.object(rec,'download_jacket',AsyncMock(return_value=None)),patch.object(native_song,'download_jacket',AsyncMock(return_value=None)),patch.object(player,'player_images',AsyncMock(return_value={})),patch.object(profiles,'player_images',AsyncMock(return_value={})),patch.object(op,'player_images',AsyncMock(return_value={})),patch.object(op,'prefetch_jackets',AsyncMock()):
         snapshot=await reader.get(bot,e,'player.best')
@@ -265,7 +316,7 @@ async def run():
                 assert result['artifacts'][0]['content'].startswith(b'\x89PNG')
             if cap=='player.recommend':
                 rows=result['data']['recommendations']
-                assert 1 <= len(rows) <= 3 and len({row['song_id'] for row in rows})==len(rows)
+                assert 1 <= len(rows) <= 2 and len({row['song_id'] for row in rows})==len(rows)
                 assert all(row['predicted_effective_gain'] is None for row in rows)
                 assert result['artifacts'][0]['content'].startswith(b'\x89PNG')
             if cap=='player.best':
@@ -341,7 +392,7 @@ async def run():
         assert rendered['full_combo']=='' and rendered['full_chain']=='fullchain'
         result=await player.query(bot,e,'player.song_scores',{'query':'Same title'})
         assert result['code']=='AMBIGUOUS_TARGET'
-        specs=llm_api.describe_capabilities();assert len(specs)==25 and llm_api.CAPABILITY_VERSION=='4.2.0'
+        specs=llm_api.describe_capabilities();assert len(specs)==25 and llm_api.CAPABILITY_VERSION=='4.3.0'
         assert not {'player.bind','score.submit','score.sync','score.import_file'} & {s['id'] for s in specs}
         assert next(s for s in specs if s['id']=='player.best')['native_commands'][0].get('aliases',[])==[]
         for method in [llm_api.prepare_capability,llm_api.invoke_capability]:

@@ -13,30 +13,29 @@ from .job_store import check_render_cancelled
 from .rating import CN, eligible
 from .song_model import Chart, Song
 
-MODES = {"score": "推分", "op": "推 OP", "mixed": "综合",
-         "fc": "FC", "aj": "AJ", "ajc": "AJC", "auto": "推什么"}
+MODES = {"score": "推分", "op": "推 OP", "fc": "FC", "aj": "AJ", "ajc": "AJC"}
 COMBOS = {"": 0, "none": 0, "fullcombo": 1, "alljustice": 2, "alljusticecritical": 3}
 COMBO_TARGETS = {"fc": (1, 975_000), "aj": (2, 1_004_000), "ajc": (3, 1_009_000)}
 RANK_TARGETS = ((500_000, "C"), (600_000, "B"), (700_000, "BB"), (800_000, "BBB"),
                 (900_000, "A"), (925_000, "AA"), (950_000, "AAA"), (975_000, "S"),
                 (990_000, "S+"), (1_000_000, "SS"), (1_005_000, "SS+"),
                 (1_007_500, "SSS"), (1_009_000, "SSS+"), (1_010_000, "AJC"))
-USAGE = "用法：推什么 [推分 / 推OP / 综合 / aj / ajc / fc] [等级或定数]，例如「推什么 14+ 推OP」。"
+USAGE = "用法：推什么 [推分 / 推OP / aj / ajc / fc] [等级或定数]，例如「推什么 14+ 推OP」。"
 
 
 def parse_filter(value):
     """Accept one mode and one optional display level or exact constant."""
     tokens = unicodedata.normalize("NFKC", value).casefold().split()
-    aliases = {"推分": "score", "推op": "op", "综合": "mixed", **{key: key for key in COMBO_TARGETS}}
-    mode, level = "auto", None
+    aliases = {"推分": "score", "推op": "op", "综合": "auto", **{key: key for key in COMBO_TARGETS}}
+    mode, level = None, None
     for token in tokens:
-        if token in aliases and mode == "auto":
+        if token in aliases and mode is None:
             mode = aliases[token]
         elif level is None and re.fullmatch(r"[0-9]{1,2}(?:\+|\.[0-9])?", token):
             level = token
         else:
             raise ValueError(USAGE)
-    return mode, level
+    return mode or "auto", level
 
 
 @dataclass(frozen=True)
@@ -218,10 +217,8 @@ def _weight(candidate, mode, picked, recent):
     op_room = candidate.op_priority
     if mode == "op":
         score = fit * (.35 + .65 * op_room) * (.65 + .35 * reach)
-    elif mode == "score":
-        score = fit * (.55 + .45 * reach)
     else:
-        score = fit * (.55 + .30 * reach + .15 * op_room)
+        score = fit * (.55 + .45 * reach)
     if candidate.song.id in recent:
         score *= .55
     if picked:
@@ -235,7 +232,7 @@ def _weight(candidate, mode, picked, recent):
 def select(snapshot, catalog, mode, level, previous=(), stopped=None, *, rng=random):
     """Sample a small high-ranked pool with one chart per song."""
     options = list(candidates(snapshot, catalog, mode, level, stopped))
-    modes = ("score", "op", "mixed") if mode == "auto" else (mode,) * 3
+    modes = ("score", "op") if mode == "auto" else (mode, mode)
     pools = {kind: [c for c in options if (kind != "op" or c.headroom)
                     and (kind != "score" or c.record is not None)] for kind in modes}
     picked = []

@@ -44,18 +44,30 @@ class RecommendationTests(unittest.TestCase):
     def test_command_modes_and_strict_filters(self):
         for text, expected in {
             "": ("auto", None), "推分": ("score", None), "推OP": ("op", None),
-            "综合": ("mixed", None), "14+": ("auto", "14+"), "14.8": ("auto", "14.8"),
+            "综合": ("auto", None), "综合 14.8": ("auto", "14.8"), "14+": ("auto", "14+"), "14.8": ("auto", "14.8"),
             "１４＋　推ＯＰ": ("op", "14+"), "aj": ("aj", None), "AJC": ("ajc", None),
             "fc": ("fc", None),
         }.items():
             self.assertEqual(self.rules.parse_filter(text), expected)
-        for text in ("14+ 14.8", "推分 推OP", "14.8xx", "ajc 14.88", "未认识的条件"):
+        for text in ("14+ 14.8", "推分 推OP", "综合 推分", "综合 综合", "14.8xx", "ajc 14.88", "未认识的条件"):
             with self.assertRaises(ValueError):
                 self.rules.parse_filter(text)
         songs = [song(1, chart(14.8)), song(2, chart(14.9)), song(3, chart(14.3))]
         scores = [score(i, 1_007_000, 80) for i in range(1, 4)]
         self.assertEqual([c.key for _, c in self.select(songs, scores, "op", "14.8")], [(1, 3)])
         self.assertEqual({c.key for _, c in self.select(songs, scores, "op", "14+")}, {(1, 3), (2, 3)})
+
+    def test_two_slots_and_scarce_songs(self):
+        songs = [song(1, chart(14.8), chart(14.9, 4)), song(2, chart(14.8)), song(3, chart(14.8))]
+        scores = [score(1, 1_008_000, 85), score(1, 1_008_500, 87, 4),
+                  score(2, 1_007_000, 89), score(3, 1_006_900, 89)]
+        for seed in range(12):
+            default = self.select(songs, scores, "auto", seed=seed)
+            self.assertEqual([mode for mode, _ in default], ["score", "op"])
+            self.assertIn(default[0][1].song.id, {2, 3})
+            self.assertEqual(default[1][1].song.id, 1)
+            self.assertEqual([mode for mode, _ in self.select(songs, scores, "score", seed=seed)], ["score", "score"])
+            self.assertEqual([mode for mode, _ in self.select(songs, scores, "op", seed=seed)], ["op"])
 
     def test_per_song_op_and_unknown(self):
         songs = [song(1, chart(13.9, 2), chart(14.7), chart(15.0, 4), chart(19, 5)),
@@ -69,7 +81,7 @@ class RecommendationTests(unittest.TestCase):
                   score(6, 1_007_500, 82, 4)]
         snapshot = SimpleNamespace(player={"rating": 16}, scores=scores)
         catalog = self.catalog({"songs": songs})
-        choices = {c.key: c.data("mixed") for c in self.rules.candidates(snapshot, catalog, "mixed", None)}
+        choices = {c.key: c.data("auto") for c in self.rules.candidates(snapshot, catalog, "auto", None)}
         self.assertNotIn((7, 3), choices)
         self.assertNotIn((8, 3), choices)
         self.assertEqual(choices[(1, 3)]["current_chart_op"], 80)
@@ -100,9 +112,9 @@ class RecommendationTests(unittest.TestCase):
             previous = ()
             for seed in range(24):
                 picks = self.select(songs, records, "auto", seed=seed, previous=previous)
-                self.assertEqual([mode for mode, _ in picks], ["score", "op", "mixed"])
+                self.assertEqual([mode for mode, _ in picks], ["score", "op"])
                 keys = tuple(c.key for _, c in picks)
-                self.assertEqual(len(set(keys)), 3)
+                self.assertEqual(len({sid for sid, _ in keys}), 2)
                 self.assertNotEqual(set(previous), set(keys))
                 self.assertTrue(all(level <= c.chart.attributes["level_value"] <= level + .21
                                     for _, c in picks))
@@ -122,5 +134,5 @@ class RecommendationTests(unittest.TestCase):
             candidates = list(self.rules.candidates(snapshot, catalog, mode, None))
             self.assertEqual({c.song.id for c in candidates if c.record}, eligible)
             self.assertTrue(all(c.objective == mode.upper() for c in candidates))
-        self.assertEqual(self.select(songs, scores, "mixed", "9"), [])
-        self.assertTrue(all(c.record for _, c in self.select(songs, scores[:1], "mixed")))
+        self.assertEqual(self.select(songs, scores, "auto", "9"), [])
+        self.assertEqual(len(self.select(songs, scores[:1], "auto")), 1)

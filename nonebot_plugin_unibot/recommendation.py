@@ -5,17 +5,19 @@ import time
 from nonebot import on_regex
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 
-from .services.chat_cards import INK, LINE, MUTED, PAPER, TEAL, artwork, frame, lines
+from .services.chat_cards import INK, LINE, MUTED, PAPER, TEAL, artwork, frame
 from .services.image_components import badge, label, png, rounded, score_digits, wrap
 from .services.job_store import async_render, check_render_cancelled
-from .services.recommendation import MODES, parse_filter, select
+from .services.recommendation import MODES, RANK_TARGETS, parse_filter, select
 from .services.results import image, outcome
-from .services.song_images import _difficulty
+from .services.song_images import _difficulty, _level
 from .song import download_jacket
 
 
 recommend_cmd = on_regex(r"^推什么\s*(.+)?$", priority=5, block=True)
 _recent = OrderedDict()
+TARGET_COMBOS = {"FC": "fullcombo", "AJ": "alljustice", "AJC": "alljusticecritical"}
+TARGET_RANKS = dict(RANK_TARGETS[:-1])
 
 
 def remember(scope, mode, level, rows):
@@ -30,54 +32,81 @@ def _op(value):
     return "未知" if value is None else f"{value:.2f}"
 
 
+def _draw_target(canvas, x, top, candidate):
+    score, objective = candidate.target, candidate.objective
+    combo = TARGET_COMBOS.get(objective)
+    rank = TARGET_RANKS.get(score)
+    heading = "连击目标" if score is None else "目标成绩"
+    if not combo and rank != objective:
+        heading += f" · {objective}"
+    label(canvas, (x, top, x + 328, top + 29), heading, 22, TEAL)
+    if score is not None:
+        score_digits(canvas, (x, top + 33, x + 220, top + 77), score)
+    if combo:
+        left = x if score is None else x + 231
+        badge(canvas, (left, top + 39, x + 328, top + 72), "combo", combo)
+    elif rank == objective:
+        badge(canvas, (x + 231, top + 41, x + 328, top + 70), "rank", objective)
+
+
 def render_recommendation_image(picks, jackets, stopped=None):
     cards = []
     for mode, candidate in picks:
         check_render_cancelled(stopped)
-        data = candidate.data(mode)
+        name = candidate.song.attributes["title"]
         size = 33
-        title = wrap(data["title"], size, 504)
-        if len(title) >= 4:
+        title = wrap(name, size, 550)
+        if len(title) > 3:
             size = 29
-            title = wrap(data["title"], size, 504)
-        reason = wrap(data["reason"], 23, 704)
-        head = max(162, 89 + 42 * len(title))
-        cards.append((mode, candidate, data, title, size, reason, head, head + 224 + len(reason) * 31))
+            title = wrap(name, size, 550)
+        # The compact LEVEL board uses 73 px below the last title line.
+        head = max(168, 43 + 41 * len(title) + 73 + 10)
+        cards.append((mode, candidate, title, size, head))
 
-    canvas = frame("推什么", 143 + sum(card[-1] + 12 for card in cards))
+    show_op_note = any(mode == "op" for mode, _, _, _, _ in cards)
+    body_height, gap = 109, 12
+    canvas = frame("推什么", 83 + sum(card[-1] + body_height + gap for card in cards) + (38 if show_op_note else 4))
     y = 83
-    for mode, candidate, data, title, size, reason, head, height in cards:
+    for mode, candidate, title, size, head in cards:
         check_render_cancelled(stopped)
+        height = head + body_height
         rounded(canvas, (20, y, 780, y + height), 16, PAPER, LINE)
-        artwork(canvas, jackets.get(data["song_id"]), (36, y + 17, 176, y + 157))
+        artwork(canvas, jackets.get(candidate.song.id), (36, y + 17, 176, y + 157))
         label(canvas, (193, y + 10, 745, y + 43), MODES[mode], 24, TEAL)
-        top = lines(canvas, title, 193, y + 43, 750, size, 42, INK)
-        _difficulty(canvas, 193, top, data["level_index"], compact=True)
-        label(canvas, (390, top, 746, top + 43), f"{data['level']}  ·  定数 {data['level_value']:.1f}", 25, INK)
-        top = y + head + 9
+        top = y + 43
+        for row in title:
+            label(canvas, (193, top, 751, top + 41), row, size, INK, fit=True)
+            top += 41
+        _difficulty(canvas, 193, top + 14, candidate.chart.difficulty, compact=True)
+        _level(canvas, 389, top, candidate.chart.attributes, compact=True)
+
+        top = y + head
         rounded(canvas, (36, top, 764, top + 96), 10, "#eff6f6")
-        label(canvas, (49, top + 3, 367, top + 32), "当前成绩", 22, MUTED)
-        if data["score"] is None:
-            label(canvas, (49, top + 33, 365, top + 84), "落雪无成绩记录", 28, INK)
+        if mode == "op":
+            _draw_target(canvas, 49, top + 5, candidate)
+            if candidate.record is None:
+                label(canvas, (211, top + 5, 377, top + 34), "落雪无本谱成绩", 20, MUTED, "right")
+            for x, caption, value in (
+                (405, "当前歌曲有效 OP", candidate.song_op),
+                (586, "本谱理论有效空间", candidate.headroom),
+            ):
+                label(canvas, (x, top + 10, x + 171, top + 35), caption, 22, MUTED, fit=True)
+                label(canvas, (x, top + 40, x + 171, top + 81), _op(value), 34, TEAL)
         else:
-            score_digits(canvas, (47, top + 35, 272, top + 84), data["score"])
-            badge(canvas, (288, top + 37, 382, top + 82), "rank", candidate.record.get("rank"))
-        label(canvas, (403, top + 3, 748, top + 32), "目标  " + data["objective"], 24, TEAL)
-        if data["target_score"] is not None:
-            score_digits(canvas, (401, top + 35, 634, top + 84), data["target_score"])
-        else:
-            label(canvas, (403, top + 34, 749, top + 82), "达成连击标记", 28, INK)
-        top += 104
-        for index, (caption, value) in enumerate((
-            ("当前谱面 OP", data["current_chart_op"]), ("当前歌曲 OP", data["current_song_op"]),
-            ("本谱理论上限", data["theoretical_chart_op"]), ("本谱有效理论空间", data["theoretical_effective_room"]),
-        )):
-            x = 45 + index % 2 * 359
-            line = top + index // 2 * 36
-            label(canvas, (x, line, x + 344, line + 35), f"{caption}  {_op(value)}", 23, INK)
-        lines(canvas, reason, 45, top + 77, 749, 23, 31, MUTED)
-        y += height + 12
-    label(canvas, (28, y, 772, y + 43), "同曲取最高 OP · 理论空间为上界 · 实际提升未知", 23, MUTED, fit=True)
+            label(canvas, (49, top + 5, 372, top + 34), "当前成绩", 22, MUTED)
+            if candidate.record is None:
+                label(canvas, (49, top + 38, 372, top + 83), "落雪无本谱成绩", 26, INK)
+            else:
+                score = candidate.record["score"]
+                score_digits(canvas, (49, top + 38, 269, top + 82), score)
+                badge(canvas, (280, top + 46, 377, top + 75), "rank", candidate.record.get("rank"))
+                if candidate.target is not None and candidate.target > score:
+                    label(canvas, (619, top + 5, 748, top + 34),
+                          f"还差 {candidate.target - score:,} 分", 22, TEAL, "right")
+            _draw_target(canvas, 405, top + 5, candidate)
+        y += height + gap
+    if show_op_note:
+        label(canvas, (28, y - 4, 772, y + 30), "同曲取最高 OP · 理论空间是上界，实际提升未知", 22, MUTED)
     check_render_cancelled(stopped)
     return png(canvas)
 
