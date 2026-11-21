@@ -50,18 +50,21 @@ async def _render(bot, name, markdown, checkpoint):
     from nonebot.adapters.onebot.v11 import Message, MessageSegment
     await checkpoint("downloading_story_images")
     markdown = await story.predownload_images(markdown)
-    chunks = await _db_thread(lambda: story.split_markdown(markdown, max_lines=400))
+    chunks = await _db_thread(lambda: story.split_markdown(markdown, max_lines=80))
     nodes = [MessageSegment.node_custom(user_id=int(bot.self_id), nickname="uni",
                                       content=Message(f"当前角色：{name}"))]
     for index, chunk in enumerate(chunks):
         await checkpoint(f"rendering_story:{index + 1}/{len(chunks)}")
-        header = f"\n# {name}\n\n" if index == 0 else ""
+        header = f"\n# {name}\n\n"
         base_style = """<style>
-.markdown-body { background-color: #fdf6e3 !important; color: #333333 !important; }
-.markdown-body table tr { background-color: #fdf6e3 !important; }
-.markdown-body table tr:nth-child(2n) { background-color: #f2e9ce !important; }
+.markdown-body { background: #fbfaf5 !important; color: #253849 !important;
+ padding: 32px 40px !important; font-family: "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+ font-size: 22px; line-height: 1.75; overflow-wrap: anywhere; }
+.markdown-body h1, .markdown-body h2 { color: #245850; line-height: 1.35; }
+.markdown-body footer { margin-top: 32px; border-top: 1px solid #c7dce0; color: #526875; }
 </style>"""
-        image = await story.md_to_pic(base_style + header + chunk, width=800, type="jpeg", quality=90,
+        footer = f"\n\n<footer>UniBot 剧情阅读 · 第 {index + 1} / {len(chunks)} 节</footer>"
+        image = await story.md_to_pic(base_style + header + chunk + footer, width=800, type="jpeg", quality=90,
                                       device_scale_factor=1.5)
         pieces = await _db_thread(lambda: story.split_image(image, max_height=6000))
         for piece in pieces:
