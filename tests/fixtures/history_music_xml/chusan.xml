@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Synthetic metadata written for UniBot tests. No game assets. -->
+<MusicData>
+  <name><id>59001</id><str>Example Tune</str></name>
+  <artistName><str>Fixture Artist</str></artistName>
+  <releaseTagName><id>1</id><str>Example debut</str></releaseTagName>
+  <exType>0</exType><disableFlag>false</disableFlag><firstLock>false</firstLock>
+  <fumens>
+    <MusicFumenData><type><id>0</id><data>BASIC</data></type><enable>true</enable><level>3</level><levelDecimal>0</levelDecimal><file><path>synthetic_00.c2s</path></file></MusicFumenData>
+    <MusicFumenData><type><id>2</id><data>EXPERT</data></type><enable>true</enable><level>10</level><levelDecimal>75</levelDecimal></MusicFumenData>
+    <MusicFumenData><type><id>3</id><data>MASTER</data></type><enable>true</enable><level>14</level></MusicFumenData>
+    <MusicFumenData><type><id>4</id><data>ULTIMA</data></type><enable>true</enable><level>15</level><levelDecimal>20</levelDecimal></MusicFumenData>
+  </fumens>
+</MusicData>
