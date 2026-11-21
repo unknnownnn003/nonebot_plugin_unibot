@@ -42,7 +42,8 @@ SELECT c.song_id, n.name AS title, c.id AS chart_id, c.difficulty, c.variant,
        ss.observation_id AS song_observation, cs.observation_id AS chart_observation,
        co.quality AS chart_quality, so.quality AS song_quality,
        e.kind AS event_kind, e.constant_tenths, e.conflict_id,
-       e.observation_id AS constant_observation, o.quality AS constant_quality
+       e.observation_id AS constant_observation, o.quality AS constant_quality,
+       o.value_kind AS constant_evidence_kind
 FROM selected a
 JOIN chart_revision r ON r.id = a.revision_id
 JOIN chart c ON c.id = r.chart_id

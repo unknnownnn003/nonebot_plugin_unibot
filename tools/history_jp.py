@@ -116,6 +116,10 @@ def import_historical_chart(db, row, locator, song, key, difficulty):
     db.external(artifact, "JP", key, difficulty, song, chart_locator, rev,
                 "observed" if difficulty in row["charts"] else "unknown")
     horizon = offset(JP_THROUGH)
+    if difficulty == "ULT" and "announcement-ultima" in db.artifacts:
+        first_ultima_edition = next(edition[0] for edition in db.editions.values() if edition[3] == "NEW")
+        db.states("announcement-ultima", "新難易度「ULTIMA」追加！", "JP", song, title,
+                  [(FIRST_DAY, first_ultima_edition, "not_released", "B", "version", 20)], revision=rev)
     daydream_ult = (key, difficulty) == ("02091", "ULT") and "daydream-evidence" in db.artifacts
     genesis_first = key == "01145" and "genesis-evidence" in db.artifacts
     nodes = row["charts"].get(difficulty, {}).get("timeline", [])

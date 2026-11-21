@@ -14,6 +14,7 @@ from _unibot_history.history import (
     CURRENT_REVISIONS, RELEASE_ID, SCHEMA_VERSION, coverage, iso_day, snapshot_rows,
 )
 from history_import import CatalogImport, identifier, json_file, json_text, sha
+from history_enrichment import enrich
 from history_jp import (
     jp_releases, load_checkpoint_otoge, load_lost, load_timemachine, load_verse_sheet, seed_rules,
 )
@@ -23,7 +24,7 @@ from history_regions import (
 )
 
 
-TOOL_VERSION = "1.0.0"
+TOOL_VERSION = "1.1.0"
 TOOL_DIR = Path(__file__).resolve().parent
 SCHEMA = TOOL_DIR / "history_schema.sql"
 PINS = TOOL_DIR / "history_inputs.json"
@@ -31,6 +32,7 @@ IMPLEMENTATION = (
     Path(__file__), TOOL_DIR / "history_import.py", TOOL_DIR / "history_jp.py",
     TOOL_DIR / "history_regions.py", ROOT / "nonebot_plugin_unibot" / "services" / "history.py",
     TOOL_DIR / "import_paradise_lost.py", Path(legacy.__file__),
+    TOOL_DIR / "history_enrichment.py", TOOL_DIR / "history_constant_sources.py",
 )
 
 
@@ -112,6 +114,7 @@ def input_manifest(config, artifacts, raw, schema):
         "artifacts": [dict(meta, byte_count=len(raw[name])) for name, meta in sorted(artifacts.items())],
         "regional_releases": config.get("regional_releases", []),
         "extra_observations": config.get("extra_observations", []),
+        "constant_enrichment": config.get("constant_enrichment", []),
         "distribution": "local-only",
     }
 
@@ -147,6 +150,7 @@ def populate(db, raw, manifest):
     import_intl_current(db, raw["intl-current"])
     import_cn(db, raw["cn-current"], raw["cn-config"])
     append_observations(db, raw, manifest)
+    enrich(db, raw, manifest["constant_enrichment"])
     db.materialize_intervals()
 
 

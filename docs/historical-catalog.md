@@ -95,6 +95,28 @@ changes = catalog.get_constant_changes("JP", "LUMINOUS PLUS", "VERSE", include_u
 
 审核时检查 coverage.json 的逐地区版本数据及 conflict 候选，对比新增日期和变动，依赖同一上游的值只算一批证据。禁止以最新常定数覆盖旧记录，也不要将锁定的推测升级为精确。审批完毕后用 --activate 原子切换。
 
+## 日服历史定数补全与差异导出
+
+B2 从锁文件构建同一套 SQLite schema。CRYSTAL PLUS 和 PARADISE 使用 MAX-eipi 在版本末日的固定提交。从 PARADISE LOST → NEW 到 X-VERSE-X → MATE 的有名列对照表使用前代列核对前代末，后代列按各自的日期证据入库。历史匹配限于已建档的日服谱面槽，要求曲名无歧义、曲目在目标日可玩、谱面无已知反证。可用的历史槽仍可能缺少内容版本的身份凭证，跨地区映射审核沿用原规则。
+
+旧调查文章各自保留观察日，且只在该日曲目和谱面状态均可确认时登记同期 B 级观察。文章给出的版本末候选保留 C 级。初代调查作者声明的近似误差保留为估算。MATE 以当天官方曲号、曲名、曲师及难度匹配 ChuniSupport 与 CHUNITHM Info，再核对 CN10 工作簿或有谱面物量的 Wiki 数据。Wiki 低等级表引用 CN10，这两项证据共用一条来源链。显示等级规则仅能在锁定的版本、日期和证据范围内产生 `rule_derived` 值。
+
+前代 A/B 定数有新异议时，保留原值和原来源，将异议登记在 `conflict` 供审核。已有未决冲突和 OTOGE LUMINOUS PLUS 的隔离结论继续生效。
+
+```powershell
+$historyDir = '.tools/history-catalog'
+$sources = '.tools/history-b2/sources'
+$before = (Get-Content "$historyDir/CURRENT" -Raw).Trim()
+$staged = python tools/build_history_catalog.py --sources $sources --output $historyDir --stage-only
+python tools/export_history_constants.py --catalog $staged --baseline "$historyDir/releases/$before" --output .tools/history-b2/results
+```
+
+`check.json` 记录基线、发布 ID、CSV 校验值及原可信值的差异。`verified_constants.csv` 和 `newly_verified_constants.csv` 按版本及内部谱面 ID 给出观察证据。`missing_constants.csv` 保留完全未知、仅显示等级、估计、冲突以及身份或时间证据不足的各自状态。CSV 的候选观察 ID 可用 `get_observation` 查值及来源。`constant_conflicts.csv` 每候选证据一行，同一个 `conflict_id` 可能有多行。`coverage_by_version.csv` 按难度列出确定可玩谱面及额外待确认谱面槽，可信占比的分母为确定可玩谱面，真实历史分母字段留空。闭合版本取后继首日前一天，MATE 取最近有证据的观察日。
+
+核对差异和回归测试后，用 `--activate <release-id>` 选择新包。用同一个命令传入 `$before` 可恢复上一包。原件、SQLite 和来源导出单独保存在本地。可变网页和工作簿的在线重新下载可能已经改变字节，离线重建用通过锁文件 SHA-256 验证的原件。
+
+原始入口包括 [MAX-eipi 提交历史](https://github.com/MAX-eipi/ChunithmMusicDataTable/commits/master/index.html)、[历代工作簿索引](https://chunithm.org/)、[RKS 同期调查](https://chunithmfanclub.hatenablog.com/archive)、[MATE CN10 对照工作簿](https://docs.google.com/spreadsheets/d/1XK3_hjMlJk1YXLMRbSNAnZdVrGh986Qp5X0rXc2qSHQ/edit)、[CHUNITHM Info 定数表](https://chuni.info/const-table?lang=ja) 和 [SEGA ULTIMA 首发公告](https://info-chunithm.sega.jp/1151/)。
+
 ## Rating 接入状态与分发
 
 本阶段的历史库未开放新的 Rating 查询。PARADISE LOST 标 legacy_reference_only，现有 /旧框 仍用固定 762 首与 3,048 张指纹映射。VERSE 已有 2025-07-15 截面、互斥新旧池规则证据和双代定数对照。后续开放前需要审核官方逐曲 New 资格、目标版谱面等价、剩余定数冲突、低分段和机台取整。其余版本依赖各自的数据证据，X-VERSE 及后续目前只属于曲库建设范围。

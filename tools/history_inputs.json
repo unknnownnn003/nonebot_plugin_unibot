@@ -63,6 +63,22 @@
     "cn-observer": [
       "https://note.com/eager_yeti6246/n/n411dd5768518",
       "unknown; local use only"
+    ],
+    "jp-paired-sheets": [
+      "https://chunithm.org/",
+      "individual authors; redistribution unconfirmed; local use only"
+    ],
+    "rks-constants": [
+      "https://chunithmfanclub.hatenablog.com/archive",
+      "individual author; redistribution unconfirmed; local use only"
+    ],
+    "risette": [
+      "https://risette14.hatenadiary.jp/archive",
+      "individual author; redistribution unconfirmed; local use only"
+    ],
+    "chuni-info": [
+      "https://chuni.info/const-table?lang=ja",
+      "public presentation; redistribution unconfirmed; local use only"
     ]
   },
   "dependencies": [
@@ -125,6 +141,21 @@
       "legacy-package",
       "lxns",
       "CN compatibility fingerprint"
+    ],
+    [
+      "jp-paired-sheets",
+      "rks-constants",
+      "overlapping editors and underlying historical data; not independent"
+    ],
+    [
+      "arcade-songs",
+      "rks-constants",
+      "historical estimate or measurement lineage can overlap"
+    ],
+    [
+      "wikiwiki",
+      "jp-paired-sheets",
+      "MATE low-level table explicitly cites CN10; shared evidence for that table"
     ]
   ],
   "artifacts": [
@@ -370,6 +401,521 @@
       "observed_on": null,
       "upstream_version": null,
       "sha256": "75b165272706f633efc817185fe151d7d19cf43ed252e9bdd1dd4e1cd1e13c37"
+    },
+    {
+      "id": "b2-sheet-new",
+      "source": "jp-paired-sheets",
+      "file": "new.xlsx",
+      "url": "https://docs.google.com/spreadsheets/d/1ycrNnSbnl7xgaoMCGPu31QF_ulPmwji28RldY7pZSfQ/export?format=xlsx",
+      "observed_on": null,
+      "sha256": "93b3be9a58e4efd84c442e9c140d694e19dfa9ec39ca232e2592286c828a81f7",
+      "upstream_version": "PARADISE LOST -> NEW comparison",
+      "retrieved_at": "2026-11-21T07:20:00.832570+00:00"
+    },
+    {
+      "id": "b2-sheet-new-plus",
+      "source": "jp-paired-sheets",
+      "file": "new-plus.xlsx",
+      "url": "https://docs.google.com/spreadsheets/d/1m9BXU3D8rD4qYPn4YrxnzI3-2NydDwB-GTs1h88UX-U/export?format=xlsx",
+      "observed_on": null,
+      "sha256": "f15ecb53bb643c9b9d42f99dd377c7dd5a5adcb5134404ee82cd1a14c7576105",
+      "upstream_version": "NEW -> NEW PLUS comparison",
+      "retrieved_at": "2026-11-21T07:19:57.874445+00:00"
+    },
+    {
+      "id": "b2-sheet-sun",
+      "source": "jp-paired-sheets",
+      "file": "sun.xlsx",
+      "url": "https://docs.google.com/spreadsheets/d/1AQswvf1DaJ1ZlcESoX1TWliVSjkWwiyj9ONA3f6dNlc/export?format=xlsx",
+      "observed_on": null,
+      "sha256": "1e8518313cead0fb9bbc296f27c7dffb1a27a65f8002b801464cbb0efa1ce82a",
+      "upstream_version": "NEW PLUS -> SUN comparison",
+      "retrieved_at": "2026-11-21T07:19:56.531255+00:00"
+    },
+    {
+      "id": "b2-sheet-sun-plus",
+      "source": "jp-paired-sheets",
+      "file": "sun-plus.xlsx",
+      "url": "https://docs.google.com/spreadsheets/d/1FaorKV15tTc6RaEliIRi9vj95aasRl46ej35BPXA3Ic/export?format=xlsx",
+      "observed_on": null,
+      "sha256": "9002a6666f55fb79375754a8df2c7327bf229b52f2eb7d1b116299abdbe236ce",
+      "upstream_version": "SUN -> SUN PLUS comparison",
+      "retrieved_at": "2026-11-21T07:19:55.938202+00:00"
+    },
+    {
+      "id": "b2-sheet-luminous",
+      "source": "jp-paired-sheets",
+      "file": "luminous.xlsx",
+      "url": "https://docs.google.com/spreadsheets/d/1Nhr-lC1u11WPkUPVTatnNrKWCmVLglaA6hZHgh56N6w/export?format=xlsx",
+      "observed_on": null,
+      "sha256": "407ab08e29f8e06b928d7fb7cce3d7ff95bd8deff548798c5bd31237038ea03d",
+      "upstream_version": "SUN PLUS -> LUMINOUS comparison",
+      "retrieved_at": "2026-11-21T07:19:54.550874+00:00"
+    },
+    {
+      "id": "b2-sheet-luminous-plus",
+      "source": "jp-paired-sheets",
+      "file": "luminous-plus.xlsx",
+      "url": "https://docs.google.com/spreadsheets/d/1ySnda8wjXIhWzCTJ4tqDi-XnZCABpQdWik9lUOqzHuM/export?format=xlsx",
+      "observed_on": null,
+      "sha256": "aae9b1e0c7215dbc4451773d4681983c7023534b5c84537aae7a74777890b731",
+      "upstream_version": "LUMINOUS -> LUMINOUS PLUS comparison",
+      "retrieved_at": "2026-11-21T07:19:52.911070+00:00"
+    },
+    {
+      "id": "b2-sheet-verse",
+      "source": "jp-paired-sheets",
+      "file": "verse.xlsx",
+      "url": "https://docs.google.com/spreadsheets/d/1NTGkrOoLdzOoaYyz7d4vDT3cW2Q6lZfoc1nvd7nlNLE/export?format=xlsx",
+      "observed_on": null,
+      "sha256": "2f125b6fdfb6fb68dbbbdaa1925b98a224bf390f4f655146825fead88f6d5f09",
+      "upstream_version": "LUMINOUS PLUS -> VERSE comparison",
+      "retrieved_at": "2026-11-21T07:19:59.971853+00:00"
+    },
+    {
+      "id": "b2-sheet-x-verse",
+      "source": "jp-paired-sheets",
+      "file": "x-verse.xlsx",
+      "url": "https://docs.google.com/spreadsheets/d/1wewufZZ9iOy-3To6ITc_vwbUpfMhEVlGUKAmse2JgSs/export?format=xlsx",
+      "observed_on": null,
+      "sha256": "38728507d59cd5aaf032125378a429d8165c20d52aef84be6be92e37ed7d0c22",
+      "upstream_version": "VERSE -> X-VERSE comparison",
+      "retrieved_at": "2026-11-21T07:19:58.979646+00:00"
+    },
+    {
+      "id": "b2-sheet-x-verse-x",
+      "source": "jp-paired-sheets",
+      "file": "x-verse-x.xlsx",
+      "url": "https://docs.google.com/spreadsheets/d/1UgalRHELZBe4Wb4yKXffBJ6juj57bHgSdEWphCDsByE/export?format=xlsx",
+      "observed_on": null,
+      "sha256": "6fe5babc2491f8e7887c4a5d7e3541c5862b91b9353e861b55d9653a68d5c6e6",
+      "upstream_version": "X-VERSE -> X-VERSE-X comparison",
+      "retrieved_at": "2026-11-21T07:20:03.075129+00:00"
+    },
+    {
+      "id": "b2-max-crystal-plus",
+      "source": "max-eipi",
+      "file": "max-crystal-plus.html",
+      "url": "https://raw.githubusercontent.com/MAX-eipi/ChunithmMusicDataTable/418b38a1fdaf5d9e2a8d709e3a23da3ea177adb4/index.html",
+      "observed_on": "2021-01-20",
+      "sha256": "78e69d1e619c98ad33430a4a116d828a897d918af4366fda4d7483eb426ce5c8",
+      "upstream_version": "ChunithmMusicDataTable",
+      "retrieved_at": "2026-11-21T07:26:11.814365+00:00"
+    },
+    {
+      "id": "b2-max-paradise",
+      "source": "max-eipi",
+      "file": "max-paradise.html",
+      "url": "https://raw.githubusercontent.com/MAX-eipi/ChunithmMusicDataTable/efc5bd28eb7506e04792403592303439fb3f3242/index.html",
+      "observed_on": "2021-05-12",
+      "sha256": "4bfff471144befaad202a9b1efc12c5a2d50093757c3d50e85d4f6650aece597",
+      "upstream_version": "ChunithmMusicDataTable",
+      "retrieved_at": "2026-11-21T07:26:11.127816+00:00"
+    },
+    {
+      "id": "b2-fan-star",
+      "source": "rks-constants",
+      "file": "fan-star.html",
+      "url": "https://chunithmfanclub.hatenablog.com/entry/2017/08/03/143856",
+      "observed_on": "2018-02-24",
+      "sha256": "0c5b06cc981d8d283da77e82e1ea75a9b4240aba1169ae98ca5193a70fd03085",
+      "upstream_version": "STAR survey",
+      "retrieved_at": "2026-11-21T07:26:07.045549+00:00"
+    },
+    {
+      "id": "b2-fan-star-plus",
+      "source": "rks-constants",
+      "file": "fan-star-plus.html",
+      "url": "https://chunithmfanclub.hatenablog.com/entry/2018/02/10/050504",
+      "observed_on": "2018-10-14",
+      "sha256": "d64e655db1c1716e4b62c09f8a314cb871906ad8024804a8fa82caeefa31f2b4",
+      "upstream_version": "STAR PLUS survey",
+      "retrieved_at": "2026-11-21T07:33:30.985200+00:00"
+    },
+    {
+      "id": "b2-fan-amazon",
+      "source": "rks-constants",
+      "file": "fan-amazon.html",
+      "url": "https://chunithmfanclub.hatenablog.com/entry/2018/10/15/120307",
+      "observed_on": "2019-03-07",
+      "sha256": "08cbbfd5cb0c6f0c1a6e2e1531bda72eff3bc387271f9ef95517bd14bbeae585",
+      "upstream_version": "AMAZON survey",
+      "retrieved_at": "2026-11-21T07:26:07.638567+00:00"
+    },
+    {
+      "id": "b2-fan-amazon-plus",
+      "source": "rks-constants",
+      "file": "fan-amazon-plus.html",
+      "url": "https://chunithmfanclub.hatenablog.com/entry/2019/04/02/120832",
+      "observed_on": "2019-10-06",
+      "sha256": "d6e6a28369ed5249a592c0e339e7c8376b8da695598a5695138b4de4b68db9f1",
+      "upstream_version": "AMAZON PLUS survey",
+      "retrieved_at": "2026-11-21T07:26:07.128947+00:00"
+    },
+    {
+      "id": "b2-fan-crystal",
+      "source": "rks-constants",
+      "file": "fan-crystal.html",
+      "url": "https://chunithmfanclub.hatenablog.com/entry/2019/10/11/122251",
+      "observed_on": "2020-07-06",
+      "sha256": "45630c748689fc767cbad38b90003f2ff483e6d451185632813bbef7c4efe7ad",
+      "upstream_version": "CRYSTAL survey",
+      "retrieved_at": "2026-11-21T07:26:07.277873+00:00"
+    },
+    {
+      "id": "b2-fan-crystal-plus",
+      "source": "rks-constants",
+      "file": "fan-crystal-plus.html",
+      "url": "https://chunithmfanclub.hatenablog.com/entry/2020/07/03/214826",
+      "observed_on": null,
+      "sha256": "b60541c78407b08547fc474c50485dce68c4c9c599f6cfd502a51511cc532ce8",
+      "upstream_version": "CRYSTAL PLUS survey",
+      "retrieved_at": "2026-11-21T07:26:09.925854+00:00"
+    },
+    {
+      "id": "b2-fan-paradise",
+      "source": "rks-constants",
+      "file": "fan-paradise.html",
+      "url": "https://chunithmfanclub.hatenablog.com/entry/2021/01/12/121113",
+      "observed_on": "2021-04-28",
+      "sha256": "1ada1e4ba54ae8cedc1822dc4b024566963bfb6fcdd0b69505da54d09fcba3f3",
+      "upstream_version": "PARADISE survey",
+      "retrieved_at": "2026-11-21T07:33:32.276261+00:00"
+    },
+    {
+      "id": "b2-fan-lost",
+      "source": "rks-constants",
+      "file": "fan-lost.html",
+      "url": "https://chunithmfanclub.hatenablog.com/entry/2021/05/06/125723",
+      "observed_on": "2021-10-21",
+      "sha256": "5e5b4769b60ba1a6021dc620255edecc32ca667a057e4431955ce9b28cfa24fb",
+      "upstream_version": "PARADISE LOST survey",
+      "retrieved_at": "2026-11-21T07:33:33.559504+00:00"
+    },
+    {
+      "id": "b2-fan-new",
+      "source": "rks-constants",
+      "file": "fan-new.html",
+      "url": "https://chunithmfanclub.hatenablog.com/entry/2021/11/03/111313",
+      "observed_on": "2021-12-23",
+      "sha256": "da44ceea5c558984f1957da6f2ebcc0c023a0983d7efa7f0efd969d00386a196",
+      "upstream_version": "NEW survey",
+      "retrieved_at": "2026-11-21T07:33:35.342507+00:00"
+    },
+    {
+      "id": "b2-fan-new-plus",
+      "source": "rks-constants",
+      "file": "fan-new-plus.html",
+      "url": "https://chunithmfanclub.hatenablog.com/entry/2022/04/05/160813",
+      "observed_on": null,
+      "sha256": "c3c8be2c16fc0da91d38a8d3572b80d13adc318bd6fb6074c4a19e96164ed1f7",
+      "upstream_version": "NEW PLUS survey",
+      "retrieved_at": "2026-11-21T07:33:37.621082+00:00"
+    },
+    {
+      "id": "b2-risette-plus",
+      "source": "risette",
+      "file": "risette-origin.html",
+      "url": "https://risette14.hatenadiary.jp/entry/20160205/1454700578",
+      "observed_on": null,
+      "sha256": "001648440ae7c013355174e0564224ccf82d399ca46da8d1a45d5b4f6998f507",
+      "upstream_version": "PLUS survey, exact date unconfirmed",
+      "retrieved_at": "2026-11-21T07:33:56.636219+00:00"
+    },
+    {
+      "id": "b2-risette-air",
+      "source": "risette",
+      "file": "risette-plus.html",
+      "url": "https://risette14.hatenadiary.jp/entry/20160824/1472044736",
+      "observed_on": null,
+      "sha256": "888ed633e08337594086e3c87079c7fc1e8767089904f3fc8f48dd3cdcae58f5",
+      "upstream_version": "AIR survey, exact date unconfirmed",
+      "retrieved_at": "2026-11-21T07:33:55.125325+00:00"
+    },
+    {
+      "id": "b2-risette-air-plus",
+      "source": "risette",
+      "file": "risette-air.html",
+      "url": "https://risette14.hatenadiary.jp/entry/20170208/1486529479",
+      "observed_on": null,
+      "sha256": "671d17a60a7b052f38f2ce4f7031fb2d682f511d50609f2311335f37ea1e0c38",
+      "upstream_version": "AIR PLUS survey, exact date unconfirmed",
+      "retrieved_at": "2026-11-21T07:33:53.708324+00:00"
+    },
+    {
+      "id": "b2-mate-rule",
+      "source": "wikiwiki",
+      "file": "wiki-difficulty-rule.html",
+      "url": "https://wikiwiki.jp/chunithmwiki/%E3%83%AC%E3%83%BC%E3%83%86%E3%82%A3%E3%83%B3%E3%82%B0%E3%83%BBOVER%20POWER",
+      "observed_on": "2026-11-21",
+      "sha256": "47a3885fc0a38dccceec19d3f67be6b4bc3189a690433147e4af5c9a2abfe381",
+      "upstream_version": "MATE observed rule",
+      "retrieved_at": "2026-11-21T07:34:04.264622+00:00"
+    },
+    {
+      "id": "b2-info-mate",
+      "source": "chuni-info",
+      "file": "mate-constants-page.html",
+      "url": "https://chuni.info/const-table?lang=ja",
+      "observed_on": "2026-11-21",
+      "sha256": "b356dcd151a32cce669e04b8f684e46cf7a5e323365613cf958b9c0e49129b53",
+      "upstream_version": "MATE current web table",
+      "retrieved_at": "2026-11-21T07:20:03.249277+00:00"
+    },
+    {
+      "id": "b2-mate-low-level",
+      "source": "wikiwiki",
+      "file": "wiki-mate-low-level.html",
+      "url": "https://wikiwiki.jp/chunithmwiki/CHUNITHM%20Mate%20%E6%A5%BD%E6%9B%B2%E4%B8%80%E8%A6%A7%28%E5%AE%9A%E6%95%B0%E9%A0%863%29",
+      "observed_on": "2026-11-21",
+      "sha256": "9340b58b0fc3ea103441ecd5a55421c00518199f99a14bcca30a5c27d67b2fdb",
+      "upstream_version": "MATE 10 through 11+ table",
+      "retrieved_at": "2026-11-21T07:34:11.593768+00:00"
+    },
+    {
+      "id": "b2-sheet-mate",
+      "source": "jp-paired-sheets",
+      "file": "mate-book.xlsx",
+      "url": "https://docs.google.com/spreadsheets/d/1XK3_hjMlJk1YXLMRbSNAnZdVrGh986Qp5X0rXc2qSHQ/export?format=xlsx",
+      "observed_on": "2026-11-21",
+      "sha256": "3d4ef4cd0f4367e969a6a53159ccd035d89b4052a9787f7696ef9d31c92156bf",
+      "upstream_version": "X-VERSE-X to MATE CN10 comparison",
+      "retrieved_at": "2026-11-21T07:47:19.307343+00:00"
+    },
+    {
+      "id": "b2-risette-chunithm",
+      "source": "risette",
+      "file": "risette-chunithm.html",
+      "url": "https://risette14.hatenadiary.jp/entry/20151006/1444103719",
+      "observed_on": "2015-11-08",
+      "sha256": "3409ade26d78b58b3f324e650c1b2a78f4503356f2b3de3171440da8daadb45a",
+      "upstream_version": "First CHUNITHM survey; author reports +/-0.05 error",
+      "retrieved_at": "2026-11-21T07:47:21.225840+00:00"
+    },
+    {
+      "id": "announcement-ultima",
+      "source": "sega-jp",
+      "file": "official-ultima.html",
+      "url": "https://info-chunithm.sega.jp/1151/",
+      "observed_on": "2021-11-04",
+      "sha256": "2b4c9ef57df4b6b4abf35b50a0dd26b3afb6e359fff2ca026a820683adc27136",
+      "upstream_version": "NEW launch and first ULTIMA",
+      "retrieved_at": "2026-11-21T07:53:32.669161+00:00"
+    }
+  ],
+  "constant_enrichment": [
+    {
+      "artifact": "b2-sheet-new",
+      "adapter": "comparison",
+      "versions": [
+        "PARADISE LOST",
+        "NEW"
+      ],
+      "columns": [
+        "Paradise",
+        "New"
+      ]
+    },
+    {
+      "artifact": "b2-sheet-new-plus",
+      "adapter": "comparison",
+      "versions": [
+        "NEW",
+        "NEW PLUS"
+      ],
+      "columns": [
+        "NEW",
+        "NEW+"
+      ]
+    },
+    {
+      "artifact": "b2-sheet-sun",
+      "adapter": "comparison",
+      "versions": [
+        "NEW PLUS",
+        "SUN"
+      ],
+      "columns": [
+        "NEW+",
+        "SUN"
+      ]
+    },
+    {
+      "artifact": "b2-sheet-sun-plus",
+      "adapter": "comparison",
+      "versions": [
+        "SUN",
+        "SUN PLUS"
+      ],
+      "columns": [
+        "SUN",
+        "SUN+"
+      ]
+    },
+    {
+      "artifact": "b2-sheet-luminous",
+      "adapter": "comparison",
+      "versions": [
+        "SUN PLUS",
+        "LUMINOUS"
+      ],
+      "columns": [
+        "SUN+",
+        "LMN"
+      ]
+    },
+    {
+      "artifact": "b2-sheet-luminous-plus",
+      "adapter": "comparison",
+      "versions": [
+        "LUMINOUS",
+        "LUMINOUS PLUS"
+      ],
+      "columns": [
+        "LMN",
+        "LMN+"
+      ]
+    },
+    {
+      "artifact": "b2-sheet-verse",
+      "adapter": "comparison",
+      "versions": [
+        "LUMINOUS PLUS",
+        "VERSE"
+      ],
+      "columns": [
+        "LMN+",
+        "VRS"
+      ]
+    },
+    {
+      "artifact": "b2-sheet-x-verse",
+      "adapter": "comparison",
+      "versions": [
+        "VERSE",
+        "X-VERSE"
+      ],
+      "columns": [
+        "VRS",
+        "XVRS"
+      ]
+    },
+    {
+      "artifact": "b2-sheet-x-verse-x",
+      "adapter": "comparison",
+      "versions": [
+        "X-VERSE",
+        "X-VERSE-X"
+      ],
+      "columns": [
+        "XVRS",
+        "XVRSX"
+      ],
+      "final_archive": true
+    },
+    {
+      "artifact": "b2-max-crystal-plus",
+      "adapter": "max",
+      "version": "CRYSTAL PLUS"
+    },
+    {
+      "artifact": "b2-max-paradise",
+      "adapter": "max",
+      "version": "PARADISE"
+    },
+    {
+      "artifact": "b2-fan-star",
+      "adapter": "survey",
+      "version": "STAR"
+    },
+    {
+      "artifact": "b2-fan-star-plus",
+      "adapter": "survey",
+      "version": "STAR PLUS"
+    },
+    {
+      "artifact": "b2-fan-amazon",
+      "adapter": "survey",
+      "version": "AMAZON"
+    },
+    {
+      "artifact": "b2-fan-amazon-plus",
+      "adapter": "survey",
+      "version": "AMAZON PLUS"
+    },
+    {
+      "artifact": "b2-fan-crystal",
+      "adapter": "survey",
+      "version": "CRYSTAL"
+    },
+    {
+      "artifact": "b2-fan-crystal-plus",
+      "adapter": "survey",
+      "version": "CRYSTAL PLUS"
+    },
+    {
+      "artifact": "b2-fan-paradise",
+      "adapter": "survey",
+      "version": "PARADISE"
+    },
+    {
+      "artifact": "b2-fan-lost",
+      "adapter": "survey",
+      "version": "PARADISE LOST"
+    },
+    {
+      "artifact": "b2-fan-new",
+      "adapter": "survey",
+      "version": "NEW"
+    },
+    {
+      "artifact": "b2-fan-new-plus",
+      "adapter": "survey",
+      "version": "NEW PLUS"
+    },
+    {
+      "artifact": "b2-risette-plus",
+      "adapter": "survey",
+      "version": "PLUS",
+      "separator": "japanese"
+    },
+    {
+      "artifact": "b2-risette-air",
+      "adapter": "survey",
+      "version": "AIR",
+      "separator": "japanese"
+    },
+    {
+      "artifact": "b2-risette-air-plus",
+      "adapter": "survey",
+      "version": "AIR PLUS",
+      "separator": "japanese"
+    },
+    {
+      "artifact": "b2-info-mate",
+      "adapter": "mate_info",
+      "rule_artifact": "b2-mate-rule",
+      "survey_artifact": "b2-mate-low-level",
+      "comparison_artifact": "b2-sheet-mate"
+    },
+    {
+      "artifact": "b2-sheet-mate",
+      "adapter": "comparison",
+      "versions": [
+        "X-VERSE-X",
+        "MATE"
+      ],
+      "columns": [
+        "XVRSX",
+        "Mate"
+      ]
+    },
+    {
+      "artifact": "b2-risette-chunithm",
+      "adapter": "survey",
+      "version": "CHUNITHM",
+      "separator": "japanese",
+      "provisional": true
     }
   ]
 }
