@@ -1,11 +1,10 @@
 """Historical sources, checkpoint evidence and the frozen LOST bridge."""
-from collections import Counter
 from io import StringIO
 import csv
 import re
-from urllib.parse import unquote, urlsplit
 
 from _unibot_history.history import DIFFICULTIES, normalize_name
+from history_calendar import FIRST_DAY, TIMEMACHINE_THROUGH
 from history_import import covering, decimal_tenths, js_array, json_file, json_text, offset
 from import_paradise_lost import TableParser, legacy
 
@@ -13,8 +12,6 @@ from import_paradise_lost import TableParser, legacy
 LOST = "PARADISE LOST"
 LOST_OBSERVED = "2021-11-02"
 LOST_END = "2021-11-03"
-JP_THROUGH = "2026-10-31"
-FIRST_DAY = "2015-07-16"
 HISTORY_BASIS = "historical_slot_unverified_revision"
 
 
@@ -45,20 +42,6 @@ def seed_rules(db):
                         [(conflict, "star-calculator"), (conflict, "legacy-package")])
 
 
-def jp_releases(db, data):
-    generations = js_array(data, "GENS")
-    for index, g in enumerate(generations):
-        start = g["start"]
-        end = generations[index + 1]["start"] if index + 1 < len(generations) else None
-        checkpoint = offset(end, -1) if end else JP_THROUGH
-        version = g["short"]
-        rules = "old-r10" if index < 12 else "new-r10" if index < 18 else "verse-n20" if index == 18 else None
-        db.release("JP", version, start, end, checkpoint, "Asia/Tokyo", "history", "date-jp",
-                   f"GENS[{index}]", rules)
-        db.editions[index + 1] = (start, end, checkpoint, version)
-        db.points.append(("JP", version, checkpoint, "version_end" if end else "observation"))
-
-
 def historical_song_periods(row, daydream):
     start = row["releaseDate"]
     terminal = row["endDate"]
@@ -68,13 +51,13 @@ def historical_song_periods(row, daydream):
         periods.extend(((cursor, stop, "playable" if start else "unknown", "B" if start else "C", "day", 10),
                         (stop, resume, "suspended", "B", "day", 10)))
         cursor = resume
-    periods.append((cursor, terminal or offset(JP_THROUGH), "playable" if start else "unknown",
+    periods.append((cursor, terminal or offset(TIMEMACHINE_THROUGH), "playable" if start else "unknown",
                     "B" if start else "C", "day", 10))
     if terminal:
         removed = terminal if daydream else offset(terminal)
         if not daydream:
             periods.append((terminal, removed, "unknown", "C", "day", 10))
-        periods.append((removed, offset(JP_THROUGH), "removed", "B", "day", 10))
+        periods.append((removed, offset(TIMEMACHINE_THROUGH), "removed", "B", "day", 10))
     return periods
 
 
@@ -102,7 +85,7 @@ def load_timemachine(db, data):
             periods = [p for p in periods if p[0] != terminal]
             db.record_name(song, title, "sdvx", "daydream-evidence", "配信再停止")
             db.states("daydream-evidence", "配信再停止", "JP", song, title,
-                      [(terminal, offset(JP_THROUGH), "removed", "B", "day", 20)])
+                      [(terminal, offset(TIMEMACHINE_THROUGH), "removed", "B", "day", 20)])
         db.states(artifact, locator, "JP", song, title, periods)
         for difficulty in DIFFICULTIES[:5 if "ULT" in row["charts"] else 4]:
             import_historical_chart(db, row, locator, song, key, difficulty)
@@ -115,7 +98,7 @@ def import_historical_chart(db, row, locator, song, key, difficulty):
     chart_locator = f"{locator}.charts.{difficulty}"
     db.external(artifact, "JP", key, difficulty, song, chart_locator, rev,
                 "observed" if difficulty in row["charts"] else "unknown")
-    horizon = offset(JP_THROUGH)
+    horizon = offset(TIMEMACHINE_THROUGH)
     if difficulty == "ULT" and "announcement-ultima" in db.artifacts:
         first_ultima_edition = next(edition[0] for edition in db.editions.values() if edition[3] == "NEW")
         db.states("announcement-ultima", "新難易度「ULTIMA」追加！", "JP", song, title,
@@ -135,8 +118,7 @@ def import_historical_chart(db, row, locator, song, key, difficulty):
         raw_day = node["date"]
         if not start <= raw_day <= checkpoint:
             raise ValueError(f"Out-of-version time machine node at {chart_locator}")
-        # Data stores dates at version starts. Use the last observable day for
-        # the numeric value when the actual date of the adjustment is unknown.
+        # Keep a version-qualified numeric observation separate from availability.
         lo = max(raw_day, row["releaseDate"] or raw_day)
         effective = max(lo, checkpoint) if raw_day == start else lo
         grain, proof = ("version", artifact) if raw_day == start else ("day", artifact)
@@ -147,7 +129,7 @@ def import_historical_chart(db, row, locator, song, key, difficulty):
             lo = effective = row["releaseDate"]
             grain, proof = "day", "genesis-evidence"
         first = first or (lo, effective, grain, proof)
-        next_bound = nodes[i + 1]["date"] if i + 1 < len(nodes) else horizon
+        next_bound = end or horizon
         if effective >= next_bound:
             db.issues["constant_node_without_valid_window"] += 1
         db.constant(artifact, f"{chart_locator}.timeline[{i}]", "JP", song, rev, node,
@@ -176,6 +158,10 @@ def load_lost(db, html, pinned):
         title = row["title"]
         locator = f"song-table row {i + 1}"
         candidates = db.ordinary.get(normalize_name(title), set())
+        if (title == "Help me, ERINNNNNN!!" and "01034" in db.baseline
+                and "sega-verse-renames" in db.artifacts):
+            # SEGA's VERSE title change applies to this original chart set.
+            candidates = {db.baseline["01034"][0]}
         # A unique match in the same JP period can be attached to the catalog
         # slot. The slot itself carries no assertion of chart-content equality.
         same_period = [sid for sid in candidates
@@ -197,60 +183,13 @@ def load_lost(db, html, pinned):
             db.external(artifact, "JP", title, DIFFICULTIES[difficulty], song, chart_locator, rev)
             db.states(artifact, chart_locator, "JP", song, title,
                       [(LOST_OBSERVED, LOST_END, "playable", "B", "point", 20),
-                       (LOST_END, offset(LOST_END), "unknown", "C", "point", 5)], revision=rev)
-            oid = db.constant(artifact, chart_locator, "JP", song, rev, f"{value // 10}.{value % 10}", value,
-                              start=LOST_OBSERVED, end=LOST_END, activate=False)
-            db.compare_point("JP", LOST, song, rev, LOST_OBSERVED, (oid, value),
-                             role="checkpoint", artifact=artifact, anchor=True)
-            projection = db.constant(artifact, f"{chart_locator}/one-day projection", "JP", song, rev,
-                                     {"observed_on": LOST_OBSERVED, "observation_id": oid}, value,
-                                     start=LOST_END, end=offset(LOST_END), quality="C", activate=False)
-            db.compare_point("JP", LOST, song, rev, LOST_END, (projection, value),
-                             role="checkpoint", artifact=artifact, anchor=True)
+                       (LOST_END, offset(LOST_END), "playable", "B", "version", 20)], revision=rev)
+            db.constant(artifact, chart_locator, "JP", song, rev, f"{value // 10}.{value % 10}", value,
+                        start=LOST_OBSERVED, end=LOST_END, priority=50)
             if "lxns_id" in row and (identity := row["identities"][difficulty]) is not None:
                 db.legacy[row["lxns_id"], difficulty] = (song, rev, identity, value, title)
     if len(db.legacy) != 3048 or len({sid for sid, _ in db.legacy}) != 762:
         raise ValueError("Unexpected existing LOST mapping size")
-
-
-def wiki_key(url):
-    return unquote(urlsplit(url).path).removeprefix("/chunithmwiki/") if url else ""
-
-
-def oto_key(row):
-    chart_link = row.get("lev_mas_chart_link", "")
-    match = re.search(r"/(\d{5})mst$", chart_link)
-    return match.group(1) if match else ""
-
-
-def load_checkpoint_otoge(db, artifact, data, version, day):
-    quarantined = version == "LUMINOUS PLUS"
-    for i, row in enumerate(json_file(data)):
-        if not row.get("lev_mas"):
-            continue
-        key = oto_key(row)
-        record = db.baseline.get(key)
-        if not record or normalize_name(record[1]["title"]) != normalize_name(row["title"]):
-            db.issues[f"{artifact}_unpaired_rows"] += 1
-            continue
-        song, _ = record
-        locator = f"$[{i}]"
-        for diff in DIFFICULTIES[:5]:
-            raw = row.get(f"lev_{diff.lower()}_i")
-            if not raw:
-                continue
-            rev = db.chart(song, diff, HISTORY_BASIS)
-            try:
-                value = decimal_tenths(raw)
-            except ValueError:
-                db.evidence(artifact, f"{locator}.lev_{diff.lower()}_i", "JP", song, rev, "constant",
-                            raw, None, start=day, end=offset(day), grain="point", quality="C", kind="invalid")
-                db.issues[f"{artifact}_invalid_constants"] += 1
-                continue
-            oid = db.constant(artifact, f"{locator}.lev_{diff.lower()}_i", "JP", song, rev, raw, value,
-                              start=day, end=offset(day), quality="C", activate=False)
-            db.compare_point("JP", version, song, rev, day, (oid, value),
-                             role="quarantined" if quarantined else "audit", artifact=artifact)
 
 
 def load_verse_sheet(db, data):
@@ -269,13 +208,10 @@ def load_verse_sheet(db, data):
                 continue
             song = next(iter(names))
             rev = db.chart(song, difficulty, HISTORY_BASIS)
-            for column, raw, version, day in ((3, old, "LUMINOUS PLUS", "2024-12-11"),
-                                              (4, new, "VERSE", "2025-07-15")):
+            for column, raw, day in ((3, old, "2024-12-11"), (4, new, "2024-12-12")):
                 if not re.fullmatch(r"\d+\.\d", raw):
                     continue
                 value = decimal_tenths(raw)
                 locator = f"row {i} column {col + column + 1}"
-                oid = db.constant(artifact, locator, "JP", song, rev, raw, value,
-                                  start=day, end=offset(day), activate=False)
-                db.compare_point("JP", version, song, rev, day, (oid, value),
-                                 role="audit", artifact=artifact)
+                db.constant(artifact, locator, "JP", song, rev, raw, value,
+                            start=day, end=offset(day), quality="C", activate=False)

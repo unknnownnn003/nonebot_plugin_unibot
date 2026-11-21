@@ -118,7 +118,7 @@ CREATE TABLE region_song_state (
 CREATE TABLE region_chart_state (
     region TEXT NOT NULL, revision_id TEXT NOT NULL REFERENCES chart_revision,
     valid_from TEXT NOT NULL, valid_to TEXT,
-    state TEXT NOT NULL CHECK (state IN ('playable','unknown','not_released','disabled')),
+    state TEXT NOT NULL CHECK (state IN ('playable','unknown','not_released','disabled','removed','suspended')),
     observation_id TEXT NOT NULL REFERENCES observation,
     level_display TEXT,
     CHECK (valid_to IS NULL OR valid_from < valid_to),

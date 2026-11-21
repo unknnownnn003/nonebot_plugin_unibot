@@ -1,7 +1,6 @@
-"""Build and publish a private, reproducible SQLite history package."""
+"""Build and publish a private, reproducible SQLite Versioned Catalog."""
 import argparse
 import asyncio
-from datetime import date
 import json
 import os
 from pathlib import Path
@@ -14,17 +13,19 @@ from _unibot_history.history import (
     CURRENT_REVISIONS, RELEASE_ID, SCHEMA_VERSION, coverage, iso_day, snapshot_rows,
 )
 from history_import import CatalogImport, identifier, json_file, json_text, sha
-from history_enrichment import enrich
+from history_availability import apply_jp_availability
+from history_calendar import jp_releases
+from history_enrichment import enrich, resolve_version_constants
 from history_jp import (
-    jp_releases, load_checkpoint_otoge, load_lost, load_timemachine, load_verse_sheet, seed_rules,
+    load_lost, load_timemachine, load_verse_sheet, seed_rules,
 )
 from history_regions import (
-    import_cn, import_intl_current, import_jp_current, import_official, import_otoge_metadata,
-    release_observations,
+    import_cn, import_intl_current, import_jp_current, import_official,
+    release_observations, review_cn_mapping_candidates,
 )
 
 
-TOOL_VERSION = "1.1.0"
+TOOL_VERSION = "1.2.0"
 TOOL_DIR = Path(__file__).resolve().parent
 SCHEMA = TOOL_DIR / "history_schema.sql"
 PINS = TOOL_DIR / "history_inputs.json"
@@ -33,11 +34,14 @@ IMPLEMENTATION = (
     TOOL_DIR / "history_regions.py", ROOT / "nonebot_plugin_unibot" / "services" / "history.py",
     TOOL_DIR / "import_paradise_lost.py", Path(legacy.__file__),
     TOOL_DIR / "history_enrichment.py", TOOL_DIR / "history_constant_sources.py",
+    TOOL_DIR / "history_calendar.py", TOOL_DIR / "history_availability.py",
 )
 
 
 def load_inputs(lock, root):
     config = json_file(lock.read_bytes())
+    if "otoge" in json_text(config).casefold():
+        raise ValueError("Retired OTOGE source in active source lock")
     artifacts = {row["id"]: row for row in config["artifacts"]}
     if len(artifacts) != len(config["artifacts"]):
         raise ValueError("Duplicate source artifact ID")
@@ -113,6 +117,7 @@ def input_manifest(config, artifacts, raw, schema):
         "source_policies": config["sources"], "dependencies": sorted(config["dependencies"]),
         "artifacts": [dict(meta, byte_count=len(raw[name])) for name, meta in sorted(artifacts.items())],
         "regional_releases": config.get("regional_releases", []),
+        "regional_correspondences": config.get("regional_correspondences", []),
         "extra_observations": config.get("extra_observations", []),
         "constant_enrichment": config.get("constant_enrichment", []),
         "distribution": "local-only",
@@ -132,17 +137,14 @@ def write_sources(conn, manifest):
 
 def populate(db, raw, manifest):
     seed_rules(db)
-    jp_releases(db, raw["date-jp"])
+    observed = max([db.artifacts["jp-current"]["observed_on"]] + [
+        db.artifacts[row["catalog"]]["observed_on"] for row in manifest["extra_observations"]
+        if (row["region"], row["version"]) == ("JP", "MATE")
+    ])
+    jp_releases(db, raw["date-jp"], observed_through=observed)
     release_observations(db)
     load_timemachine(db, raw["timemachine"])
     load_lost(db, raw["max-lost"], raw["legacy-package"])
-    for artifact, region in (("oto-jp", "JP"), ("oto-deleted", "JP"), ("oto-intl", "INTL")):
-        import_otoge_metadata(db, artifact, raw[artifact], region)
-    for artifact, version, day in (
-        ("oto-luminousplus", "LUMINOUS PLUS", "2024-12-11"), ("oto-verse", "VERSE", "2025-07-15"),
-        ("oto-xverse", "X-VERSE", "2025-12-10"), ("oto-xversex", "X-VERSE-X", "2026-07-01"),
-    ):
-        load_checkpoint_otoge(db, artifact, raw[artifact], version, day)
     load_verse_sheet(db, raw["verse-sheet"])
     import_official(db, "official-jp", raw["official-jp"], "JP")
     import_official(db, "official-intl", raw["official-intl"], "INTL", observed_snapshot=True)
@@ -150,7 +152,10 @@ def populate(db, raw, manifest):
     import_intl_current(db, raw["intl-current"])
     import_cn(db, raw["cn-current"], raw["cn-config"])
     append_observations(db, raw, manifest)
+    apply_jp_availability(db, raw)
     enrich(db, raw, manifest["constant_enrichment"])
+    resolve_version_constants(db)
+    review_cn_mapping_candidates(db, manifest["regional_correspondences"])
     db.materialize_intervals()
 
 
@@ -195,13 +200,17 @@ def publish_snapshots(db, requested):
     for region, version, day in requested:
         day = iso_day(day)
         known = conn.execute(
-            "SELECT start_on,through_on FROM region_release WHERE region=? AND version=? AND kind='history'",
+            """SELECT start_on, end_before FROM region_release WHERE region=? AND version=? AND kind='history'""",
             (region, version),
         ).fetchone()
         already = any((region, version, day) == point[:3] for point in db.points)
         if already:
             continue
-        if not known or not known["start_on"] <= day <= known["through_on"]:
+        end = (known["end_before"] or min(
+            (p[2] for p in db.points if p[:2] == (region, version) and p[3] == "observation"),
+            default=known["start_on"],
+        )) if known else None
+        if not known or not known["start_on"] <= day < end:
             raise ValueError(f"No evidence for requested checkpoint {region} {version} {day}")
         db.points.append((region, version, day, "as_of"))
     for region, version, day, kind in sorted(db.points, key=lambda p: (p[0], p[2], p[1])):
@@ -354,7 +363,7 @@ def build_package(source_root, lock, root, *, fetch=False, requested=(), activat
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, required=True, help="private history package root")
+    parser.add_argument("--output", type=Path, required=True, help="private Versioned Catalog package root")
     parser.add_argument("--sources", type=Path, help="directory holding the locked source files")
     parser.add_argument("--manifest", type=Path, default=PINS, help="source lock manifest")
     parser.add_argument("--fetch-missing", action="store_true", help="verify checksums before saving public sources")

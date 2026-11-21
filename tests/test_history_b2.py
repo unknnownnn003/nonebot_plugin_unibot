@@ -12,7 +12,7 @@ sys.path.insert(0, str(TOOLS))
 try:
     from build_history_catalog import SCHEMA
     from history_constant_sources import mate_low_level_rows, survey_rows
-    from history_enrichment import Candidate, known_display_constant, ordinary_slot, resolve_checkpoint
+    from history_enrichment import Candidate, known_display_constant, ordinary_slot, resolve_checkpoint, resolve_version_constants
     from history_import import CatalogImport, covering, offset
     from history_jp import HISTORY_BASIS
     from _unibot_history.history import HistoryCatalog, resolve_release
@@ -34,6 +34,7 @@ class ConstantEvidenceTests(unittest.TestCase):
         db = CatalogImport(conn, artifacts)
         song = db.song(("test", "first"), "Example", "old", "song")
         db.ordinary["example"].add(song)
+        db.editions[10] = ("2020-07-16", offset(self.day), self.day, "CRYSTAL PLUS")
         db.states("old", "song", "JP", song, "Example", [(self.day, offset(self.day), "playable", "B", "day", 10)])
         return db, song, db.chart(song, "MAS", HISTORY_BASIS)
 
@@ -50,14 +51,25 @@ class ConstantEvidenceTests(unittest.TestCase):
         self.assertEqual(db.conn.execute("SELECT DISTINCT effective_on FROM observation WHERE field='constant' ORDER BY 1")
                          .fetchall(), [("2021-01-12",), ("2021-01-20",)])
 
-    def test_prior_verified_is_preserved_and_conflict_retains_both_values(self):
+        resolve_version_constants(db)
+        projected = covering(db.constants["JP", chart], self.day)
+        self.assertEqual(db.conn.execute("SELECT quality, effective_on FROM observation WHERE id=?",
+                                         (projected[2],)).fetchone(), ("B", "2021-01-12"))
+        self.assertIsNone(covering(db.constants["JP", chart], offset(self.day)))
+
+    def test_same_edition_disagreement_keeps_both_values_and_blocks_projection(self):
         db, song, chart = self.fixture()
-        proof = db.constant("old", "row", "JP", song, chart, "13.0", 130, start=self.day)
+        chart_window = [("2020-10-01", offset(self.day), "playable", "B", "day", 10)]
+        db.states("old", "earlier-song", "JP", song, "Example", chart_window)
+        db.states("old", "earlier-chart", "JP", song, "Example", chart_window, revision=chart)
+        db.constant("old", "row", "JP", song, chart, "13.0", 130, start="2020-10-01", end="2020-10-02")
         candidate = Candidate("sheet", "comparison!E2", None, "checkpoint", "Example", "MAS", 132)
         resolve_checkpoint(db, "CRYSTAL PLUS", self.day, song, chart, [candidate])
-        self.assertEqual(covering(db.constants["JP", chart], self.day), ("exact", 130, proof, None))
+        resolve_version_constants(db)
+        for day in ("2020-10-01", self.day):
+            self.assertEqual(covering(db.constants["JP", chart], day)[:2], ("conflict", None))
         self.assertEqual(db.conn.execute("SELECT status, reason FROM conflict").fetchone(),
-                         ("open", "additional_evidence_prior_verified_preserved"))
+                         ("open", "same_edition_exact_sources_disagree"))
         self.assertEqual(db.conn.execute("SELECT count(*) FROM conflict_observation").fetchone(), (2,))
 
     def test_two_strong_values_keep_the_slot_unverified(self):
@@ -65,7 +77,33 @@ class ConstantEvidenceTests(unittest.TestCase):
         values = [Candidate(src, "comparison!E2", None, "checkpoint", "Example", "MAS", val)
                   for src, val in (("sheet", 130), ("other", 132))]
         resolve_checkpoint(db, "CRYSTAL PLUS", self.day, song, chart, values)
+        db.states("old", "chart", "JP", song, "Example",
+                  [(self.day, offset(self.day), "playable", "B", "day", 10)], revision=chart)
+        resolve_version_constants(db)
         self.assertEqual(covering(db.constants["JP", chart], self.day)[:2], ("conflict", None))
+
+    def test_constant_invariance_respects_launch_removal_and_edition_bounds(self):
+        db, song, chart = self.fixture()
+        db.editions[11] = ("2021-01-21", "2021-05-13", "2021-05-12", "PARADISE")
+        db.editions[12] = ("2021-05-13", "2021-11-04", "2021-11-03", "PARADISE LOST")
+        db.states("old", "long-song", "JP", song, "Example",
+                  [("2020-07-16", "2021-11-04", "playable", "B", "day", 10)])
+        db.states("old", "chart", "JP", song, "Example", [
+            ("2020-07-16", "2020-09-01", "not_released", "B", "day", 10),
+            ("2020-09-01", "2021-01-17", "playable", "B", "day", 10),
+            ("2021-01-17", "2021-01-21", "removed", "B", "day", 10),
+            ("2021-01-21", "2021-11-04", "playable", "B", "day", 10),
+        ], revision=chart)
+        db.constant("old", "older", "JP", song, chart, "13.0", 130, start="2020-12-01")
+        db.constant("sheet", "newer", "JP", song, chart, "13.2", 132, start="2021-03-01")
+        resolve_version_constants(db)
+        periods = db.constants["JP", chart]
+        self.assertIsNone(covering(periods, "2020-08-31"))
+        for day in ("2020-09-01", "2021-01-16"):
+            self.assertEqual(covering(periods, day)[:2], ("exact", 130))
+        self.assertIsNone(covering(periods, "2021-01-17"))
+        self.assertEqual(covering(periods, "2021-01-21")[:2], ("exact", 132))
+        self.assertIsNone(covering(periods, "2021-05-13"))
 
     def test_title_collision_and_prelaunch_ultima_are_rejected(self):
         db, song, _ = self.fixture()

@@ -49,11 +49,9 @@ class CatalogImport:
         self.points = []
         self.baseline = {}
         self.ordinary = defaultdict(set)
-        self.jp_anchor = {}
         self.current = defaultdict(dict)
         self.current_songs = {}
         self.legacy = {}
-        self.otoge_notes = defaultdict(set)
         self.issues = defaultdict(int)
 
     def record_name(self, song, name, basis, artifact, locator):
@@ -122,34 +120,6 @@ class CatalogImport:
             artifact, chosen, why = reject
             self.conn.execute("INSERT INTO resolution VALUES (?,?,?,?)", (cid, chosen, artifact, why))
         return cid
-
-    def compare_point(self, region, version, song, revision, day, compared, *, role, artifact, anchor=None):
-        key = (region, revision)
-        points = self.constants.get(key, ())
-        baseline = covering(points, day)
-        # Other evidence at this checkpoint must remain visible even when the
-        # selected projection has already flagged a dispute.
-        if baseline and baseline[0] == "conflict":
-            baseline = covering([p for p in points if p[3][0] != "conflict"], day)
-        oid, value = compared
-        if baseline and baseline[1] != value:
-            if role == "quarantined":
-                self.dispute(region, version, revision, "constant", day, "cross_version_contamination",
-                             (baseline[2], oid),
-                             reject=(artifact, None, "Archive column quarantined; did not resolve the underlying number"))
-                return
-            cid = self.dispute(region, version, revision, "constant", day,
-                               "different_constants", (baseline[2], oid))
-            # A conflicting checkpoint invalidates the continuation of the
-            # selected observation until it actually ends. An adjacent day
-            # alone cannot resolve the dispute.
-            end = offset(day)
-            if role == "audit":
-                end = next(stop for start, stop, _, fact in points
-                           if fact == baseline and start <= day and (stop is None or day < stop))
-            self.constants[key].append((day, end, 100, ("conflict", None, baseline[2], cid)))
-        elif role == "checkpoint" and not baseline and anchor:
-            self.constants[key].append((day, offset(day), 25, ("exact", value, oid, None)))
 
     def jacket(self, artifact, region, song, locator, key, url, *, width=None, height=None, sha256=None):
         if not key:

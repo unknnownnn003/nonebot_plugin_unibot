@@ -73,7 +73,10 @@ def snapshot_rows(conn, region, day, snapshot_id=None):
 
 
 def catalog_state(row):
-    return row["chart_state"] if row["song_state"] == "playable" else row["song_state"]
+    song, chart = row["song_state"], row["chart_state"]
+    if song == "playable" or (song == "unknown" and chart == "not_released"):
+        return chart
+    return song
 
 
 def constant_kind(row):
@@ -93,6 +96,8 @@ def coverage(rows):
         "eligible_exact_count": 0,
         "unconfirmed_availability_count": 0,
         "unconfirmed_constant_count": 0,
+        "playable_unconfirmed_constant_count": 0,
+        "charts_by_state": {},
         "historical_population": None,
     }
     for _, charts in groupby(rows, key=lambda row: row["song_id"]):
@@ -102,6 +107,8 @@ def coverage(rows):
         states[song_state] = states.get(song_state, 0) + 1
         for row in charts:
             state = catalog_state(row)
+            state_counts = result["charts_by_state"]
+            state_counts[state] = state_counts.get(state, 0) + 1
             if state == "unknown":
                 result["unconfirmed_availability_count"] += 1
             if state not in ("playable", "unknown"):
@@ -117,6 +124,7 @@ def coverage(rows):
                     result["eligible_exact_count"] += 1
                 else:
                     result["unconfirmed_constant_count"] += 1
+                    result["playable_unconfirmed_constant_count"] += state == "playable"
     return result
 
 
@@ -132,9 +140,14 @@ def public_chart(row):
     item["metadata"] = json.loads(item["metadata"])
     item["state"] = catalog_state(row)
     item["constant_kind"] = constant_kind(row)
+    if item["constant_kind"] == "exact" and row["constant_quality"] not in ("A", "B"):
+        item["constant_kind"] = "evidence_insufficient"
     item["constant"] = (Decimal(row["constant_tenths"]).scaleb(-1)
                         if item["constant_kind"] == "exact" else None)
     item["trusted_constant"] = item["constant"] if trusted(row) else None
+    item["constant_label"] = (str(item["trusted_constant"]) if item["trusted_constant"] is not None
+                              else "CONFLICT" if item["constant_kind"] == "conflict"
+                              else "UNKNOWN" if item["constant_kind"] != "not_applicable" else None)
     return item
 
 
@@ -198,6 +211,13 @@ class HistoryCatalog:
         if (day is None or release["kind"] != "history" or release["through_on"] is None
                 or not release["start_on"] <= day <= release["through_on"]):
             raise SnapshotUnavailable(f"No supported observation for {region} {version} on {day}")
+        if release["end_before"] is None:
+            earlier_horizon = conn.execute(
+                """SELECT min(on_date) FROM snapshot WHERE region=? AND version=? AND kind='observation'""",
+                (region, version),
+            ).fetchone()[0]
+            if earlier_horizon is None or day > earlier_horizon:
+                raise SnapshotUnavailable(f"No dated observation for {region} {version} on {day}")
         return release, day, None
 
     def get_snapshot(self, region, version, date=None):
@@ -298,6 +318,12 @@ class HistoryCatalog:
                    ORDER BY e.observed_on, e.artifact_id, e.external_chart_key""",
                 (region, source, str(song_key)),
             )]
+
+    def get_version_correspondences(self):
+        """Read project-defined version mappings without implying chart equivalence."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT source_manifest FROM package").fetchone()
+            return json.loads(row[0]).get("regional_correspondences", [])
 
     def get_chart_mappings(self, revision_id):
         with self._connect() as conn:

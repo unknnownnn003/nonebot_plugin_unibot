@@ -73,7 +73,7 @@ def collect_checkpoint_evidence(db, raw, plan):
             candidates = (
                 (left if side == 0 else right,
                  Candidate(artifact, location, observed,
-                           "checkpoint" if side == 0 else "frozen_match" if source.get("final_archive") else "reference",
+                           "checkpoint" if side == 0 else "reference",
                            title, difficulty, value, genre))
                 for side, title, difficulty, genre, value, location in comparison_rows(
                     raw[artifact], tuple(source["columns"])
@@ -82,8 +82,9 @@ def collect_checkpoint_evidence(db, raw, plan):
             )
         elif adapter == "max":
             version = source["version"]
-            if observed != editions[version][2]:
-                raise ValueError("A full MAX-eipi release must be observed on the checkpoint day")
+            start, _, day, _ = editions[version]
+            if not observed or not start <= observed <= day:
+                raise ValueError("A MAX-eipi release must be observed within its recorded edition")
             candidates = ((version, row) for row in dated_max_candidates(raw[artifact], artifact, observed, version))
         elif adapter == "survey":
             candidates = ((source["version"], row) for row in surveyed_candidates(
@@ -106,34 +107,19 @@ def collect_checkpoint_evidence(db, raw, plan):
     return grouped
 
 
-def archive_values(db, song, revision, day):
-    return {row[0] for row in db.conn.execute("""
-        SELECT json_extract(value_json, '$') FROM observation
-        WHERE region='JP' AND song_id=? AND revision_id=? AND effective_on=? AND field='constant'
-          AND artifact_id='oto-xversex' AND value_kind='exact'
-    """, (song, revision, day))}
-
-
-def classify_candidate(db, candidate, song, revision, day):
-    if candidate.tier == "checkpoint":
-        return "B"
-    if candidate.tier == "frozen_match" and archive_values(db, song, revision, day) == {candidate.tenths}:
-        return "B"
-    return "C"
-
-
 def record_candidate(db, song, revision, day, candidate, quality):
     raw = {"title": candidate.title, "difficulty": candidate.difficulty, "source_date": candidate.observed,
            "method": candidate.tier, "context": candidate.context}
-    # A near-end survey gives a precise observation at its own date. Its
-    # applicability to the checkpoint remains a separate C-grade assertion.
+    # Preserve the dated primary observation separately from an unqualified
+    # reference. The edition resolver can extend the dated exact evidence.
     song_at_survey = covering(db.song_states["JP", song], candidate.observed) if candidate.observed else None
     chart_at_survey = covering(db.chart_states["JP", revision], candidate.observed) if candidate.observed else None
     if (candidate.tier == "reference" and candidate.observed and candidate.observed != day
             and song_at_survey and song_at_survey[0] == "playable"
             and chart_at_survey and chart_at_survey[0] == "playable"):
         witness = db.constant(candidate.artifact, candidate.locator, "JP", song, revision, raw, candidate.tenths,
-                              start=candidate.observed, end=offset(candidate.observed), activate=False)
+                              start=candidate.observed, end=offset(candidate.observed),
+                              grain="day", priority=30)
         raw["dated_observation_id"] = witness
     return db.constant(candidate.artifact, candidate.locator + "/checkpoint", "JP", song, revision, raw,
                        candidate.tenths, start=day, end=offset(day), quality=quality,
@@ -142,43 +128,19 @@ def record_candidate(db, song, revision, day, candidate, quality):
 
 def resolve_checkpoint(db, version, day, song, revision, candidates):
     unique = sorted(set(candidates), key=lambda c: (c.artifact, c.locator, c.tenths))
-    proof = [(c, classify_candidate(db, c, song, revision, day)) for c in unique]
-    rows = [(c, quality, record_candidate(db, song, revision, day, c, quality)) for c, quality in proof]
-    strong = [(c, oid) for c, quality, oid in rows if quality == "B"]
-    values = {c.tenths for c, _ in strong}
-    current = covering(db.constants["JP", revision], day)
-    if current and current[0] == "conflict":
-        db.conn.executemany("INSERT OR IGNORE INTO conflict_observation VALUES (?,?)",
-                            [(current[3], oid) for _, _, oid in rows])
-        return
-    existing_quality = (db.conn.execute("SELECT quality FROM observation WHERE id=?", (current[2],)).fetchone()[0]
-                        if current else None)
-    if current and current[0] == "exact" and existing_quality in ("A", "B"):
-        different = [(c, oid) for c, oid in strong if c.tenths != current[1]]
-        if different:
-            db.dispute("JP", version, revision, "constant", day, "additional_evidence_prior_verified_preserved",
-                       [current[2], *(oid for _, oid in different)])
-        return
-    if len(values) > 1:
-        cid = db.dispute("JP", version, revision, "constant", day, "checkpoint_sources_disagree",
-                         [oid for _, oid in strong])
-        db.constants["JP", revision].append((day, offset(day), 100, ("conflict", None, strong[0][1], cid)))
-        return
+    rows = [(c, record_candidate(db, song, revision, day, c, "B" if c.tier == "checkpoint" else "C"))
+            for c in unique]
+    strong = [(c, oid) for c, oid in rows if c.tier == "checkpoint"]
     if not strong:
-        # Keep numeric leads inspectable without deriving availability or Rating eligibility.
-        if current is None and len({c.tenths for c, _, _ in rows}) == 1:
-            c, _, oid = min(rows, key=lambda row: row[0].tier == "estimate")
+        # A survey is kept as a candidate and cannot overwrite an active fact.
+        if covering(db.constants["JP", revision], day) is None and len({c.tenths for c, _ in rows}) == 1:
+            c, oid = min(rows, key=lambda row: row[0].tier == "estimate")
             kind = "estimated" if c.tier == "estimate" else "exact"
             db.constants["JP", revision].append((day, offset(day), 25, (kind, c.tenths, oid, None)))
         return
-    candidate, oid = strong[0]
-    if current and current[1] != candidate.tenths:
-        # For example, the 11/02 LOST table disagrees with the later exact checkpoint.
-        cid = db.dispute("JP", version, revision, "constant", day, "prior_candidate_disagrees",
-                         (current[2], oid))
-        db.constants["JP", revision].append((day, offset(day), 100, ("conflict", None, oid, cid)))
-        return
-    db.constants["JP", revision].append((day, offset(day), 40, ("exact", candidate.tenths, oid, None)))
+    for candidate, oid in strong:
+        db.constants["JP", revision].append((day, offset(day), 40, ("exact", candidate.tenths, oid, None)))
+    candidate, _ = strong[0]
     # The edition-qualified row proves this chart exists at the checkpoint,
     # including lower charts for which the time machine had no numeric node.
     chart_state = covering(db.chart_states["JP", revision], day)
@@ -259,10 +221,10 @@ def enrich_mate(db, raw, source):
                 start=observed, end=offset(observed), activate=False,
             )) for witness, candidate, position in rows]
             if current and current[0] == "exact":
-                different = [proof for candidate, proof in proofs if candidate != current[1]]
-                if different:
-                    db.dispute("JP", "MATE", revision, "constant", observed,
-                               "additional_evidence_prior_verified_preserved", [current[2], *different])
+                for number, proof in proofs:
+                    db.constants["JP", revision].append(
+                        (observed, offset(observed), 40, ("exact", number, proof, None))
+                    )
                 continue
             values = {number for number, _ in proofs}
             if len(values) == 1 and (value is None or value in values):
@@ -298,3 +260,54 @@ def enrich(db, raw, plan):
     older = [row for row in plan if row["adapter"] != "mate_info"]
     for (version, day, song, revision), rows in sorted(collect_checkpoint_evidence(db, raw, older).items()):
         resolve_checkpoint(db, version, day, song, revision, rows)
+
+
+def resolve_version_constants(db):
+    """Apply JP edition invariance to one chart revision at a time."""
+    observations = {row[0]: row[1:] for row in db.conn.execute(
+        "SELECT id,quality,song_id,effective_on FROM observation WHERE region='JP' AND field='constant'"
+    )}
+    through = db.conn.execute(
+        "SELECT through_on FROM region_release WHERE region='JP' AND end_before IS NULL"
+    ).fetchone()
+    for (region, revision), periods in sorted(db.constants.items()):
+        if region != "JP":
+            continue
+        revised = []
+        for start, end, checkpoint, version in db.editions.values():
+            stop = end or offset(through[0] if through else checkpoint)
+            # Admit only evidence with its own placement within this edition.
+            admitted = [p for p in periods if start <= p[0] < stop
+                        and (observations[p[3][2]][2] is None or start <= observations[p[3][2]][2] < stop)]
+            if not admitted:
+                continue
+            strong = [p for p in admitted if p[3][0] == "exact" and observations[p[3][2]][0] in ("A", "B")]
+            disputed = [p for p in admitted if p[3][0] == "conflict"]
+            values = {p[3][1] for p in strong}
+            if len(values) > 1:
+                witnesses = sorted({p[3][2] for p in strong})
+                conflict = db.dispute(region, version, revision, "constant", checkpoint,
+                                      "same_edition_exact_sources_disagree", witnesses)
+                fact = ("conflict", None, witnesses[0], conflict)
+            elif disputed:
+                fact = max(disputed, key=lambda p: (p[2], p[0], p[3][2]))[3]
+            elif strong:
+                fact = max(strong, key=lambda p: (observations[p[3][2]][0] == "A", p[2], p[0], p[3][2]))[3]
+            else:
+                revised.extend((lo, min(hi or stop, stop), priority, value)
+                               for lo, hi, priority, value in admitted)
+                continue
+            # An edition-wide number has no effect on availability. Exclude
+            # dates explicitly outside the song or chart's playable lifespan.
+            song = observations[fact[2]][1]
+            song_periods = db.song_states[region, song]
+            chart_periods = db.chart_states[region, revision]
+            boundaries = sorted({start, stop} | {
+                bound for lo, hi, _, _ in (*song_periods, *chart_periods)
+                for bound in (lo, hi) if bound is not None and start < bound < stop
+            })
+            for lo, hi in zip(boundaries, boundaries[1:]):
+                states = [covering(items, lo) for items in (song_periods, chart_periods)]
+                if all(state and state[0] in ("playable", "unknown") for state in states):
+                    revised.append((lo, hi, 40, fact))
+        db.constants[region, revision] = revised

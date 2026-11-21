@@ -20,10 +20,6 @@
       "https://max-eipi.github.io/ChunithmMusicDataTable/",
       "unknown; local use only"
     ],
-    "otoge": [
-      "https://github.com/zvuc/otoge-db",
-      "MIT code only; data and artwork rights unconfirmed"
-    ],
     "sega-jp": [
       "https://chunithm.sega.jp/",
       "SEGA and rights holders; local use only"
@@ -101,31 +97,6 @@
       "arcade-songs",
       "chunirec",
       "reported internal levels"
-    ],
-    [
-      "otoge",
-      "sega-jp",
-      "JP official song metadata"
-    ],
-    [
-      "otoge",
-      "sega-intl",
-      "INTL official song metadata"
-    ],
-    [
-      "otoge",
-      "wikiwiki",
-      "supplementary metadata"
-    ],
-    [
-      "otoge",
-      "sdvx-in",
-      "preview and metadata"
-    ],
-    [
-      "otoge",
-      "verse-sheet",
-      "VERSE constants"
     ],
     [
       "chunimaru",
@@ -230,69 +201,6 @@
       "observed_on": "2021-11-02",
       "upstream_version": "ee801ea72184a44fa274a3eaa0b983508ff6c2e4",
       "sha256": "edde71d7889411939c91f30af514344bb086dfac8480bf04da8ef9c65d3e1cd4"
-    },
-    {
-      "id": "oto-jp",
-      "source": "otoge",
-      "file": "oto-music-ex.json",
-      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex.json",
-      "observed_on": "2026-11-12",
-      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
-      "sha256": "cca793f3d0f44d8f62f3412cb51065ccd18cf1c42c64001431d6e1425c1c61e3"
-    },
-    {
-      "id": "oto-intl",
-      "source": "otoge",
-      "file": "oto-music-ex-intl.json",
-      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex-intl.json",
-      "observed_on": "2026-11-12",
-      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
-      "sha256": "4277253e286190a06a986adeec73d4384378e24df265d6500af95a3003cbffb3"
-    },
-    {
-      "id": "oto-deleted",
-      "source": "otoge",
-      "file": "oto-music-ex-deleted.json",
-      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex-deleted.json",
-      "observed_on": null,
-      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
-      "sha256": "5abe5a55e3c9faac3ff71b1efdb2b87349de174bdd744c3398b52c12e6687620"
-    },
-    {
-      "id": "oto-luminousplus",
-      "source": "otoge",
-      "file": "oto-music-ex-luminousplus-final.json",
-      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex-luminousplus-final.json",
-      "observed_on": "2026-11-12",
-      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
-      "sha256": "b8d3787fbdde4cfe0e7749b4d0a64ebe7a69feb081a70293f08b8327b5f1935e"
-    },
-    {
-      "id": "oto-verse",
-      "source": "otoge",
-      "file": "oto-music-ex-verse-final.json",
-      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex-verse-final.json",
-      "observed_on": "2026-11-12",
-      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
-      "sha256": "d29490af12d01c79bc980999a1fc7b52759e33134c361cf48a9147241e9ac298"
-    },
-    {
-      "id": "oto-xverse",
-      "source": "otoge",
-      "file": "oto-music-ex-xverse-final.json",
-      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex-xverse-final.json",
-      "observed_on": "2026-11-12",
-      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
-      "sha256": "222a7a6d05a64df4d08a474e2ed1cdd3867b59b99454d702c00a28b818582107"
-    },
-    {
-      "id": "oto-xversex",
-      "source": "otoge",
-      "file": "oto-music-ex-xversex-final.json",
-      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex-xversex-final.json",
-      "observed_on": "2026-11-12",
-      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
-      "sha256": "f743dc88ac1d30fecb10e03531bcaff79f714ad2ddd1b1552e7c83844886c11d"
     },
     {
       "id": "official-jp",
@@ -701,6 +609,159 @@
       "sha256": "2b4c9ef57df4b6b4abf35b50a0dd26b3afb6e359fff2ca026a820683adc27136",
       "upstream_version": "NEW launch and first ULTIMA",
       "retrieved_at": "2026-11-21T07:53:32.669161+00:00"
+    },
+    {
+      "id": "sega-luminous-plus-sad",
+      "source": "sega-jp",
+      "file": "sega-luminous-plus-sad.html",
+      "url": "https://info-chunithm.sega.jp/8151/",
+      "observed_on": "2024-08-21",
+      "upstream_version": "LUMINOUS PLUS",
+      "sha256": "d26b67a5c920d3ff080e05aca6fdb64c7ddc928169290fec46a267f2a2e9e1ce"
+    },
+    {
+      "id": "sega-mate-0730",
+      "source": "sega-jp",
+      "file": "sega-mate-0730.html",
+      "url": "https://info-chunithm.sega.jp/12407/",
+      "observed_on": "2026-07-28",
+      "upstream_version": "MATE",
+      "sha256": "7117c330e528d25f6c827d067a98515e4e0b325490f86ccc6799e2d6a06b2cb4"
+    },
+    {
+      "id": "sega-mate-0925",
+      "source": "sega-jp",
+      "file": "sega-mate-0925.html",
+      "url": "https://info-chunithm.sega.jp/12719/",
+      "observed_on": "2026-09-22",
+      "upstream_version": "MATE",
+      "sha256": "8710b64e2a427fefdc75543aab335ef16231ce8a321cd84b175d296d0d08395e"
+    },
+    {
+      "id": "sega-mate-1022",
+      "source": "sega-jp",
+      "file": "sega-mate-1022.html",
+      "url": "https://info-chunithm.sega.jp/12772/",
+      "observed_on": "2026-10-20",
+      "upstream_version": "MATE",
+      "sha256": "d78e3e59220943eddfaa4ceb289a5acd5daa6d63e09a43acceaf5ad24a18c4c7"
+    },
+    {
+      "id": "sega-mate-start-ultima",
+      "source": "sega-jp",
+      "file": "sega-mate-start-ultima.png",
+      "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/07/087e211da8b60b1cf9e61a5851838f47.png",
+      "observed_on": "2026-07-02",
+      "upstream_version": "MATE",
+      "sha256": "35adf4361e4e38bf5e2937a80dbb57ecc623f1deafb5c1f3766ac1a3d21c8983"
+    },
+    {
+      "id": "sega-sun-flan",
+      "source": "sega-jp",
+      "file": "sega-sun-flan.html",
+      "url": "https://info-chunithm.sega.jp/3474/",
+      "observed_on": "2022-10-25",
+      "upstream_version": "SUN",
+      "sha256": "f74a1c2f91b837d43021e891e4b48995d8e7a89b3d5595f164c87e59ba46c2d7"
+    },
+    {
+      "id": "sega-ult-7th",
+      "source": "sega-jp",
+      "file": "sega-ult-7th.png",
+      "url": "https://info-chunithm.sega.jp/wp-content/uploads/2022/07/0b3fa4c22c4bda674b23e10a0617181f.png",
+      "observed_on": null,
+      "upstream_version": "NEW PLUS",
+      "sha256": "35899634bab28681e7487567e96b2152f38ac1391b7bb6a704bba70a43e318d2"
+    },
+    {
+      "id": "sega-ult-luminous",
+      "source": "sega-jp",
+      "file": "sega-ult-luminous.png",
+      "url": "https://info-chunithm.sega.jp/wp-content/uploads/2023/12/3f061c656fa5ef29b495a66191fa4890-1024x576.png",
+      "observed_on": null,
+      "upstream_version": "LUMINOUS",
+      "sha256": "b5e2c103701c033c08a97a33a84ea6ed1e106953abd49d2a2ddb04cbed3c9a46"
+    },
+    {
+      "id": "sega-ult-luminousplus",
+      "source": "sega-jp",
+      "file": "sega-ult-luminousplus.png",
+      "url": "https://info-chunithm.sega.jp/wp-content/uploads/2024/06/8b8ce3b8167d4b7736f78d7a63248f38.png",
+      "observed_on": null,
+      "upstream_version": "LUMINOUS PLUS",
+      "sha256": "185f8c3342785022c3e0d71db85e9bd298f5178a92506391df62266ebcfa8ed1"
+    },
+    {
+      "id": "sega-ult-newplus",
+      "source": "sega-jp",
+      "file": "sega-ult-newplus.jpg",
+      "url": "https://info-chunithm.sega.jp/wp-content/uploads/2022/04/a201642cf2c8a654caa49a906202ecb6.jpg",
+      "observed_on": null,
+      "upstream_version": "NEW PLUS",
+      "sha256": "bc82beaeb833cb76a1b110a08df471c82a48bb8ba636fe65f6245844ed150994"
+    },
+    {
+      "id": "sega-ult-sun",
+      "source": "sega-jp",
+      "file": "sega-ult-sun.png",
+      "url": "https://info-chunithm.sega.jp/wp-content/uploads/2022/10/155dabd694cb47205818f0fd52b40da1.png",
+      "observed_on": null,
+      "upstream_version": "SUN",
+      "sha256": "6350e5632798cea28a2e5692fa6f639421dee01e3e53e7b0c3ce57f470f04f51"
+    },
+    {
+      "id": "sega-ult-sunplus",
+      "source": "sega-jp",
+      "file": "sega-ult-sunplus.png",
+      "url": "https://info-chunithm.sega.jp/wp-content/uploads/2023/04/150d7b7c841b3bbb4846114315f14701.png",
+      "observed_on": null,
+      "upstream_version": "SUN PLUS",
+      "sha256": "2607e013f125646426144d3172bbd6495cfb8a25e1bc7ef9975c2b14bd28f95a"
+    },
+    {
+      "id": "sega-ult-verse",
+      "source": "sega-jp",
+      "file": "sega-ult-verse.png",
+      "url": "https://info-chunithm.sega.jp/wp-content/uploads/2024/12/57594e9451acfb71df3699ea11b423f7.png",
+      "observed_on": null,
+      "upstream_version": "VERSE",
+      "sha256": "2c3bf3b30474e0eb5ff09cda73c517fb9c5554b1273be4222c2715a8c1a9d80e"
+    },
+    {
+      "id": "sega-ult-xversex",
+      "source": "sega-jp",
+      "file": "sega-ult-xversex.png",
+      "url": "https://info-chunithm.sega.jp/wp-content/uploads/2025/12/455d4e01958f58681253124e6625c549.png",
+      "observed_on": null,
+      "upstream_version": "X-VERSE-X",
+      "sha256": "0faa4b6ef5d7765c744842773b62b2f9f3f5373820c9f348212738a97d7468b4"
+    },
+    {
+      "id": "sega-verse-erin-2025",
+      "source": "sega-jp",
+      "file": "sega-verse-erin-2025.html",
+      "url": "https://info-chunithm.sega.jp/9831/",
+      "observed_on": "2025-05-20",
+      "upstream_version": "VERSE",
+      "sha256": "ad3ecc0c2b17e8d6cf443594cfe0b7f1af3454a639cd01d06f61b19af84d6979"
+    },
+    {
+      "id": "sega-verse-renames",
+      "source": "sega-jp",
+      "file": "sega-verse-renames.html",
+      "url": "https://info-chunithm.sega.jp/8930/",
+      "observed_on": "2024-12-10",
+      "upstream_version": "VERSE",
+      "sha256": "610187bee95363863bfcfcac5fa3b4c9efbd93d038828fef75fcd13279f1aac3"
+    },
+    {
+      "id": "wiki-ult-xverse-0913",
+      "source": "wikiwiki",
+      "file": "wiki-ult-xverse-0913.html",
+      "url": "https://wikiwiki.jp/chunithmwiki/%E8%AD%9C%E9%9D%A2%E8%BF%BD%E5%8A%A0%E3%81%AE%E3%81%8A%E7%9F%A5%E3%82%89%E3%81%9B%282025.09.13%29",
+      "observed_on": "2026-11-21",
+      "upstream_version": "X-VERSE",
+      "sha256": "8c9c189be70bc41b96b668321adf313b29e954a676faebbfdf76bca7ce81d772"
     }
   ],
   "constant_enrichment": [
@@ -810,8 +871,7 @@
       "columns": [
         "XVRS",
         "XVRSX"
-      ],
-      "final_archive": true
+      ]
     },
     {
       "artifact": "b2-max-crystal-plus",
@@ -916,6 +976,19 @@
       "version": "CHUNITHM",
       "separator": "japanese",
       "provisional": true
+    }
+  ],
+  "regional_correspondences": [
+    {
+      "source_region": "CN",
+      "source_version": "CN2027",
+      "target_region": "JP",
+      "target_version": "X-VERSE-X",
+      "semantic": "end_of_updates_constants",
+      "target_checkpoint": "2026-07-01",
+      "availability": "independent",
+      "chart_equivalence": "requires_review",
+      "basis": "project_rule"
     }
   ]
 }

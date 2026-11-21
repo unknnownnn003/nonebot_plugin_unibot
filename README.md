@@ -65,7 +65,7 @@ pip install -r nonebot_plugin_unibot/requirements.txt
 - [第三阶段 C 集成与统计语义](docs/oauth-integration.md)：B30/B50、群策略、能力目录和跨插件验证。
 - [第三阶段 B 玩家查询说明](docs/oauth-player-api.md)：统一模型、缓存/授权边界、退役范围、邻仓配套项与测试。
 - [曲库模型说明](docs/lxns-cn-catalog.md)：ULTIMA、WORLD'S END 与原始ID规则。
-- [离线历史曲库](docs/historical-catalog.md)说明三地区数据来源、SQLite 构建、只读查询与回滚。
+- [CHUNITHM 全版本曲库](docs/historical-catalog.md)说明日服 22 代版本、地区数据边界、SQLite 构建、只读查询与回滚。
 - [LocalStore迁移](docs/localstore-migration.md)：离线复制、校验与回滚。运行路径只由 `services/paths.py` 管理。
 - [开发工具](tools/README.md)：显式脚本；命令目录使用本仓生成器，不能用旧邻仓生成器覆盖。
 

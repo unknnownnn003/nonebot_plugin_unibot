@@ -1,15 +1,13 @@
 """Official indexes and observed JP, INTL and CN catalogs."""
 from collections import Counter
-from pathlib import PurePosixPath
 
 from _unibot_history.history import DIFFICULTIES, normalize_name
-from history_import import absolute_url, decimal_tenths, json_file, json_text, offset, sha
-from history_jp import HISTORY_BASIS, oto_key, wiki_key
+from history_import import absolute_url, covering, decimal_tenths, identifier, json_file, json_text, offset, sha
+from history_jp import HISTORY_BASIS
 from import_paradise_lost import legacy
 
 
 JP_JACKETS = "https://new.chunithm-net.com/chuni-mobile/html/mobile/img/"
-OTOGE_JACKETS = "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/jacket/"
 LXNS_JACKETS = "https://assets2.lxns.net/chunithm/jacket/"
 
 
@@ -24,15 +22,9 @@ def release_observations(db):
                "observation", "cn-2027-evidence", "Ver.CN1.40 launch announcement recap")
 
 
-def official_identity(db, artifact, region, key, title, locator, *, target=None):
-    if target:
-        return db.record_name(target, title, "sdvx", artifact, locator)
+def official_identity(db, artifact, region, key, title, locator):
     return db.song((f"{region}:official" if region in ("JP", "INTL") else "lxns-cn", key),
                    title, artifact, locator)
-
-
-def official_anchor(db, key, title):
-    return db.jp_anchor.get((str(key), normalize_name(title)))
 
 
 def source_point(db, artifact, region, song, title, locator, *, state="playable", revision=None, display=None):
@@ -41,7 +33,7 @@ def source_point(db, artifact, region, song, title, locator, *, state="playable"
               revision=revision, display=display)
 
 
-def observed_identity(db, artifact, region, key, row, locator, *, external_key=None, target=None):
+def observed_identity(db, artifact, region, key, row, locator, *, external_key=None):
     """Keep prior identities; require review if a later capture reuses a key."""
     title, artist = row["title"], row["artist"]
     provider = db.artifacts[artifact]["source"]
@@ -52,7 +44,7 @@ def observed_identity(db, artifact, region, key, row, locator, *, external_key=N
         if previous[0] != signature:
             raise ValueError(f"Catalog identity requires review for {region}/{provider}/{external[2]}")
         return db.record_name(previous[1], title, provider, artifact, locator)
-    song = official_identity(db, artifact, region, key, title, locator, target=target)
+    song = official_identity(db, artifact, region, key, title, locator)
     db.current_songs[external] = (signature, song)
     return song
 
@@ -68,63 +60,6 @@ def preserved_key(row, duplicates, variant=""):
     return key + ":" + sha(json_text([row["title"], row.get("artist"), variant, row.get("image")]).encode("utf-8"))[:16]
 
 
-def import_otoge_metadata(db, artifact, data, region):
-    rows = json_file(data)
-    duplicates = Counter(str(r["id"]) for r in rows)
-    for i, row in enumerate(rows):
-        title, locator = row["title"], f"$[{i}]"
-        ordinary = bool(row.get("lev_mas"))
-        id_key = str(row["id"])
-        sdvx = oto_key(row)
-        baseline = db.baseline.get(sdvx) if ordinary else None
-        reference = None
-        if baseline and (normalize_name(baseline[1]["title"]) == normalize_name(title)
-                         and wiki_key(row.get("wikiwiki_url")) == wiki_key(baseline[1]["wiki_url"])):
-            reference = baseline[0]
-            if region == "JP" and artifact in ("oto-jp", "oto-deleted"):
-                key = id_key, normalize_name(title)
-                if key in db.jp_anchor and db.jp_anchor[key] != reference:
-                    raise ValueError("Conflicting historical OTOGE identity anchors")
-                db.jp_anchor[key] = reference
-        variant = "" if ordinary else official_chart_key(row)
-        key = preserved_key(row, duplicates, variant)
-        song = official_identity(db, artifact, region, key, title, locator,
-                                 target=reference or (official_anchor(db, key, title) if ordinary else None))
-        db.external(artifact, region, row["id"], "", song, locator,
-                    status="ambiguous" if duplicates[id_key] > 1 else "observed")
-        day = db.artifacts[artifact].get("observed_on")
-        db.evidence(artifact, locator, region, song, None, "song_metadata", row, {
-            "artist": row.get("artist"), "genre": row.get("catname"), "bpm": row.get("bpm"),
-            "jp_added_source_text": row.get("date_added"), "intl_added_source_text": row.get("date_intl_added"),
-            "deleted_source_text": row.get("deleted_date"), "official_id": id_key, "we_variant": variant,
-        }, start=day, end=offset(day) if day else None, grain="point" if day else "unknown")
-        if not ordinary and row.get("we_kanji"):
-            metadata = {"we_kanji": row["we_kanji"], "we_star": row["we_star"],
-                        "note_count": row.get("lev_we_notes"), "source_terminal": row.get("deleted_date")}
-            rev = db.chart(song, "WE", "otoge:unverified", variant=variant, metadata=metadata)
-            db.external(artifact, region, id_key, variant, song, locator, rev,
-                        status="ambiguous" if duplicates[id_key] > 1 else "observed")
-            db.evidence(artifact, f"{locator}.we_kanji/we_star", region, song, rev,
-                        "chart_metadata", metadata, metadata, start=day, grain="point" if day else "unknown")
-        image = row.get("image")
-        if image:
-            url = absolute_url(OTOGE_JACKETS, image)
-            sample = (190, 190, "908b2c1c8b45ac4c6c562dbccfa65e8e6e1ace4053e0694a22cb15cf4c2e19b6") if image == "5a572b327f9903a5.jpg" else (None, None, None)
-            db.jacket(artifact, region, song, f"{locator}.image", image, url, width=sample[0], height=sample[1],
-                      sha256=sample[2])
-        if region == "JP" and ordinary and artifact in ("oto-jp", "oto-deleted"):
-            for diff in DIFFICULTIES[:5]:
-                note = row.get(f"lev_{diff.lower()}_notes")
-                if note and str(note).isdigit():
-                    db.otoge_notes[id_key, normalize_name(title), normalize_name(row["artist"]), diff].add(int(note))
-        if region == "INTL" and row.get("date_intl_added") not in (None, "", "000000"):
-            added = row["date_intl_added"]
-            if len(added) == 8 and added.isdigit():
-                day = f"{added[:4]}-{added[4:6]}-{added[6:]}"
-                db.evidence(artifact, f"{locator}.date_intl_added", region, song, None,
-                            "release_date", added, day, start=day, grain="day", quality="C")
-
-
 def import_official(db, artifact, data, region, *, observed_snapshot=False):
     rows = json_file(data)
     duplicates = Counter(str(r["id"]) for r in rows)
@@ -132,8 +67,7 @@ def import_official(db, artifact, data, region, *, observed_snapshot=False):
         title, locator = row["title"], f"$[{i}]"
         variant = official_chart_key(row) if row.get("we_kanji") else ""
         key = preserved_key(row, duplicates, variant)
-        song = official_identity(db, artifact, region, key, title, locator,
-                                 target=official_anchor(db, key, title) if not variant else None)
+        song = official_identity(db, artifact, region, key, title, locator)
         db.external(artifact, region, row["id"], "", song, locator,
                     status="ambiguous" if duplicates[str(row["id"])] > 1 else "observed")
         day = db.artifacts[artifact]["observed_on"]
@@ -192,7 +126,7 @@ def import_jp_current(db, data, we_data, *, artifact="jp-current", we_artifact="
     short = dict(zip(("BASIC", "ADVANCED", "EXPERT", "MASTER", "ULTIMA"), DIFFICULTIES))
     for i, row in enumerate(json_file(data)["songs"]):
         idx, title, key, locator = row["official_idx"], row["title"], row["id"], f"songs[{i}]"
-        song = observed_identity(db, artifact, "JP", idx, row, locator, target=official_anchor(db, idx, title))
+        song = observed_identity(db, artifact, "JP", idx, row, locator)
         point_song(db, artifact, "JP", song, key, locator, row)
         for long, chart in row["charts"].items():
             if chart is None:
@@ -236,8 +170,7 @@ def import_intl_current(db, data, *, artifact="intl-current", version="MATE"):
     for i, row in enumerate(payload["songs"]):
         title, key, idx, locator = row["title"], row["id"], str(row["idx"]), f"songs[{i}]"
         artist = normalize_name(row["artist"])
-        match = db.current["JP"].get((idx, normalize_name(title), artist, "MAS"))
-        song = observed_identity(db, artifact, "INTL", idx, row, locator, target=match[2] if match else None)
+        song = observed_identity(db, artifact, "INTL", idx, row, locator)
         point_song(db, artifact, "INTL", song, key, locator, row)
         url = row.get("jacket")
         if url:
@@ -310,22 +243,42 @@ def link_current(db, artifact, key, title, artist, diff, revision, notes):
     match = db.current["JP"].get(lookup)
     if not match:
         return
-    jp, jp_notes, song, jp_artifact = match
-    source_totals = sorted({jp_notes, *db.otoge_notes.get(lookup, ())} - {None})
-    if notes is None or not source_totals:
+    jp, jp_notes, _, jp_artifact = match
+    if notes is None or jp_notes is None:
         return
-    status = "candidate" if [notes] == source_totals else "conflict"
+    status = "candidate" if notes == jp_notes else "conflict"
     add_mapping(db, revision, jp, artifact, jp_artifact, status,
                 {"official_index": key, "title_artist_match": True, "source_note_total": notes,
-                 "jp_note_totals": source_totals, "scope": "current cross-region observation"})
-    historical = db.conn.execute(
-        """SELECT r.id FROM chart_revision r JOIN chart c ON c.id=r.chart_id
-           WHERE c.song_id=? AND c.difficulty=? AND c.variant='' AND r.identity_basis=?""",
-        (song, diff, HISTORY_BASIS),
-    ).fetchone()
-    if historical:
-        add_mapping(db, revision, historical[0], artifact, "timemachine", status,
-                    {"via_jp_revision": jp, "note_totals": source_totals, "historical_revision_verified": False})
+                 "jp_note_total": jp_notes, "normalized_title": lookup[1], "difficulty": diff, "scope": "current cross-region observation"})
+
+def review_cn_mapping_candidates(db, correspondences):
+    """Record version-end leads from the current identity bridge, with no equivalence claim."""
+    for link in correspondences:
+        day = link["target_checkpoint"]
+        for source, target, artifact, jp_artifact, status, evidence in db.conn.execute("""
+            SELECT m.* FROM chart_mapping m
+            JOIN source_artifact sa ON sa.id=m.source_artifact_id
+            JOIN source_artifact ja ON ja.id=m.target_artifact_id
+            WHERE sa.source_id='lxns' AND ja.source_id='chunisupport' AND m.status IN ('candidate','conflict')
+            ORDER BY m.source_revision_id,m.target_revision_id,m.source_artifact_id,m.target_artifact_id
+        """).fetchall():
+            evidence = json_file(evidence.encode("utf-8"))
+            title, diff = evidence["normalized_title"], evidence["difficulty"]
+            names = db.ordinary.get(title, ())
+            if len(names) != 1:
+                continue
+            song = next(iter(names))
+            revision = identifier("revision", identifier("chart", song, diff, ""), HISTORY_BASIS, None)
+            if revision not in db.revisions:
+                continue
+            song_state = covering(db.song_states["JP", song], day)
+            chart_state = covering(db.chart_states["JP", revision], day)
+            if not (song_state and song_state[0] == "playable" and chart_state and chart_state[0] == "playable"):
+                continue
+            add_mapping(db, source, revision, artifact, "timemachine", status,
+                        {**evidence, "via_current_jp_revision": target, "via_artifact": jp_artifact,
+                         "target_version": link["target_version"], "target_checkpoint": day,
+                         "historical_revision_verified": False, "scope": "version-end review candidate"})
 
 
 def add_mapping(db, source, target, artifact, target_artifact, status, evidence):

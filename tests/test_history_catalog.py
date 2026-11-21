@@ -14,7 +14,9 @@ import unittest
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 sys.path.insert(0, str(TOOLS))
 try:
-    from build_history_catalog import SCHEMA, check_integrity, publish_snapshots, validate_package
+    from build_history_catalog import SCHEMA, check_integrity, publish_snapshots, validate_package, load_inputs
+    from export_versioned_catalog import counts, gap_reason
+    from history_enrichment import resolve_version_constants
     from history_import import CatalogImport, decimal_tenths, identifier, offset, partition, sha
     from _unibot_history.history import HistoryCatalog, SnapshotUnavailable, resolve_release
 finally:
@@ -38,6 +40,7 @@ class HistoryStorageTests(unittest.TestCase):
                        "Asia/Tokyo", "history", "fixture", "version")
             db.points.append(("JP", "VERSE", "2025-07-15", "version_end"))
             day = "2025-07-15"
+            db.editions[19] = ("2024-12-12", offset(day), day, "VERSE")
             single_day = [(day, offset(day), "playable", "B", "point", 10)]
             for key in ("first", "second"):
                 song = db.song(("fixture", key), "Collision", "fixture", key)
@@ -52,10 +55,9 @@ class HistoryStorageTests(unittest.TestCase):
                                     end=offset(day), kind="estimated", quality="D")
                     if diff == "EXP":
                         db.constant("fixture", locator, "JP", song, rev, "10.0", 100, start=day, end=offset(day))
-                        oid = db.constant("alternative", locator, "JP", song, rev, "10.2", 102,
-                                          start=day, end=offset(day), activate=False)
-                        db.compare_point("JP", "VERSE", song, rev, day, (oid, 102),
-                                         role="audit", artifact="alternative")
+                        db.constant("alternative", locator, "JP", song, rev, "10.2", 102,
+                                    start=day, end=offset(day))
+            resolve_version_constants(db)
             db.materialize_intervals()
             publish_snapshots(db, ())
             check_integrity(conn)
@@ -85,6 +87,29 @@ class HistoryStorageTests(unittest.TestCase):
                 catalog.get_snapshot("CN", "VERSE")
             with self.assertRaises(sqlite3.OperationalError), catalog._connect() as conn:
                 conn.execute("DELETE FROM song")
+
+    def test_retired_lineage_fails_before_sources_are_opened(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            lock = root / "sources.json"
+            lock.write_text(json.dumps({"sources": {}, "artifacts": [],
+                                        "dependencies": [["workbook", "otoge", "indirect validation"]]}),
+                            encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Retired OTOGE"):
+                load_inputs(lock, root)
+
+    def test_gap_accounting_excludes_unavailable_and_separates_unknown_availability(self):
+        base = {"category": "unknown", "verified": False, "constant_evidence_kind": None}
+        for state in ("not_released", "removed", "suspended", "disabled"):
+            record = {**base, "state": state}
+            self.assertIsNone(gap_reason(record))
+            self.assertEqual(counts(record, active=True)["playable_unknown_constant"], 0)
+        unknown = {**base, "state": "unknown"}
+        self.assertEqual(gap_reason(unknown), "availability_unknown")
+        self.assertEqual(counts(unknown, active=True)["playable_unknown_constant"], 0)
+        playable = {**base, "state": "playable"}
+        self.assertEqual(gap_reason(playable), "constant_unknown")
+        self.assertEqual(counts(playable, active=True)["playable_unknown_constant"], 1)
 
     def test_half_open_and_exact_tenths(self):
         values = [
@@ -129,10 +154,10 @@ class PinnedHistoryTests(unittest.TestCase):
         self.assertNotEqual(self.chart("NEW", title, "MAS", "2021-11-04")["constant"], Decimal("11.8"))
         self.assertEqual(self.chart("NEW", title, "MAS")["constant"], Decimal("12.4"))
         bas_end = self.chart("PARADISE LOST", title, "BAS")
-        self.assertIsNone(bas_end["trusted_constant"])
         bas_observed = self.chart("PARADISE LOST", title, "BAS", "2021-11-02")
-        self.assertIsNotNone(bas_observed["trusted_constant"])
-        self.assertEqual(c.get_observation(bas_end["constant_observation"])["quality"], "C")
+        self.assertEqual(bas_end["trusted_constant"], bas_observed["trusted_constant"])
+        self.assertIsNotNone(bas_end["trusted_constant"])
+        self.assertEqual(c.get_observation(bas_end["constant_observation"])["effective_on"], "2021-11-02")
         with self.assertRaises(SnapshotUnavailable):
             c.get_snapshot("JP", "PARADISE LOST", "2021-11-04")
 
@@ -145,18 +170,18 @@ class PinnedHistoryTests(unittest.TestCase):
         self.assertTrue(new["ruleset"]["parameters"]["disjoint"])
         self.assertEqual(self.chart("LUMINOUS PLUS", "Acid God", "MAS")["constant"], Decimal("15.2"))
         self.assertEqual(self.chart("VERSE", "Acid God", "MAS")["constant"], Decimal("15.4"))
-        pollution = [r for r in c.get_conflicts("JP", "LUMINOUS PLUS")
-                     if r["reason"] == "cross_version_contamination"]
-        self.assertGreater(len(pollution), 200)
-        self.assertTrue(all(r["status"] == "resolved" and r["selected_observation"] is None for r in pollution))
+        sources = self.manifest["inputs"]
+        self.assertNotIn("otoge", json.dumps(sources).casefold())
+        with c._connect() as conn:
+            for column in ("source_id", "url"):
+                self.assertFalse(conn.execute(
+                    f"SELECT 1 FROM source_artifact WHERE lower({column}) LIKE '%otoge%' LIMIT 1"
+                ).fetchone())
         self.assertEqual(c.get_constant_changes("JP", "LUMINOUS PLUS", "VERSE"), [])
         changes = c.get_constant_changes("JP", "LUMINOUS PLUS", "VERSE", include_unverified=True)
         self.assertTrue(any(r["title"] == "Acid God" and not r["revision_verified"] for r in changes))
-        disagreement = self.chart("VERSE", "地獄の端にて君を待つ", "MAS")
-        self.assertEqual(disagreement["constant_kind"], "conflict")
-        self.assertIsNone(disagreement["trusted_constant"])
-        subsequent = self.chart("X-VERSE", "地獄の端にて君を待つ", "MAS", "2025-07-16")
-        self.assertEqual(subsequent["constant_kind"], "conflict")
+        self.assertEqual(self.chart("LUMINOUS PLUS", "Acid God", "MAS")["constant"],
+                         self.chart("LUMINOUS PLUS", "Acid God", "MAS", "2024-12-10")["constant"])
 
     def test_star_arithmetic_remains_disputed(self):
         star = [c for c in self.catalog.get_conflicts("JP", "STAR") if c["field"] == "rating_formula"][0]
@@ -202,6 +227,23 @@ class PinnedHistoryTests(unittest.TestCase):
             c.get_snapshot("INTL", "MATE", "2026-11-03")
         with self.assertRaises(SnapshotUnavailable):
             c.get_snapshot("CN", "CN2027", jp["date"][:8] + "20")
+
+    def test_cn2027_end_state_mapping_is_explicit_and_unapproved(self):
+        correspondence, = self.catalog.get_version_correspondences()
+        self.assertEqual((correspondence["source_version"], correspondence["target_version"],
+                          correspondence["target_checkpoint"]), ("CN2027", "X-VERSE-X", "2026-07-01"))
+        with self.catalog._connect() as conn:
+            self.assertEqual(conn.execute("""
+                SELECT start_on,end_before FROM region_release WHERE region='CN' AND version='CN2027'
+            """).fetchone()[:], ("2026-09-10", None))
+            mapped = conn.execute("""
+                SELECT count(*) FROM chart_mapping
+                WHERE json_extract(evidence,'$.target_version')='X-VERSE-X'
+                  AND status='candidate' AND json_extract(evidence,'$.historical_revision_verified')=0
+            """).fetchone()[0]
+            self.assertGreater(mapped, 0)
+        with self.assertRaises(SnapshotUnavailable):
+            self.catalog.get_snapshot("JP", "MATE", "2026-11-20")
 
     def test_build_inventory_and_readiness(self):
         c = self.catalog
