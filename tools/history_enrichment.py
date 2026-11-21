@@ -6,7 +6,7 @@ import re
 from _unibot_history.history import DIFFICULTIES, normalize_name
 from history_constant_sources import comparison_rows, current_info_rows, mate_low_level_rows, survey_rows
 from history_import import covering, identifier, offset
-from history_jp import HISTORY_BASIS
+from history_jp import HISTORY_BASIS, TIMEMACHINE_THROUGH
 from import_paradise_lost import TableParser
 
 
@@ -265,8 +265,15 @@ def enrich(db, raw, plan):
 def resolve_version_constants(db):
     """Apply JP edition invariance to one chart revision at a time."""
     observations = {row[0]: row[1:] for row in db.conn.execute(
-        "SELECT id,quality,song_id,effective_on FROM observation WHERE region='JP' AND field='constant'"
+        """SELECT id,quality,song_id,effective_on,value_kind,artifact_id,grain
+           FROM observation WHERE region='JP' AND field='constant'"""
     )}
+    evidence = defaultdict(list)
+    for revision, day, end, oid, number in db.conn.execute("""
+        SELECT revision_id,effective_on,effective_before,id,value_json
+        FROM observation WHERE region='JP' AND field='constant' AND value_kind!='estimated'
+    """):
+        evidence[revision].append((day, end, oid, int(number)))
     through = db.conn.execute(
         "SELECT through_on FROM region_release WHERE region='JP' AND end_before IS NULL"
     ).fetchone()
@@ -279,15 +286,47 @@ def resolve_version_constants(db):
             # Admit only evidence with its own placement within this edition.
             admitted = [p for p in periods if start <= p[0] < stop
                         and (observations[p[3][2]][2] is None or start <= observations[p[3][2]][2] < stop)]
+            carries = [p for p in periods if p[2] == 5 and p[0] < stop and start < p[1]]
+            revised.extend((max(lo, start), min(hi, stop), priority, fact)
+                           for lo, hi, priority, fact in carries)
+            wiki = [p for p in periods if p[0] < stop and (p[1] is None or start < p[1])
+                    and observations[p[3][2]][3] == "wiki_verified"]
+            if wiki:
+                witnesses = {p[3][2] for p in wiki}
+                values = {p[3][1] for p in wiki}
+                alternatives = {oid for day, end, oid, number in evidence[revision]
+                                if day and start <= day <= checkpoint and (end is None or start < end)
+                                and number not in values}
+                alternatives.update(p[3][2] for p in carries if p[3][1] not in values)
+                preferred = max(wiki, key=lambda p: (p[2], p[0], p[3][2]))
+                selected = preferred[3]
+                if len(values) > 1:
+                    conflict = db.dispute(region, version, revision, "constant", checkpoint,
+                                          "wiki_internal_disagreement", witnesses | alternatives)
+                    selected = ("conflict", None, selected[2], conflict)
+                elif alternatives:
+                    artifact = db.conn.execute("SELECT artifact_id FROM observation WHERE id=?",
+                                               (selected[2],)).fetchone()[0]
+                    db.dispute(region, version, revision, "constant", checkpoint, "wiki_priority",
+                               witnesses | alternatives,
+                               reject=(artifact, selected[2], "Explicit Wiki edition record takes precedence"))
+                # Explicit Wiki version ranges remain constrained by the
+                # independently established chart and song release boundaries.
+                admitted = [(max(start, preferred[0]), min(stop, preferred[1]), 100, selected)]
             if not admitted:
                 continue
             strong = [p for p in admitted if p[3][0] == "exact" and observations[p[3][2]][0] in ("A", "B")]
             disputed = [p for p in admitted if p[3][0] == "conflict"]
             values = {p[3][1] for p in strong}
-            if len(values) > 1:
+            reviewed_gap = ((version, revision) in db.constant_reviews and not wiki and strong and carries
+                            and len(values | {p[3][1] for p in carries}) > 1)
+            if len(values) > 1 or reviewed_gap:
+                if reviewed_gap:
+                    strong = strong + carries
                 witnesses = sorted({p[3][2] for p in strong})
                 conflict = db.dispute(region, version, revision, "constant", checkpoint,
-                                      "same_edition_exact_sources_disagree", witnesses)
+                                      "wiki_edition_gap_with_disagreement" if reviewed_gap
+                                      else "same_edition_exact_sources_disagree", witnesses)
                 fact = ("conflict", None, witnesses[0], conflict)
             elif disputed:
                 fact = max(disputed, key=lambda p: (p[2], p[0], p[3][2]))[3]
@@ -295,18 +334,40 @@ def resolve_version_constants(db):
                 fact = max(strong, key=lambda p: (observations[p[3][2]][0] == "A", p[2], p[0], p[3][2]))[3]
             else:
                 revised.extend((lo, min(hi or stop, stop), priority, value)
-                               for lo, hi, priority, value in admitted)
+                               for lo, hi, priority, value in admitted if priority != 5)
+                active = [p for p in carries if p[0] <= checkpoint < p[1]]
+                if active:
+                    numbers = {p[3][2]: p[3][1] for p in active}
+                    numbers.update((oid, number) for day, until, oid, number in evidence[revision]
+                                   if day == checkpoint and (until is None or checkpoint < until))
+                    if len(set(numbers.values())) > 1:
+                        conflict = db.dispute(region, version, revision, "constant", checkpoint,
+                                              "reference_values_disagree", numbers)
+                        revised.append((checkpoint, offset(checkpoint), 100,
+                                        ("conflict", None, active[0][3][2], conflict)))
                 continue
             # An edition-wide number has no effect on availability. Exclude
             # dates explicitly outside the song or chart's playable lifespan.
             song = observations[fact[2]][1]
             song_periods = db.song_states[region, song]
             chart_periods = db.chart_states[region, revision]
+            change_days = [p[0] for p in strong if observations[p[3][2]][4:] == ("timemachine", "day")
+                           and any(carry[1] == p[0] for carry in carries)]
             boundaries = sorted({start, stop} | {
                 bound for lo, hi, _, _ in (*song_periods, *chart_periods)
                 for bound in (lo, hi) if bound is not None and start < bound < stop
             })
             for lo, hi in zip(boundaries, boundaries[1:]):
+                if wiki:
+                    lo, hi = max(lo, admitted[0][0]), min(hi, admitted[0][1])
+                elif fact[0] == "exact" and observations[fact[2]][4] == "timemachine":
+                    hi = min(hi, offset(TIMEMACHINE_THROUGH))
+                    if len(strong) == 1 and observations[fact[2]][5] == "day":
+                        lo = max(lo, observations[fact[2]][2])
+                if not wiki and change_days:
+                    lo = max(lo, min(change_days))
+                if lo >= hi:
+                    continue
                 states = [covering(items, lo) for items in (song_periods, chart_periods)]
                 if all(state and state[0] in ("playable", "unknown") for state in states):
                     revised.append((lo, hi, 40, fact))

@@ -15,6 +15,7 @@ from _unibot_history.history import (
 from history_import import CatalogImport, identifier, json_file, json_text, sha
 from history_availability import apply_jp_availability
 from history_calendar import jp_releases
+from history_wiki import import_wiki
 from history_enrichment import enrich, resolve_version_constants
 from history_jp import (
     load_lost, load_timemachine, load_verse_sheet, seed_rules,
@@ -25,7 +26,7 @@ from history_regions import (
 )
 
 
-TOOL_VERSION = "1.2.0"
+TOOL_VERSION = "1.3.0"
 TOOL_DIR = Path(__file__).resolve().parent
 SCHEMA = TOOL_DIR / "history_schema.sql"
 PINS = TOOL_DIR / "history_inputs.json"
@@ -34,7 +35,7 @@ IMPLEMENTATION = (
     TOOL_DIR / "history_regions.py", ROOT / "nonebot_plugin_unibot" / "services" / "history.py",
     TOOL_DIR / "import_paradise_lost.py", Path(legacy.__file__),
     TOOL_DIR / "history_enrichment.py", TOOL_DIR / "history_constant_sources.py",
-    TOOL_DIR / "history_calendar.py", TOOL_DIR / "history_availability.py",
+    TOOL_DIR / "history_calendar.py", TOOL_DIR / "history_availability.py", TOOL_DIR / "history_wiki.py",
 )
 
 
@@ -76,6 +77,8 @@ async def fetch_missing(missing):
 
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         for meta, path in missing:
+            if meta.get("format") == "wiki_review_record":
+                raise ValueError(f"Copy the pinned local Wiki review record: {meta['id']}")
             if not meta["url"].startswith("https://"):
                 raise ValueError(f"Only HTTPS sources are supported: {meta['id']}")
             response = await client.get(meta["url"])
@@ -120,6 +123,7 @@ def input_manifest(config, artifacts, raw, schema):
         "regional_correspondences": config.get("regional_correspondences", []),
         "extra_observations": config.get("extra_observations", []),
         "constant_enrichment": config.get("constant_enrichment", []),
+        "wiki_constant_evidence": config.get("wiki_constant_evidence", []),
         "distribution": "local-only",
     }
 
@@ -153,6 +157,7 @@ def populate(db, raw, manifest):
     import_cn(db, raw["cn-current"], raw["cn-config"])
     append_observations(db, raw, manifest)
     apply_jp_availability(db, raw)
+    import_wiki(db, raw, manifest["wiki_constant_evidence"])
     enrich(db, raw, manifest["constant_enrichment"])
     resolve_version_constants(db)
     review_cn_mapping_candidates(db, manifest["regional_correspondences"])

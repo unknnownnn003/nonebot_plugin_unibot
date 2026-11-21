@@ -45,6 +45,7 @@ class CatalogImport:
         self.song_states = defaultdict(list)
         self.chart_states = defaultdict(list)
         self.constants = defaultdict(list)
+        self.constant_reviews = set()
         self.editions = {}
         self.points = []
         self.baseline = {}
@@ -100,12 +101,12 @@ class CatalogImport:
 
     def constant(self, artifact, locator, region, song, revision, raw, value, *,
                  start, end=None, grain="point", quality="B", kind="exact", activate=True, priority=10,
-                 observed_start=None, observed_end=None):
+                 observed_start=None, observed_end=None, value_kind=None):
         # A version-qualified number is projected from its checkpoint. The original
         # possible effective window stays on the observation, never the resolved row.
         oid = self.evidence(artifact, locator, region, song, revision, "constant", raw, value,
                             start=observed_start or start, end=observed_end or end,
-                            grain=grain, quality=quality, kind=kind)
+                            grain=grain, quality=quality, kind=value_kind or kind)
         if activate:
             self.constants[region, revision].append((start, end, priority, (kind, value, oid, None)))
         return oid

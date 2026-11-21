@@ -129,12 +129,21 @@ def import_historical_chart(db, row, locator, song, key, difficulty):
             lo = effective = row["releaseDate"]
             grain, proof = "day", "genesis-evidence"
         first = first or (lo, effective, grain, proof)
-        next_bound = end or horizon
+        change = nodes[i + 1]["date"] if i + 1 < len(nodes) else horizon
+        next_bound = min(end or horizon, change)
         if effective >= next_bound:
             db.issues["constant_node_without_valid_window"] += 1
-        db.constant(artifact, f"{chart_locator}.timeline[{i}]", "JP", song, rev, node,
-                    decimal_tenths(node["const"]), start=effective, end=next_bound,
-                    grain=grain, activate=effective < next_bound, observed_start=lo, observed_end=offset(effective))
+        locator = f"{chart_locator}.timeline[{i}]"
+        number = decimal_tenths(node["const"])
+        observation = db.constant(artifact, locator, "JP", song, rev, node, number,
+                                  start=effective, end=next_bound, grain=grain,
+                                  activate=effective < next_bound, observed_start=lo, observed_end=offset(effective))
+        carry_start = max(next_bound, lo)
+        if carry_start < change:
+            db.constant(artifact, locator + "/continuity", "JP", song, rev,
+                        {"method": "timemachine_reference", "node": node, "node_observation": observation,
+                         "observed_through": TIMEMACHINE_THROUGH}, number,
+                        start=carry_start, end=change, grain="version", quality="C", priority=5)
     lo, effective, grain, proof = first
     before = "not_released" if difficulty == "ULT" and daydream_ult else "unknown"
     db.states(artifact, chart_locator, "JP", song, title,

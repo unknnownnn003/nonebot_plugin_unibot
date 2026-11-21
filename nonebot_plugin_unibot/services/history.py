@@ -43,7 +43,8 @@ SELECT c.song_id, n.name AS title, c.id AS chart_id, c.difficulty, c.variant,
        co.quality AS chart_quality, so.quality AS song_quality,
        e.kind AS event_kind, e.constant_tenths, e.conflict_id,
        e.observation_id AS constant_observation, o.quality AS constant_quality,
-       o.value_kind AS constant_evidence_kind
+       o.value_kind AS constant_evidence_kind, o.artifact_id AS constant_artifact,
+       o.locator AS constant_locator
 FROM selected a
 JOIN chart_revision r ON r.id = a.revision_id
 JOIN chart c ON c.id = r.chart_id
@@ -145,9 +146,34 @@ def public_chart(row):
     item["constant"] = (Decimal(row["constant_tenths"]).scaleb(-1)
                         if item["constant_kind"] == "exact" else None)
     item["trusted_constant"] = item["constant"] if trusted(row) else None
-    item["constant_label"] = (str(item["trusted_constant"]) if item["trusted_constant"] is not None
-                              else "CONFLICT" if item["constant_kind"] == "conflict"
-                              else "UNKNOWN" if item["constant_kind"] != "not_applicable" else None)
+    status = "unknown"
+    if item["state"] not in ("playable", "unknown") or item["constant_kind"] == "not_applicable":
+        status = "not_applicable"
+    elif item["trusted_constant"] is not None:
+        if row["constant_evidence_kind"] == "wiki_verified":
+            status = "wiki_verified"
+        elif row["constant_artifact"] == "timemachine":
+            status = "timemachine_edition_verified"
+        else:
+            status = "independently_verified"
+    elif item["constant_kind"] == "conflict":
+        status = "conflict"
+    elif row["constant_tenths"] is not None:
+        status = ("estimated" if item["constant_kind"] == "estimated" else
+                  "timemachine_reference" if row["constant_locator"].endswith("/continuity") else "reference")
+    item["constant_status"] = status
+    item["selected_constant"] = (Decimal(row["constant_tenths"]).scaleb(-1)
+                                 if status != "not_applicable" and row["constant_tenths"] is not None else None)
+    if status == "not_applicable":
+        item["constant"] = item["constant_tenths"] = None
+        item["constant_label"] = None
+    elif item["trusted_constant"] is not None:
+        item["constant_label"] = str(item["trusted_constant"])
+    elif item["selected_constant"] is not None:
+        suffix = "估算" if status == "estimated" else "参考"
+        item["constant_label"] = f"{item['selected_constant']}（{suffix}）"
+    else:
+        item["constant_label"] = status.upper()
     return item
 
 
