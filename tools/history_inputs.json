@@ -1,0 +1,375 @@
+{
+  "sources": {
+    "timemachine": [
+      "https://github.com/IncimathCal/chunithm-constants",
+      "unknown; local use only"
+    ],
+    "wikiwiki": [
+      "https://wikiwiki.jp/chunithmwiki/",
+      "unknown; local use only"
+    ],
+    "sdvx-in": [
+      "https://sdvx.in/chunithm.php",
+      "unknown; local use only"
+    ],
+    "arcade-songs": [
+      "https://arcade-songs.zetaraku.dev/chunithm/",
+      "data rights unconfirmed"
+    ],
+    "max-eipi": [
+      "https://max-eipi.github.io/ChunithmMusicDataTable/",
+      "unknown; local use only"
+    ],
+    "otoge": [
+      "https://github.com/zvuc/otoge-db",
+      "MIT code only; data and artwork rights unconfirmed"
+    ],
+    "sega-jp": [
+      "https://chunithm.sega.jp/",
+      "SEGA and rights holders; local use only"
+    ],
+    "sega-intl": [
+      "https://chunithm.sega.com/",
+      "SEGA and rights holders; local use only"
+    ],
+    "chunisupport": [
+      "https://docs.chunisupport.net/api/",
+      "free non-commercial API; redistribution unconfirmed"
+    ],
+    "chunimaru": [
+      "https://chunimaru.fuwamofu.net/api",
+      "public API; redistribution unconfirmed"
+    ],
+    "chunirec": [
+      "https://developer.chunirec.net/docs/v2.0/",
+      "data rights unconfirmed"
+    ],
+    "lxns": [
+      "https://maimai.lxns.net/docs/api/chunithm",
+      "public catalog; redistribution unconfirmed"
+    ],
+    "verse-sheet": [
+      "https://docs.google.com/spreadsheets/d/1NTGkrOoLdzOoaYyz7d4vDT3cW2Q6lZfoc1nvd7nlNLE/edit#gid=262760047",
+      "unknown; local use only"
+    ],
+    "legacy-package": [
+      "https://github.com/unknnownnn003/nonebot_plugin_unibot",
+      "existing package is an independent compatibility fixture"
+    ],
+    "star-calculator": [
+      "https://zk-phi.github.io/CHUNITHMRateAnalyzerSTAR/",
+      "unknown; local use only"
+    ],
+    "cn-observer": [
+      "https://note.com/eager_yeti6246/n/n411dd5768518",
+      "unknown; local use only"
+    ]
+  },
+  "dependencies": [
+    [
+      "timemachine",
+      "wikiwiki",
+      "JP historical numbers and availability"
+    ],
+    [
+      "timemachine",
+      "arcade-songs",
+      "current baseline"
+    ],
+    [
+      "timemachine",
+      "sdvx-in",
+      "chart links"
+    ],
+    [
+      "arcade-songs",
+      "chunirec",
+      "reported internal levels"
+    ],
+    [
+      "otoge",
+      "sega-jp",
+      "JP official song metadata"
+    ],
+    [
+      "otoge",
+      "sega-intl",
+      "INTL official song metadata"
+    ],
+    [
+      "otoge",
+      "wikiwiki",
+      "supplementary metadata"
+    ],
+    [
+      "otoge",
+      "sdvx-in",
+      "preview and metadata"
+    ],
+    [
+      "otoge",
+      "verse-sheet",
+      "VERSE constants"
+    ],
+    [
+      "chunimaru",
+      "chunirec",
+      "current constants"
+    ],
+    [
+      "legacy-package",
+      "max-eipi",
+      "LOST constants"
+    ],
+    [
+      "legacy-package",
+      "lxns",
+      "CN compatibility fingerprint"
+    ]
+  ],
+  "artifacts": [
+    {
+      "id": "date-jp",
+      "source": "timemachine",
+      "file": "chunithm-constants-main/gens.js",
+      "url": "https://raw.githubusercontent.com/IncimathCal/chunithm-constants/f71688d5104c3f63b12035cea203f9d307d988a0/gens.js",
+      "observed_on": null,
+      "upstream_version": "f71688d5104c3f63b12035cea203f9d307d988a0",
+      "sha256": "eb646565599d69294f865cd2eff32be4fb931dc752078065da6c152c5663bcaa"
+    },
+    {
+      "id": "timemachine",
+      "source": "timemachine",
+      "file": "time-pinned-data.js",
+      "url": "https://raw.githubusercontent.com/IncimathCal/chunithm-constants/f71688d5104c3f63b12035cea203f9d307d988a0/data.js",
+      "observed_on": "2026-10-31",
+      "upstream_version": "f71688d5104c3f63b12035cea203f9d307d988a0",
+      "sha256": "fd3158599efb708ec03359ca50259a80ed9b6dadd93d9c4d095d01d8921bc35f"
+    },
+    {
+      "id": "daydream-evidence",
+      "source": "wikiwiki",
+      "file": "wiki-daydream.html",
+      "url": "https://wikiwiki.jp/chunithmwiki/Daydream%20caf%C3%A9",
+      "observed_on": null,
+      "upstream_version": null,
+      "sha256": "549a392d10763c9fc5ab6e1ef5f3d96c18893ab86262c7378e656127b984e618"
+    },
+    {
+      "id": "genesis-evidence",
+      "source": "wikiwiki",
+      "file": "wiki-genesis.html",
+      "url": "https://wikiwiki.jp/chunithmwiki/Genesis",
+      "observed_on": null,
+      "upstream_version": null,
+      "sha256": "9e786d2b3c1536944bbd7d2660df6cdf1fa207ba6abaff8f7a60e93357a5d8bc"
+    },
+    {
+      "id": "announcement-new",
+      "source": "sega-jp",
+      "file": "official-new.html",
+      "url": "https://info-chunithm.sega.jp/1042/",
+      "observed_on": null,
+      "upstream_version": null,
+      "sha256": "4e23787914fe3ccbdfbc15d520d02106c9c309b244dd24c4ee7f840033909421"
+    },
+    {
+      "id": "announcement-verse",
+      "source": "sega-jp",
+      "file": "official-verse.html",
+      "url": "https://info-chunithm.sega.jp/8774/",
+      "observed_on": "2024-11-29",
+      "upstream_version": null,
+      "sha256": "8bd391961c670c81b296368bb3005e3301c4e32a911c730c060e02456320f982"
+    },
+    {
+      "id": "star-calculator",
+      "source": "star-calculator",
+      "file": "star-analyzer.js",
+      "url": "https://zk-phi.github.io/CHUNITHMRateAnalyzerSTAR/chunithm.js",
+      "observed_on": "2017-11-04",
+      "upstream_version": "171104",
+      "sha256": "41fa666b9b229aee0ec430e7336735c8c963cd969fda8f1012df9ec2a49c0e7b"
+    },
+    {
+      "id": "max-lost",
+      "source": "max-eipi",
+      "file": "max-20211102.html",
+      "url": "https://raw.githubusercontent.com/MAX-eipi/ChunithmMusicDataTable/ee801ea72184a44fa274a3eaa0b983508ff6c2e4/index.html",
+      "observed_on": "2021-11-02",
+      "upstream_version": "ee801ea72184a44fa274a3eaa0b983508ff6c2e4",
+      "sha256": "edde71d7889411939c91f30af514344bb086dfac8480bf04da8ef9c65d3e1cd4"
+    },
+    {
+      "id": "oto-jp",
+      "source": "otoge",
+      "file": "oto-music-ex.json",
+      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex.json",
+      "observed_on": "2026-11-12",
+      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
+      "sha256": "cca793f3d0f44d8f62f3412cb51065ccd18cf1c42c64001431d6e1425c1c61e3"
+    },
+    {
+      "id": "oto-intl",
+      "source": "otoge",
+      "file": "oto-music-ex-intl.json",
+      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex-intl.json",
+      "observed_on": "2026-11-12",
+      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
+      "sha256": "4277253e286190a06a986adeec73d4384378e24df265d6500af95a3003cbffb3"
+    },
+    {
+      "id": "oto-deleted",
+      "source": "otoge",
+      "file": "oto-music-ex-deleted.json",
+      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex-deleted.json",
+      "observed_on": null,
+      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
+      "sha256": "5abe5a55e3c9faac3ff71b1efdb2b87349de174bdd744c3398b52c12e6687620"
+    },
+    {
+      "id": "oto-luminousplus",
+      "source": "otoge",
+      "file": "oto-music-ex-luminousplus-final.json",
+      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex-luminousplus-final.json",
+      "observed_on": "2026-11-12",
+      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
+      "sha256": "b8d3787fbdde4cfe0e7749b4d0a64ebe7a69feb081a70293f08b8327b5f1935e"
+    },
+    {
+      "id": "oto-verse",
+      "source": "otoge",
+      "file": "oto-music-ex-verse-final.json",
+      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex-verse-final.json",
+      "observed_on": "2026-11-12",
+      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
+      "sha256": "d29490af12d01c79bc980999a1fc7b52759e33134c361cf48a9147241e9ac298"
+    },
+    {
+      "id": "oto-xverse",
+      "source": "otoge",
+      "file": "oto-music-ex-xverse-final.json",
+      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex-xverse-final.json",
+      "observed_on": "2026-11-12",
+      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
+      "sha256": "222a7a6d05a64df4d08a474e2ed1cdd3867b59b99454d702c00a28b818582107"
+    },
+    {
+      "id": "oto-xversex",
+      "source": "otoge",
+      "file": "oto-music-ex-xversex-final.json",
+      "url": "https://raw.githubusercontent.com/zvuc/otoge-db/3f44d051381b1d3fc680a254b6b53fe124b1900c/chunithm/data/music-ex-xversex-final.json",
+      "observed_on": "2026-11-12",
+      "upstream_version": "3f44d051381b1d3fc680a254b6b53fe124b1900c",
+      "sha256": "f743dc88ac1d30fecb10e03531bcaff79f714ad2ddd1b1552e7c83844886c11d"
+    },
+    {
+      "id": "official-jp",
+      "source": "sega-jp",
+      "file": "sega-jp.json",
+      "url": "https://chunithm.sega.jp/storage/json/music.json",
+      "observed_on": "2026-10-29",
+      "upstream_version": null,
+      "sha256": "e9ad8d1e121c29896e7aed0c58bf3019a0e0998f40f936b1f54f2d7448f1ce00"
+    },
+    {
+      "id": "official-intl",
+      "source": "sega-intl",
+      "file": "sega-intl-assets.json",
+      "url": "https://chunithm.sega.com/assets/data/music.json",
+      "observed_on": "2026-10-21",
+      "upstream_version": null,
+      "sha256": "9bd2ff7b8bc60a4aaf8ca90ccf62f11fe7d1f43dfc1769f33755679108aecff0"
+    },
+    {
+      "id": "jp-current",
+      "source": "chunisupport",
+      "file": "jp.json",
+      "url": "https://static.chunisupport.net/v1/songs.json",
+      "observed_on": "2026-11-21",
+      "upstream_version": "MATE",
+      "sha256": "b6af1b80420a4c1ecd22168f6d77341049db6e39ce3037a845ca7a782a9e483a"
+    },
+    {
+      "id": "jp-we",
+      "source": "chunisupport",
+      "file": "jp-reiwa.json",
+      "url": "https://static.chunisupport.net/compat/reiwa/1/chunirec_all.json",
+      "observed_on": "2026-11-21",
+      "upstream_version": "MATE",
+      "sha256": "8997cf68aadc0a5193ce5be21d3bd8832957897e5222a18d8c80e3c7486cdcb2"
+    },
+    {
+      "id": "intl-current",
+      "source": "chunimaru",
+      "file": "intl.json",
+      "url": "https://chunimaru.fuwamofu.net/api/songdb/intl",
+      "observed_on": "2026-11-02",
+      "upstream_version": "MATE",
+      "sha256": "9b8da8a555e2940c07e4c79ed4524bb586ba158b378a27849d5ca44fa7ef3aea"
+    },
+    {
+      "id": "cn-current",
+      "source": "lxns",
+      "file": "cn-24000.json",
+      "url": "https://maimai.lxns.net/api/v0/chunithm/song/list?version=24000&notes=true",
+      "observed_on": "2026-11-21",
+      "upstream_version": "24000",
+      "sha256": "e4a9be39357ed166d4cecf18b1333dd3ccb29524551c24463d8c16c5dd1afefa"
+    },
+    {
+      "id": "cn-config",
+      "source": "lxns",
+      "file": "cn-config.json",
+      "url": "https://maimai.lxns.net/api/v0/site/config",
+      "observed_on": "2026-11-21",
+      "upstream_version": "24000",
+      "sha256": "f1c15353d8f65d507d79c8284bee35d799e693a0233cc086c9d2e76730348a8e"
+    },
+    {
+      "id": "verse-sheet",
+      "source": "verse-sheet",
+      "file": "verse-sheet.csv",
+      "url": "https://docs.google.com/spreadsheets/d/1NTGkrOoLdzOoaYyz7d4vDT3cW2Q6lZfoc1nvd7nlNLE/export?format=csv&gid=262760047",
+      "observed_on": null,
+      "upstream_version": "gid=262760047",
+      "sha256": "3aa217e8dcd5b7e7b913d2f74394dd501dfec5421529fc147fdf25ca081c703f"
+    },
+    {
+      "id": "intl-xverse",
+      "source": "sega-intl",
+      "file": "intl-xverse.html",
+      "url": "https://info-chunithm.sega.com/3665/",
+      "observed_on": null,
+      "upstream_version": null,
+      "sha256": "93e5cfc09d7a458b8f99f4339313049a91b81b89d996531009540c4b126e895b"
+    },
+    {
+      "id": "intl-xversex",
+      "source": "sega-intl",
+      "file": "intl-xversex.html",
+      "url": "https://info-chunithm.sega.com/3937/",
+      "observed_on": null,
+      "upstream_version": null,
+      "sha256": "5255aefad51a73122b6eeece899f89404365c66e08bb343943705c9a86dcd49a"
+    },
+    {
+      "id": "intl-mate",
+      "source": "sega-intl",
+      "file": "intl-mate.html",
+      "url": "https://info-chunithm.sega.com/4228/",
+      "observed_on": null,
+      "upstream_version": null,
+      "sha256": "780ab53efa54b55698bf1229cd1f044bc31570bc0b9736c21a0a21c7f6c79960"
+    },
+    {
+      "id": "cn-2027-evidence",
+      "source": "cn-observer",
+      "file": "cn-2027-evidence.html",
+      "url": "https://note.com/eager_yeti6246/n/n411dd5768518",
+      "observed_on": null,
+      "upstream_version": null,
+      "sha256": "75b165272706f633efc817185fe151d7d19cf43ed252e9bdd1dd4e1cd1e13c37"
+    }
+  ]
+}
