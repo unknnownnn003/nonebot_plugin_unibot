@@ -1,7 +1,6 @@
 """Historical evidence adapters for the old-cabinet audit."""
 from collections import defaultdict
-import csv
-from datetime import date
+from datetime import date, timedelta
 from hashlib import sha256
 import json
 import re
@@ -17,7 +16,6 @@ WIKI_PAGES = {
     'wiki-aug': 'バージョンアップのお知らせ(2021.8.5)',
     'wiki-deleted': '配信終了・日本版未収録楽曲一覧',
     'wiki-we': "WORLD'S END",
-    'wiki-cirno': 'チルノのパーフェクトさんすう教室',
     'wiki-p-dates': 'CHUNITHM PARADISE 楽曲一覧(追加日順)',
     'wiki-lost-dates': 'CHUNITHM PARADISE LOST 楽曲一覧(追加日順)',
 }
@@ -64,10 +62,12 @@ class PublicEvidence:
         self.release = defaultdict(list)
         self.we_release = defaultdict(list)
         self.removed = defaultdict(list)
+        self.restored = defaultdict(list)
+        self.boundary_removed = defaultdict(list)
+        self.dated_rows = defaultdict(list)
         self.levels = defaultdict(list)
         self.max_titles = {}
         self.transition = False
-        self.constants = {}
         if directory is None:
             return
         from bs4 import BeautifulSoup
@@ -86,9 +86,7 @@ class PublicEvidence:
             if key == 'wiki-lost':
                 text = document.get_text(' ', strip=True)
                 self.transition = ('更新されていないもの' in text and '各楽曲のレベル・譜面定数の変更' in text)
-            if key == 'wiki-cirno':
-                self._cirno(document, url)
-            elif key in DATE_EDITIONS:
+            if key in DATE_EDITIONS:
                 self._dates(key, wiki_rows(document, key))
             else:
                 self._page(key, wiki_rows(document, key))
@@ -110,32 +108,16 @@ class PublicEvidence:
                        ('sega-end', 'https://info-chunithm.sega.jp/4017/', sha256(end.read_bytes()).hexdigest(),
                         'SEGA: separate legacy online end'))
 
-    def _cirno(self, document, url):
-        title = WIKI_PAGES['wiki-cirno']
-        for info in document.select('h4'):
-            if info.get_text(strip=True) != 'レベル・譜面定数変更履歴':
-                continue
-            for sibling in info.next_siblings:
-                if sibling.name in ('h2', 'h3', 'h4'):
-                    break
-                if sibling.name is None:
-                    continue
-                text = sibling.get_text(' ', strip=True)
-                found = re.search(r'譜面定数\s+MAS\s+【[^】]*?(\d{1,2})\.(\d)\(PLUS\)', text)
-                if found:
-                    whole, tenths = map(int, found.groups())
-                    self.constants['PLUS', 96, normalize_name(title), 'MAS'] = (
-                        whole * 100 + tenths * 10, url, 'レベル・譜面定数変更履歴 / MAS / PLUS')
-                break
-
     def _page(self, reference, rows):
         section = ''
         last_table = 0
+        headers = []
         ordinary = reference in ('wiki-p', 'wiki-lost', 'wiki-aug')
         ordinary_table = 0
         for table, cells, locator in rows:
             if table != last_table:
                 last_table, section = table, ''
+                headers = cells
             if cells[:3] == ['ジャケ', 'タイトル', 'アーティスト'] and cells[3:] == ['B', 'A', 'E', 'M']:
                 ordinary_table += 1
             if len(cells) == 1 and cells[0].startswith('▼'):
@@ -158,11 +140,44 @@ class PublicEvidence:
                 self._we(cells[0], cells[1], cells[2], locator)
             if reference == 'wiki-deleted' and len(cells) in (5, 7):
                 self._we(cells[0], cells[3], cells[4], locator)
+                self._deleted(cells, locator, section, headers)
             if reference in ('wiki-lost', 'wiki-aug') and len(cells) == 5 and re.fullmatch(r'☆[1-5]', cells[4]):
                 title, tag = normalize_name(cells[1]), normalize_name(cells[3])
                 self._we(cells[1], cells[3], cells[4], locator)
                 self.removed[title, tag, int(cells[4][1:])].append(
                     ('2021-05-13' if reference == 'wiki-lost' else '2021-08-05', locator))
+
+    def _deleted(self, cells, locator, section, headers):
+        from history_calendar import JP_RELEASES
+
+        stars = re.fullmatch(r'☆([1-5])', cells[4]) if len(cells) >= 5 and '属性' in headers else None
+        if '属性' in headers and not stars:
+            return
+        title = normalize_name(cells[0])
+        key = (title, normalize_name(cells[3]) if stars else '', int(stars[1]) if stars else None)
+        if headers[-2:] == ['前配信停止ver.', '復活日付']:
+            boundaries = {version: JP_RELEASES[i + 1][1] for i, (version, _, _) in enumerate(JP_RELEASES[:12])}
+            for version, period in zip(cells[-2].split(' ・ '), cells[-1].split(' ・ '), strict=False):
+                days = re.findall(r'(20\d\d)/(\d{1,2})/(\d{1,2})', period)
+                if days:
+                    first, *last = [date(*map(int, value)) for value in days]
+                    self.restored[key].append((first.isoformat(), locator))
+                    if last:
+                        self.removed[key].append(((last[0] + timedelta(days=1)).isoformat(), locator))
+                    boundary = boundaries.get(version)
+                    if boundary and boundary < first.isoformat():
+                        self.boundary_removed[key].append((boundary, locator))
+            return
+        if headers[:3] != ['タイトル', 'アーティスト', 'BPM'] or not section:
+            return
+        section_version = re.match(r'▼\s*(.+?)\s*まで', section)
+        stamp = re.search(r'～(20\d\d)/(\d{1,2})/(\d{1,2})', section)
+        if stamp:
+            self.removed[key].append(((date(*map(int, stamp.groups())) + timedelta(days=1)).isoformat(), locator))
+        elif section_version:
+            for index, (version, _start, _source) in enumerate(JP_RELEASES[:12]):
+                if version == section_version[1]:
+                    self.boundary_removed[key].append((JP_RELEASES[index + 1][1], locator))
 
     def _dates(self, reference, rows):
         version = DATE_EDITIONS[reference]
@@ -179,9 +194,11 @@ class PublicEvidence:
             if re.fullmatch(r'WE(?:\s*\*\d+)?', cells[0]) and len(cells) == 5 and re.fullmatch(r'☆[1-5]', cells[4]):
                 tag, stars = normalize_name(cells[3]), int(cells[4][1:])
                 self.we_release[title, tag, stars].append((version, locator, day))
+                self.dated_rows[title, tag, stars].append((version, locator, day, cells[2]))
                 self._we(title, tag, cells[4], locator)
             elif len(cells) == 7 and all(re.fullmatch(r'\d{1,2}\+?', c) for c in cells[3:]):
                 self.release[title].append((version, locator, day))
+                self.dated_rows[title, '', None].append((version, locator, day, cells[2]))
                 for diff, level in zip(('BAS', 'ADV', 'EXP', 'MAS'), cells[3:]):
                     self.levels[version, title, diff].append((level, locator))
 
@@ -200,75 +217,3 @@ class PublicEvidence:
 
 def source_lock():
     return json.loads((ROOT / 'tools/history_inputs.json').read_text(encoding='utf-8'))
-
-
-class B5Evidence:
-    def __init__(self, path, output):
-        self.catalog = HistoryCatalog(path) if path is not None else None
-        self.sources = {x['id']: x for x in source_lock()['artifacts']}
-        self.b51_rows = set()
-        if self.catalog is None:
-            return
-        path = self.catalog.path
-        with path.open('rb') as file:
-            digest = sha256()
-            for chunk in iter(lambda: file.read(1024 * 1024), b''):
-                digest.update(chunk)
-        output.execute('INSERT INTO references_used VALUES (?,?,?,?)',
-                       ('B5', f'local:{path.parent.name}/{path.name}', digest.hexdigest(), 'Explicit immutable baseline'))
-        path = ROOT / 'docs/b51-continuity/b51_continuity_candidates.csv'
-        data = path.read_bytes()
-        output.execute('INSERT INTO references_used VALUES (?,?,?,?)',
-                       ('B5.1', 'local:docs/b51-continuity/b51_continuity_candidates.csv', sha256(data).hexdigest(),
-                        'Carry candidates compared by chart revision and edition'))
-        for row in csv.DictReader(data.decode('utf-8-sig').splitlines()):
-            self.b51_rows.add((row['version'], row['revision_id']))
-
-    def snapshot(self, version):
-        rows = defaultdict(list)
-        if self.catalog is not None:
-            for row in self.catalog.get_snapshot('JP', version)['charts']:
-                rows[normalize_name(row['title']), row['difficulty']].append(row)
-        return rows
-
-    def compare(self, db, version, song, chart, constant, snapshot, unique, state, reviewed=None):
-        candidates = snapshot.get((normalize_name(song.title), chart.difficulty), ())
-        row = candidates[0] if unique and len(candidates) == 1 else None
-        if row is None:
-            if self.catalog is not None:
-                db.execute('INSERT INTO unmatched_records VALUES (?,?,?,?,?,?,?)',
-                           (version, song.music_id, song.title, chart.difficulty, song.source,
-                            'b5_ambiguous' if candidates else 'b5_missing',
-                            json.dumps([r['revision_id'] for r in candidates])))
-            return None, None, False
-        trusted = row['constant_tenths'] * 10 if row['trusted_constant'] is not None else None
-        known_gap = row['constant_kind'] in ('unknown', 'display_only')
-        wiki_value, wiki_url_, wiki_locator = None, None, None
-        if constant is None:
-            result = 'hdd_unknown'
-        elif trusted == constant:
-            result = 'same'
-        elif trusted is not None:
-            result = 'conflict'
-            artifact = self.sources.get(row['constant_artifact'], {})
-            url = artifact.get('url', '')
-            # Preserve historical Wiki counterevidence alongside the HDD value.
-            # A contemporary unqualified value is not evidence for this edition.
-            if reviewed is not None:
-                wiki_value, wiki_url_, wiki_locator = reviewed
-            elif url.startswith(WIKI_ROOT) and row['constant_artifact'] in ('genesis-evidence', 'daydream-evidence'):
-                wiki_value, wiki_url_, wiki_locator = trusted, url, row['constant_locator']
-        elif known_gap and state == 'present':
-            if row['state'] == 'playable':
-                result = 'b51_unknown_hdd_value' if (version, row['revision_id']) in self.b51_rows else 'b5_unknown_hdd_value'
-            elif row['state'] == 'unknown':
-                result = 'b5_availability_unknown_hdd_value'
-            else:
-                result = 'b5_unavailable_hdd_value'
-        else:
-            result = 'b5_unconfirmed'
-        db.execute('INSERT INTO comparison VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                   (version, song.music_id, song.title, chart.difficulty, song.source, row['revision_id'],
-                    constant, trusted, row['state'], row.get('constant_status', row['constant_kind']), result, wiki_value, wiki_url_,
-                    wiki_locator, 'unique normalized ordinary title and difficulty; B5 revision is not C2S certified'))
-        return row['revision_id'], wiki_value, result == 'conflict'

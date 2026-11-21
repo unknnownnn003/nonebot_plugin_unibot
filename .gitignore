@@ -52,6 +52,11 @@ venv/
 .tools/
 font_preview.png
 
+# Private archival HDD and chart inputs
+*.vhd
+*.vhdx
+*.c2s
+
 # LocalStore when this repository is used as the host working directory
 /cache/
 /config/

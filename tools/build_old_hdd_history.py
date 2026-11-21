@@ -9,7 +9,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 
-from old_hdd_evidence import B5Evidence, PublicEvidence, ROOT, normalize_name
+from old_hdd_evidence import PublicEvidence, ROOT, normalize_name
 from history_calendar import JP_RELEASES
 from old_hdd_scan import HDD_NAMES, STARS, discover, display_level, encoded, log_conflict
 
@@ -145,7 +145,7 @@ def base_state(song, *, early=False):
     return 'disabled' if song.disabled else 'present'
 
 
-def paradise_options(db, indexed, evidence, b5):
+def paradise_options(db, indexed, evidence):
     hdd = HDD_NAMES[-1]
     groups = group_candidates(indexed, ['A000', 'A032', 'A033'])
     result = {'PARADISE': [], 'PARADISE LOST': []}
@@ -161,14 +161,6 @@ def paradise_options(db, indexed, evidence, b5):
         known_release, release_ref, release_date = evidence.first_release(title, tag, STARS.get(reference.star) if tag else None)
         release_proof = f'{release_ref} {release_date}' if release_ref and release_date else release_ref
         reference_basis = [x for x in (removal_ref, release_proof, evidence.max_titles.get(title) if not tag else None) if x]
-        availability = {}
-        if reference.ex_type == 0:
-            for v in result:
-                matches = b5[v].get((title, 'MAS'), ())
-                if len(matches) == 1:
-                    row = matches[0]
-                    availability[v] = row['state']
-                    reference_basis.append(f"B5:{v}:{row['song_observation']}:{row['state']}")
         conflicting_identity = any(normalize_name(row.title) != title or row.ex_type != reference.ex_type
                                    for row in rows) or len(candidates) != len(rows)
         if conflicting_identity:
@@ -201,17 +193,17 @@ def paradise_options(db, indexed, evidence, b5):
             elif removal and day >= removal:
                 state, basis = 'removed', 'dated_wiki_removal'
             elif paradise:
-                if known_release == 'PARADISE LOST' or availability.get(version) == 'not_released' or (
+                if known_release == 'PARADISE LOST' or (
                         reference.ex_type == 0 and reference.release == 'v1 1.55.00'):
                     state, basis = 'not_released', 'lost_release_evidence'
-                elif removal and day < removal and (first or availability.get(version) == 'playable'
+                elif removal and day < removal and (first or known_release == 'PARADISE'
                                                      or removal == '2021-05-13'):
                     choice, state, basis = first or aug or later, 'present', 'before_documented_removal'
                 elif first:
                     choice, state = first, base_state(first)
-                elif known_release == 'PARADISE' or availability.get(version) == 'playable':
+                elif known_release == 'PARADISE':
                     choice, state, basis = aug or later, 'present', 'public_paradise_membership_later_xml'
-                elif reference.ex_type == 0 and reference.release == 'v1 1.50.00' and availability.get(version) != 'removed':
+                elif reference.ex_type == 0 and reference.release == 'v1 1.50.00':
                     state, basis = 'unknown', 'paradise_release_tag_only'
                 else:
                     state, basis = 'unknown', 'paradise_membership_unverified'
@@ -288,7 +280,7 @@ def match_origin(song, songs):
     return matches[0] if len(matches) == 1 else None
 
 
-def write_edition(db, version, rows, public, baseline, snapshot, identities, pinned_scores):
+def write_edition(db, version, rows, public, identities, pinned_scores):
     identity_rows = [(identities.song(db, version, song), song, state, basis) for song, state, basis, _ in rows]
     ordinary = [(identity, song) for identity, song, state, _ in identity_rows
                 if song.ex_type == 0 and state in ('present', 'removed', 'disabled')]
@@ -323,7 +315,7 @@ def write_edition(db, version, rows, public, baseline, snapshot, identities, pin
                 write_we(db, version, identity, cid, song, chart, chart_state, basis, public)
             else:
                 write_ordinary(db, version, identity, cid, song, chart, chart_state, basis,
-                               public, baseline, snapshot, names, pinned_scores)
+                               public, names, pinned_scores)
 
 
 def chart_presence(state, chart):
@@ -355,25 +347,14 @@ def write_we(db, version, identity, cid, song, chart, state, basis, public):
                 song.source, song.package, state, basis))
 
 
-def write_ordinary(db, version, identity, cid, song, chart, state, basis, public, baseline, snapshot, names, pinned):
+def write_ordinary(db, version, identity, cid, song, chart, state, basis, public, names, pinned):
     raw = chart.constant
     selected = raw if state == 'present' else None
     status = 'hdd_observed' if selected is not None else 'unknown' if state in ('present', 'unknown') else state
     title = normalize_name(song.title)
     if version == 'PARADISE' and state == 'present' and song.package != 'A000':
-        matches = snapshot.get((title, chart.difficulty), ())
-        confirmed = (len(matches) == 1 and names[title] == 1 and matches[0]['state'] == 'playable'
-                     and matches[0]['trusted_constant'] is not None
-                     and matches[0]['constant_tenths'] * 10 == raw)
-        selected = raw if public.transition and confirmed else None
+        selected = raw if public.transition else None
         status = 'inferred_at_transition' if selected is not None else 'transition_unverified'
-    reviewed = public.constants.get((version, song.music_id, title, chart.difficulty))
-    b5_revision, wiki, disagreement = baseline.compare(db, version, song, chart, selected, snapshot,
-                                                       names[title] == 1, state, reviewed)
-    if disagreement:
-        log_conflict(db, version, song, chart.difficulty, 'b5_numeric_disagreement',
-                     'HDD value retained; ' + ('version-specific Wiki also differs' if wiki != raw and wiki is not None
-                                               else 'see linked comparison'))
     display = display_level(raw)
     for level, locator in public.levels.get((version, title, chart.difficulty), ()):
         db.execute('INSERT INTO wiki_level_checks VALUES (?,?,?,?,?,?,?,?,?,?)',
@@ -386,7 +367,7 @@ def write_ordinary(db, version, identity, cid, song, chart, state, basis, public
     db.execute('INSERT INTO chart_versions VALUES (' + ','.join('?' for _ in range(23)) + ')',
                (version, identity, cid, song.music_id, song.title, chart.slot, chart.difficulty, chart.enabled,
                 chart.level, chart.decimal, raw, selected, display, chart.ref, chart.path, chart.digest,
-                chart.designer, song.source, song.package, state, status, basis, b5_revision))
+                chart.designer, song.source, song.package, state, status, basis, None))
     entry = pinned.get(title)
     if version == 'PARADISE LOST' and names[title] == 1 and entry and chart.slot in range(4):
         digest = entry['identities'][chart.slot]
@@ -398,7 +379,7 @@ def write_ordinary(db, version, identity, cid, song, chart, state, basis, public
         db.execute('INSERT INTO paradise_split_evidence VALUES (?,?,?,?,?,?,?,?,?)',
                    (version, song.music_id, song.title, chart.difficulty, state, status, song.source,
                     encoded({'membership': basis, 'HDD_hundredths': raw, 'selected_hundredths': selected,
-                             'b5_revision': b5_revision, 'transition': 'wiki-lost' if public.transition else None}),
+                             'transition': 'wiki-lost' if public.transition else None}),
                     status in ('unknown', 'conflict', 'inferred_at_transition', 'transition_unverified')))
 
 
@@ -418,7 +399,7 @@ def build(args):
         db.row_factory = sqlite3.Row
         db.executescript((ROOT / 'tools/old_hdd_schema.sql').read_text(encoding='utf-8-sig'))
         db.executemany('INSERT INTO versions VALUES (?,?,?,?,?,?,?,?)', version_rows())
-        public, baseline = PublicEvidence(args.evidence, db), B5Evidence(args.b5, db)
+        public = PublicEvidence(args.evidence, db)
         scores = (ROOT / 'nonebot_plugin_unibot/assets/historical/paradise_lost.json').read_bytes()
         from hashlib import sha256
         db.execute('INSERT INTO references_used VALUES (?,?,?,?)',
@@ -432,16 +413,17 @@ def build(args):
             print(f'{version} / {hdd}', flush=True)
             packs, info = discover(db, root, hdd, hash_all=args.hash_all)
             index = layer_index(db, hdd, packs)
-            snapshot = {version: baseline.snapshot(version)}
             if version == 'PARADISE':
-                snapshot['PARADISE LOST'] = baseline.snapshot('PARADISE LOST')
-                versions = paradise_options(db, index, public, snapshot)
+                versions = paradise_options(db, index, public)
             else:
                 versions = {version: list(options_earlier(db, hdd, index, info))}
             for edition, rows in versions.items():
-                write_edition(db, edition, rows, public, baseline, snapshot[edition], identities, pinned)
+                write_edition(db, edition, rows, public, identities, pinned)
             db.commit()
         from old_hdd_export import changes, export
+        from old_hdd_timeline import build_timeline
+
+        build_timeline(db, public, args.evidence)
         changes(db)
         if db.execute('PRAGMA foreign_key_check').fetchone() or db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
             raise ValueError('Old HDD catalog failed database integrity checks')
@@ -449,7 +431,7 @@ def build(args):
             raise ValueError('An edition has no parsed music records')
         db.execute('INSERT INTO complete VALUES (1)')
         db.commit()
-        export(db, stage)
+        export(db, stage, audit_csv=getattr(args, 'audit_csv', False))
     if output.exists():
         raise FileExistsError(output)
     stage.rename(output)
@@ -460,7 +442,7 @@ def main():
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True, help='New output directory outside the source tree')
     parser.add_argument('--evidence', type=Path, help='Private directory with saved public Wiki and MAX HTML')
-    parser.add_argument('--b5', type=Path, help='Existing immutable B5 release or catalog.sqlite')
+    parser.add_argument('--audit-csv', action='store_true', help='Export legacy audit tables as separate CSV files')
     parser.add_argument('--hash-all', action='store_true', help='Hash all package files including unreferenced binary assets')
     args = parser.parse_args()
     build(args)

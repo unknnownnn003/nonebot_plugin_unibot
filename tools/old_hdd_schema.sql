@@ -17,6 +17,7 @@ CREATE TABLE packages (
     evidence TEXT NOT NULL, PRIMARY KEY(hdd, package)
 );
 CREATE TABLE raw_xml (path TEXT PRIMARY KEY REFERENCES sources, xml BLOB NOT NULL);
+CREATE TABLE c2s_sections (sha256 TEXT PRIMARY KEY, notation_sha256 TEXT, creator TEXT);
 CREATE TABLE raw_we (source TEXT PRIMARY KEY REFERENCES raw_xml, hdd TEXT NOT NULL, package TEXT NOT NULL,
     music_id INTEGER NOT NULL, title TEXT NOT NULL, tag TEXT, tag_id TEXT, star_raw TEXT, stars INTEGER);
 CREATE TABLE raw_song_index (source TEXT PRIMARY KEY REFERENCES raw_xml, hdd TEXT NOT NULL, package TEXT NOT NULL,
@@ -77,9 +78,6 @@ CREATE TABLE unmatched_records (version TEXT, music_id INTEGER, title TEXT, diff
     source TEXT, kind TEXT NOT NULL, candidates TEXT);
 CREATE TABLE paradise_split_evidence (version TEXT, music_id INTEGER, title TEXT, difficulty TEXT,
     state TEXT, decision TEXT, source TEXT REFERENCES sources, evidence TEXT NOT NULL, unresolved INTEGER NOT NULL);
-CREATE TABLE comparison (version TEXT, music_id INTEGER, title TEXT, difficulty TEXT, source TEXT,
-    revision_id TEXT, hdd_hundredths INTEGER, b5_hundredths INTEGER, b5_state TEXT, b5_status TEXT,
-    result TEXT NOT NULL, wiki_hundredths INTEGER, wiki_url TEXT, wiki_locator TEXT, identity_basis TEXT);
 CREATE TABLE score_mapping (version TEXT, chart_identity TEXT, cn_music_id INTEGER, cn_slot INTEGER,
     cn_fingerprint TEXT, status TEXT NOT NULL, basis TEXT NOT NULL, PRIMARY KEY(version, chart_identity));
 CREATE TABLE references_used (id TEXT PRIMARY KEY, url TEXT, sha256 TEXT NOT NULL, detail TEXT NOT NULL);

@@ -16,6 +16,7 @@ from history_music_xml import difficulty_for, reject_doctype
 HDD_NAMES = tuple(f'SDBT_1.{n:02}' for n in (1, 6, 10, 15, 20, 25, 30, 35, 40, 45, 50))
 STARS = {str(2 * n - 1): n for n in range(1, 6)}
 IMAGE_EXTENSIONS = {'.dds', '.png', '.webp', '.jpg', '.jpeg', '.bmp', '.tga'}
+C2S_LABELS = {b'VERSION', b'MUSIC', b'SEQUENCEID', b'DIFFICULT', b'LEVEL', b'CREATOR'}
 
 
 def encoded(value):
@@ -131,6 +132,31 @@ def file_hash(path):
         return digest.hexdigest()
 
 
+def c2s_notation_hash(data):
+    """Hash serialized notation/timing without known label headers or summary rows."""
+    lines = data.splitlines()
+    if not lines or not lines[0].startswith(b'VERSION\t'):
+        return None
+    notation = []
+    for line in lines:
+        line = line.strip()
+        key = line.split(b'\t', 1)[0]
+        if line and key not in C2S_LABELS and not key.startswith(b'T_'):
+            notation.append(line)
+    return sha256(b'\n'.join(notation)).hexdigest() if notation else None
+
+
+def c2s_creator(data):
+    """Read the observed UTF-8 CREATOR header, retaining the exact author text."""
+    for line in data.splitlines()[:20]:
+        if line.startswith(b'CREATOR\t'):
+            try:
+                return line.split(b'\t', 1)[1].decode('utf-8').strip() or None
+            except UnicodeDecodeError:
+                return None
+    return None
+
+
 def asset_metadata(path):
     with path.open('rb') as stream:
         header = stream.read(148)
@@ -204,6 +230,7 @@ def discover(db, root, hdd, *, hash_all=False):
     songs, package_info = defaultdict(list), {}
     source_data = {}
     path_cache = {}
+    c2s_seen = set()
     issues = []
     vhd = root / f'{hdd}.vhd'
     if vhd.is_file():
@@ -246,6 +273,13 @@ def discover(db, root, hdd, *, hash_all=False):
                     if kind in ('xml', 'music_xml') and size <= 16_000_000:
                         data = path.read_bytes()
                         digest = sha256(data).hexdigest()
+                    elif kind == 'c2s' and size <= 8_000_000:
+                        chart_data = path.read_bytes()
+                        digest = sha256(chart_data).hexdigest()
+                        if digest not in c2s_seen:
+                            c2s_seen.add(digest)
+                            db.execute('INSERT OR IGNORE INTO c2s_sections VALUES (?,?,?)',
+                                       (digest, c2s_notation_hash(chart_data), c2s_creator(chart_data)))
                     elif hash_all or kind in ('xml', 'music_xml', 'c2s', 'image', 'config'):
                         digest = file_hash(path)
                 except OSError as exc:

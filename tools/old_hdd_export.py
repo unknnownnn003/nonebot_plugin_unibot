@@ -11,7 +11,7 @@ EXPORTS = {
     'option_changes': 'option_changes', 'option_pairs': 'option_pairs',
     'jacket_manifest': 'jacket_manifest', 'jackets': 'jackets', 'sources': 'source_manifest',
     'packages': 'packages', 'paradise_split_evidence': 'paradise_split_evidence',
-    'conflicts': 'conflicts', 'unmatched_records': 'unmatched_records', 'comparison': 'b5_comparison',
+    'conflicts': 'conflicts', 'unmatched_records': 'unmatched_records',
     'score_mapping': 'score_mapping', 'references_used': 'references_used',
     'wiki_we_checks': 'wiki_we_checks', 'wiki_level_checks': 'wiki_level_checks',
     'raw_song_index': 'raw_song_index', 'raw_we': 'raw_we',
@@ -121,10 +121,10 @@ def intersection(db, table, key, before, after):
                  (before, after))
 
 
-def export(db, output):
-    for table, filename in EXPORTS.items():
-        csv_export(db, table, output / f'{filename}.csv')
-    csv_export(db, 'changes', output / 'constant_changes.csv', "WHERE kind='constant_changed'")
+def export(db, output, *, audit_csv=False):
+    if audit_csv:
+        for table, filename in EXPORTS.items():
+            csv_export(db, table, output / f'{filename}.csv')
     versions = version_summary(db)
     write(output, 'versions.json', json.dumps(versions, ensure_ascii=False, indent=2) + '\n')
     report = ['# 旧框 HDD 提取结果', '', '| 版本 | 截点（JST） | 普通歌曲 | 普通谱面 | WE 谱面 | HDD 数值 | 采纳数值 | 曲目归属未知 |',
@@ -137,8 +137,8 @@ def export(db, output):
     unknown = breakdown(db, 'SELECT kind, count(*) FROM conflicts GROUP BY kind ORDER BY kind')
     report.extend(['', f'普通有效谱面 HDD 原值合计 **{sum(r["numeric_hdd"] for r in versions):,}**。',
                    f'可选用数值 **{sum(r["numeric_selected"] for r in versions):,}**，其中 1.50 过渡推定 **{sum(r["inferred_constants"] for r in versions):,}**。',
-                   '', '跨代事件见 `chart_changes.csv`。同一谱面可以同时有定数、显示等级、内容等多类变化。',
-                   '', '采纳定数的变动明细见 `constant_changes.csv`。',
+                   '', '跨代事件见数据库 `changes`。同一谱面可以同时有定数、显示等级、内容等多类变化。',
+                   '', '生命周期变动与来源见 `history_events`。',
                    '', f'定数变化按依据统计 `{encoded(constants)}`。', '', f'各事件计数 `{encoded(delta)}`。',
                    '', f'异常计数 `{encoded(unknown)}`。', '', '缺少前代或后代 XML 的事件以来源所见标记。停配或禁用另有状态。',
                    '', f'曲绘索引状态 `{encoded(breakdown(db, "SELECT status,count(*) FROM jacket_manifest GROUP BY status"))}`。',
@@ -154,7 +154,7 @@ def export(db, output):
 def discovery_report(db, output):
     report = ['# 旧框 HDD 结构勘查', '', '扫描目标为 11 个解出的目录。HDD 目录名按用户提供对应版本。',
               '实际基础层为 `data/A000`，追加层为 `bin/option/Axxx` 的已解出目录。`bin/project.conf` 配置的机台挂载路径为 `C:/mount/Option/`。',
-              '同根 VHD 只登记大小。XML 原始字节存于 `raw_xml`，来源、大小、哈希列于 `source_manifest.csv`。',
+              '同根 VHD 只登记大小。XML 原始字节存于 `raw_xml`，来源、大小、哈希列于 `sources`。',
               '系统元数据及游戏二进制不参与解析。', '',
               '| HDD | 包（含 A000） | XML | Music.xml | C2S | 图片 | 包文件字节 |',
               '|---|---:|---:|---:|---:|---:|---:|']
@@ -166,14 +166,14 @@ def discovery_report(db, output):
                '初代与 PLUS 的 XML 全部缺少 disableFlag。有效谱面依据该两代 schema、启用标记及 C2S 识别，原值仍为空。',
                '当没有可信生效日时，差异只记为包间观测。重复累积包缺少某 ID 不作删除证据。',
                'A032/A033 与公开停配日期逐条比较。A114 的复活内容和 A910 第三方内容保留原始来源。',
-               '', '逐包 XML 数量、数据版本、来源身份及包间重叠详见 `packages.csv`、`option_pairs.csv` 和 `option_changes.csv`。']
+               '', '逐包 XML 数量、数据版本、来源身份及包间重叠详见 `packages`、`option_pairs` 和 `option_changes`。']
     write(output, 'HDD_DISCOVERY.md', '\n'.join(report) + '\n')
 
 
 def split_report(db, output, versions):
     p, pl = versions[-2:]
     report = ['# PARADISE 与 PARADISE LOST', '', f'还原目标是 {p["end_on"]} 和 {pl["end_on"]}（JST）。',
-              'A000 是 1.50.0 基础观测。A032 / A033 含跨版本内容和禁用状态。使用当年发行、停配记录和可定位的 B5 歌曲证据。',
+              'A000 是 1.50.0 基础观测。A032 / A033 含跨版本内容和禁用状态。使用当年发行与停配记录。',
               '1.55 标签作为曲目归属线索。netOpenName 留作原始排期字段。',
               '8 月 5 日停配进入 LOST。Wiki 标为 11 月 3 日仍可玩的记录按该日保留。',
               'Wiki 的升级说明支持 PARADISE 的晚期 XML 定数作为过渡推定。原始来源、选择值及推定标签分别保留。', '',
@@ -186,8 +186,8 @@ def split_report(db, output, versions):
         report.append(f'| {table} | {n} | {new-n} | {old-n} |')
     events = breakdown(db, "SELECT kind,count(*) FROM changes WHERE new_version='PARADISE LOST' GROUP BY kind")
     report.extend(['', f'跨截点事件 `{encoded(events)}`。', '',
-                   '第一张表的独有项包含已知新增、停配及覆盖不足。逐行归属、参考资料定位和未确认标记见 `paradise_split_evidence.csv`。',
-                   '', '网页原件的哈希和 URL 见 `references_used.csv`。'])
+                   '第一张表的独有项包含已知新增、停配及覆盖不足。逐行归属、参考资料定位和未确认标记见 `paradise_split_evidence`。',
+                   '', '网页原件的哈希和 URL 见 `references_used`。'])
     write(output, 'PARADISE_SPLIT_REPORT.md', '\n'.join(report) + '\n')
 
 
@@ -195,18 +195,10 @@ def validation_reports(db, output):
     w = breakdown(db, 'SELECT result,count(*) FROM wiki_we_checks GROUP BY result')
     total = count(db, "SELECT count(*) FROM worlds_end_versions WHERE state='present'")
     match = count(db, "SELECT count(*) FROM worlds_end_versions WHERE state='present' AND stars IS NOT NULL AND coalesce(tag,'') NOT IN ('','Invalid','なし')")
-    b5 = breakdown(db, 'SELECT result,count(*) FROM comparison GROUP BY result')
     report = ['# WORLD’S END 识别与校验', '', f'有效谱面中属性和数字均可解析 **{match}/{total}**。',
               '以 `exType=2` 和实际启用的 WE 槽识别。使用独立音乐 ID 和 C2S，原始星级和属性 ID 留存。',
               'Wiki 对照使用曲名和属性。多张同属性异星的记录保留歧义。', '',
               f'Wiki 比较结果 `{encoded(w)}`。', '', '| 原始编码 | 11 份 HDD 原始 XML 行（含重复） |', '|---|---:|']
     report.extend(f'| {raw} | {n} |' for raw, n in db.execute('SELECT star_raw,count(*) FROM raw_we GROUP BY star_raw ORDER BY star_raw'))
-    report.extend(['', '逐行证据见 `wiki_we_checks.csv`。WE 与同曲普通谱面的来源关系仅在共享 cue 且曲名或曲绘吻合时建立。'])
+    report.extend(['', '逐行证据见 `wiki_we_checks`。WE 与同曲普通谱面的来源关系仅在共享 cue 且曲名或曲绘吻合时建立。'])
     write(output, 'WE_VALIDATION.md', '\n'.join(report) + '\n')
-    report = ['# B5 / B5.1 对照', '', '按版本、唯一归一化标题与普通谱面难度形成候选关联。其证据强度仅达 B5 的历史槽位，尚无 B5 C2S 对照。',
-              'B5.1 候选按版本与 revision_id 核对。可用性仍未知的数值单列。', '',
-              '| 对照结果 | 谱面 × 版本 |', '|---|---:|']
-    report.extend(f'| {k} | {v} |' for k, v in sorted(b5.items()))
-    report.extend(['', '明细见 `b5_comparison.csv` 和 `unmatched_records.csv`。HDD 实测定数为采用值。B5 和具有版本依据的 Wiki 数值列在对照表中。',
-                   '独立记录、历史参考定数和候选评级映射均位于本数据包。'])
-    write(output, 'B5_COMPARISON.md', '\n'.join(report) + '\n')
