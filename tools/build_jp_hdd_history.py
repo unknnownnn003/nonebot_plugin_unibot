@@ -17,7 +17,7 @@ from xml.parsers.expat import ExpatError
 from zipfile import BadZipFile
 
 from jp_compact_history import discard_xml
-from jp_option_dates import apply_option_days
+from jp_option_dates import apply_option_days, apply_reviewed_days
 from jp_reviewed_history import copy_reviewed
 from old_hdd_evidence import normalize_name
 from old_hdd_scan import encoded, file_hash
@@ -589,6 +589,7 @@ def build(args):
                 merge_availability(db, public, notices)
             release_index(db, histories, calendar, first)
             finish_timeline(db, histories, calendar, public, revisions, first, designer, reviewed_changes)
+            apply_reviewed_days(db)
             apply_option_days(db)
             index_event_changes(db, 'SDHD_*')
             discard_xml(db)

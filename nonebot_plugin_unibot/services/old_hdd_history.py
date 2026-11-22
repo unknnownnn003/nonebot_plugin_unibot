@@ -435,7 +435,8 @@ class OldHddHistory:
                     SELECT h.identity,h.field,h.before AS after,h.effective_on
                     FROM history_batches b CROSS JOIN history_events h USING(batch)
                     WHERE b.version=? AND b.sequence>0 AND h.kind='hdd_revision'
-                      AND h.evidence LIKE 'SDHD option-day assumption: %'
+                      AND (h.evidence LIKE 'SDHD option-day assumption: %'
+                           OR h.evidence LIKE 'SDHD user-selected revision date: %')
                       AND b.earliest_on<=? AND h.effective_on>?
                       AND NOT EXISTS (
                           SELECT 1 FROM history_events prior JOIN history_batches pb USING(batch)
