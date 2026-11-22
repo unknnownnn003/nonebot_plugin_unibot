@@ -83,6 +83,11 @@ def add_official_notices(db, histories, calendar, path):
             image = claim.get('image')
             if image and not re.fullmatch(r'[0-9a-f]{64}', claim.get('image_sha256', '')):
                 raise ValueError(f'Missing announcement image digest: {url}')
+            image_source = claim.get('hdd_image_event')
+            if image_source and not db.execute('''SELECT 1 FROM history_asset_links
+                    WHERE source=? AND location=? AND asset=? AND batch=? AND relation='event_information_image' ''',
+                    (image_source, image, claim.get('image_sha256'), witness.batch)).fetchone():
+                raise ValueError(f'Unverified HDD notice image: {image_source}')
             db.execute('INSERT OR IGNORE INTO sdhd_notice_claim VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
                        (url, identity, day, kind, mode, claim['detail'], image, claim.get('image_sha256'),
                         claim['locator'], witness.batch, witness.source, witness.revision, field))
