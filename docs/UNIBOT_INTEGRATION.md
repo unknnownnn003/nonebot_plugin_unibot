@@ -72,3 +72,5 @@ constants = history.constants("PARADISE LOST")
 库内有 1,021 首普通歌曲、4,084 张普通谱面和 205 张独立 WE。附有明确首配日期的各为 1,013、4,052 和 187。165 个公开更新日有逐项事件。共登记 73 个物理包，44 个有可用的顺序信息，29 个日期和完整顺序仍待补证。实际游戏生效史仍缺服务器排期。追加另一时期的原始包、运营侧排期或有明文日期的公告，可以缩小日期窗口并校验现有推定。
 
 初版逐项差异、事件统计、SHA-256 复验和日期查询耗时见 `.tools/old-hdd/lifecycle-verification.json`。日期修订与初版的比对见 `.tools/old-hdd/lifecycle-dates-validation.json`。初版清理文件列表和校验和见同目录的 `cleanup-manifest.json`，执行结果见 `cleanup-result.json`。
+
+日服新框及统一 v3 查询见 [日服新旧框统一 HDD 历史库](JP_HDD_HISTORY.md)。

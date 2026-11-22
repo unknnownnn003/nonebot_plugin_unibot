@@ -482,13 +482,13 @@ def index_identity_links(db, entities):
             link(identity, origin, 'worlds_end_origin', source,entities[origin][0]['source'],basis)
 
 
-def index_event_changes(db):
+def index_event_changes(db, hdd_glob='*'):
     rows = db.execute('''
         SELECT e.*,s.hdd,s.package,p.data_version FROM history_game_events e
         JOIN sources s ON s.path=e.source JOIN packages p USING(hdd,package)
-        WHERE e.event_id IS NOT NULL AND p.classification IN ('base','historical_candidate')
+        WHERE e.event_id IS NOT NULL AND p.classification IN ('base','historical_candidate') AND s.hdd GLOB ?
         ORDER BY s.hdd,s.package,e.source
-    ''')
+    ''', (hdd_glob,))
     layers = defaultdict(lambda: defaultdict(list))
     targets = defaultdict(list)
     for source, role, target, _ in db.execute('SELECT * FROM history_game_event_links ORDER BY source,role,target_id'):

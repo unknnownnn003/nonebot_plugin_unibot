@@ -1,0 +1,80 @@
+from contextlib import closing
+from hashlib import sha256
+from pathlib import Path
+import sqlite3
+import sys
+from tempfile import TemporaryDirectory
+import unittest
+from zipfile import ZipFile
+
+TOOLS = Path(__file__).resolve().parents[1] / 'tools'
+sys.path.insert(0, str(TOOLS))
+from build_jp_hdd_history import Observation, save_windows
+from sdhd_scan import File, parse_record
+from _unibot_history.old_hdd_history import OldHddHistory
+
+
+def fixture(db):
+    db.row_factory = sqlite3.Row
+    for filename in ('old_hdd_schema.sql', 'old_hdd_timeline.sql', 'sdhd_schema.sql'):
+        db.executescript((TOOLS / filename).read_text(encoding='utf-8-sig'))
+
+
+class SdhdTests(unittest.TestCase):
+    def test_ultima_flag_and_notation_overlay(self):
+        xml = b"""<MusicData><name><id>42</id><str>Music</str></name>
+        <artistName><str>Artist</str></artistName><exType>0</exType>
+        <disableFlag>false</disableFlag><enableUltima>false</enableUltima>
+        <fumens><MusicFumenData><type><id>4</id><data>ULTIMA</data></type>
+        <enable>true</enable><file><path>Ult.c2s</path></file>
+        <level>13</level><levelDecimal>50</levelDecimal></MusicFumenData></fumens></MusicData>"""
+        notes = b'VERSION\t1\nCREATOR\tArtist\nTAP\t1\t0\t0\t4'
+        with TemporaryDirectory() as tmp, closing(sqlite3.connect(':memory:')) as db:
+            fixture(db)
+            p = Path(tmp)
+            (p / 'Music.xml').write_bytes(xml)
+            (p / 'Ult.c2s').write_bytes(notes)
+            files = {key: (File(path, p / path), 'SDHD_2.00', package)
+                     for key, path, package in [('music.xml', 'Music.xml', 'A000'), ('ult.c2s', 'Ult.c2s', 'A001')]}
+            _, _, charts = parse_record(db, None, files, 'music.xml', 50)
+            shape, data = charts[0]
+            self.assertEqual((shape.slot, shape.difficulty), (4, 'ULT'))
+            self.assertFalse(data['enabled'])
+            self.assertEqual(data['display_level'], '13+')
+            self.assertEqual(data['hdd_hundredths'], 1350)
+            self.assertEqual(data['notes_designer'], 'Artist')
+            self.assertEqual(data['c2s_sha256'], sha256(notes).hexdigest())
+
+    def test_uncertain_end_revision_and_confirmed_removal(self):
+        with closing(sqlite3.connect(':memory:')) as db:
+            fixture(db)
+            db.execute("INSERT INTO versions VALUES ('NEW',13,'SDHD','2021-11-04','2022-04-13','','','')")
+            db.execute("INSERT INTO history_entities VALUES ('a','song',NULL,42,NULL,NULL)")
+            for revision in ('original', 'changed'):
+                db.execute("INSERT INTO history_revisions VALUES (?,'a','{}')", (revision,))
+            trace = [Observation('a', 42, 'song', None, None, None, 'src', {}, True, day, 'pkg', key)
+                     for day, key in [('2021-11-04', 'original'), ('2022-01-01', 'changed')]]
+            save_windows(db, 'NEW', 'a', trace, '2021-11-05', '2021-11-04', '2022-04-13',
+                         None, {'2022-02-01': 'removed', '2022-03-01': 'restored'})
+            self.assertIsNone(db.execute("SELECT revision FROM history_windows WHERE end_on='2022-04-13'").fetchone()[0])
+            self.assertIsNone(db.execute("""SELECT * FROM history_windows
+                WHERE '2022-02-15' BETWEEN start_on AND end_on""").fetchone())
+            self.assertEqual(db.execute("SELECT min(start_on) FROM history_windows").fetchone()[0], '2021-11-05')
+
+    def test_indexed_zip_resource_requires_matching_hash(self):
+        with TemporaryDirectory() as tmp:
+            p = Path(tmp) / 'option.zip'
+            with ZipFile(p, 'w') as archive:
+                archive.writestr('option/A001/test.dds', b'abc')
+            pointer = 'option.zip!/option/A001/test.dds'
+            self.assertEqual(OldHddHistory.resource_bytes(tmp, pointer, sha256(b'abc').hexdigest()), b'abc')
+            base = Path(tmp) / 'NEW!!'
+            base.mkdir()
+            (base / 'test.dds').write_bytes(b'abc')
+            self.assertEqual(OldHddHistory.resource_bytes(tmp, 'NEW!!/test.dds', sha256(b'abc').hexdigest()), b'abc')
+            with self.assertRaisesRegex(ValueError, 'archived SHA-256'):
+                OldHddHistory.resource_bytes(tmp, pointer, sha256(b'changed').hexdigest())
+
+
+if __name__ == '__main__':
+    unittest.main()
