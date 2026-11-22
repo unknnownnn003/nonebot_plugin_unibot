@@ -3,18 +3,20 @@ import argparse
 from collections import Counter
 from contextlib import closing
 import json
+import os
 from pathlib import Path
 import sqlite3
 from statistics import median
 from time import perf_counter
 from xml.etree import ElementTree
+from zipfile import ZipFile
 
 import import_paradise_lost  # Offline service bootstrap
 from _unibot_history.old_hdd_history import OldHddHistory
 from old_hdd_scan import file_hash
 
 
-def verify(database, baseline, root):
+def verify(database, baseline, root, *, allow_unencrypted_sample=False):
     catalog, old = OldHddHistory(database), OldHddHistory(baseline)
     result = {'sdbt': {}, 'sdhd': {}}
     for version in old.versions():
@@ -76,8 +78,19 @@ def verify(database, baseline, root):
             charts = catalog.charts(name, active_only=False)
             sample = [r for r in charts if r['c2s_path'] and r['package'] != 'A000']
             sample = (sample or charts)[0]
+            scope = 'preferred'
+            path = sample['c2s_path']
+            marker = path.lower().find('.zip!/')
+            if allow_unencrypted_sample and marker >= 0 and not os.getenv('UNIBOT_HDD_ZIP_PASSWORD'):
+                container, member = path[:marker + 4], path[marker + 6:]
+                with ZipFile(root / container) as archive:
+                    encrypted = archive.getinfo(member).flag_bits & 1
+                if encrypted:
+                    sample = next(row for row in charts if row['c2s_path'] and '.zip!/' not in row['c2s_path'].lower())
+                    scope = 'loose_file_fallback_for_encrypted_member'
             catalog.resource_bytes(root, sample['c2s_path'], sample['c2s_sha256'])
             result['sdhd'][name] = {'counts': {'/'.join(key): count for key, count in sorted(present.items())},
+                                    'resource_sample_scope': scope,
                                     'date_median_ms': round(median(durations), 1),
                                     'dated_rows': len(snapshot['rows']),
                                     'date_uncertainty': snapshot['uncertain_count']}
@@ -90,8 +103,9 @@ def main():
     parser.add_argument('baseline', type=Path)
     parser.add_argument('root', type=Path)
     parser.add_argument('--repeat', type=Path)
+    parser.add_argument('--allow-unencrypted-sample', action='store_true')
     args = parser.parse_args()
-    result = verify(args.database, args.baseline, args.root)
+    result = verify(args.database, args.baseline, args.root, allow_unencrypted_sample=args.allow_unencrypted_sample)
     if args.repeat:
         result['reproducible'] = file_hash(args.database) == file_hash(args.repeat)
         if not result['reproducible']:

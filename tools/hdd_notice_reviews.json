@@ -1,0 +1,652 @@
+{
+  "reviews": [
+    {
+      "announcement": "https://info-chunithm.sega.jp/12053/",
+      "announcement_sha256": "3cf99e02d34d64d7534c8ae9d880b78d263a0229dac52d36bbbb8026a0e4862a",
+      "published": "2026-06-15",
+      "day": "2026-06-18",
+      "mode": "map",
+      "printed": "2026/6/18 ～",
+      "location": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A302/event/event00018852/CHU_info_event_maimai005.dds",
+      "event_xml": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A302/event/event00018852/Event.xml",
+      "batch": "pkg:SDHD_2.45:A302",
+      "sha256": "cfaef178ba484c73b74a388b316a32055c8032eb156d98619999ca9aab07d001",
+      "targets": [
+        {
+          "music_id": 2994,
+          "title": "プリズム△▽リズム"
+        },
+        {
+          "music_id": 2995,
+          "title": "ARAIS"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/04/3ade6c89f11b8b48d9421ded595672fd.png",
+        "official_sha256": "ed44c12f18af2f248979cc7a2e3ef153bb4a6ead26803ff3ba98f853fd0dcfe1",
+        "center_crop_mean_error": 0.00172
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/12053/",
+      "announcement_sha256": "3cf99e02d34d64d7534c8ae9d880b78d263a0229dac52d36bbbb8026a0e4862a",
+      "published": "2026-06-15",
+      "day": "2026-06-18",
+      "mode": "map",
+      "printed": "2026/6/18 ～",
+      "location": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A302/event/event00018850/CHU_info_event_ongeki21.dds",
+      "event_xml": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A302/event/event00018850/Event.xml",
+      "batch": "pkg:SDHD_2.45:A302",
+      "sha256": "ffae2d49a3cb722d83a62bcabb67d3b02471066f1ce275d3370eb28c88996f3e",
+      "targets": [
+        {
+          "music_id": 2996,
+          "title": "いちげき！のテーマ"
+        },
+        {
+          "music_id": 2997,
+          "title": "アイシング・ドリーム"
+        },
+        {
+          "music_id": 2998,
+          "title": "Pastel Sprinkles"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/04/a9b6130878bb8fb9faed72718dc6eaa7.png",
+        "official_sha256": "2cb246b8d31ba6d9d8e438da65454bbcc72ff0c6e391f8526748b046d6065f7c",
+        "center_crop_mean_error": 0.00142
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/12376/",
+      "announcement_sha256": "b79d4a369013aa7e317f9cd32c2e7c37f14136c83a7750390bf7072f1e7f15bb",
+      "published": "2026-07-13",
+      "day": "2026-07-16",
+      "mode": "event",
+      "printed": "2026/7/16 ～ 9/2",
+      "location": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A073/event/event00019252/CHU_info_event_ayakaki0001.dds",
+      "event_xml": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A073/event/event00019252/Event.xml",
+      "batch": "pkg:SDHD_2.50:A073",
+      "sha256": "476b6a3f70de0bb2722746ba7f9708c0e6567146bc4d3d322164f2adade24798",
+      "targets": [
+        {
+          "music_id": 3031,
+          "title": "シャオシャオ蘭々♪"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/06/2f7904f104d5d02e308276dea7b0152a.png",
+        "official_sha256": "b963cd76d7f4a2d00bc6d169b724fd334fbd43ef9cbd8f865882de3e7b2307f3",
+        "center_crop_mean_error": 0.00158
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/12390/",
+      "announcement_sha256": "6fe8d0ae0e2be225e66c1a1f48d407b6edffc8aeccb97d2372d848ab308e3d1c",
+      "published": "2026-07-14",
+      "day": "2026-07-16",
+      "mode": "event",
+      "printed": "2026/7/16 ～ 9/2",
+      "location": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A073/event/event00019255/CHU_info_event_patora0002.dds",
+      "event_xml": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A073/event/event00019255/Event.xml",
+      "batch": "pkg:SDHD_2.50:A073",
+      "sha256": "7d34c21ec21d3562569dafe0c650c11cecf4d25e82374e08a89c5dd25b1e5852",
+      "targets": [
+        {
+          "music_id": 3032,
+          "title": "偉大なる悪魔は実は大天使パトラちゃん様なのだ！"
+        },
+        {
+          "music_id": 3034,
+          "title": "ウニの歌(Nanoru Naganai Remix)"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/06/d78c3263f6f8e7cfb89706e133c497cf.png",
+        "official_sha256": "d0149290d86f33cd5217d48b57cdc16170e51888c97374bbcc9c123761ac7a25",
+        "center_crop_mean_error": 0.00163
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/12390/",
+      "announcement_sha256": "6fe8d0ae0e2be225e66c1a1f48d407b6edffc8aeccb97d2372d848ab308e3d1c",
+      "published": "2026-07-14",
+      "day": "2026-07-16",
+      "mode": "standard",
+      "printed": "7月16日 楽曲追加",
+      "location": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A073/event/event00019250/CHU_info_music_mate0004.dds",
+      "event_xml": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A073/event/event00019250/Event.xml",
+      "batch": "pkg:SDHD_2.50:A073",
+      "sha256": "ebce5b04bb870e6d10d519dcd5d2f4af605e53ed0503ab17000cad024ad59a83",
+      "targets": [
+        {
+          "music_id": 3033,
+          "title": "ウニ",
+          "opening_normal_slots": true
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/06/6f798ab53b2605846c9dc4664919422e.png",
+        "official_sha256": "91e1a1998ea62732633c738a60725b3292abc17e35e7d3afb1ab724aaf491ca2",
+        "center_crop_mean_error": 0.00184
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/12440/",
+      "announcement_sha256": "abb63b78cd43c77c853ff9f332c6b5297770df00d66914993d6309fdec7c63b8",
+      "published": "2026-08-04",
+      "day": "2026-08-06",
+      "mode": "standard",
+      "printed": "8月6日 楽曲追加",
+      "location": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A081/event/event00019305/CHU_info_music_mate0006.dds",
+      "event_xml": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A081/event/event00019305/Event.xml",
+      "batch": "pkg:SDHD_2.50:A081",
+      "sha256": "ae828963af433ec5b0c893a61fa09155eb1ab3d8eb9009168312140cca7cc753",
+      "targets": [
+        {
+          "music_id": 3038,
+          "title": "On And On!!",
+          "opening_normal_slots": true
+        },
+        {
+          "music_id": 3040,
+          "title": "E.V.E",
+          "opening_normal_slots": true
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/06/8a8dd78a4f423d0be8d4b6494f2ab57d.png",
+        "official_sha256": "a4154b5ebf861f5170a34bce73f3aebabc2ede4cdc1688ce23b84c837db0794b",
+        "center_crop_mean_error": 0.00198
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/12670/",
+      "announcement_sha256": "65923ee1f73ee6a27f8ee23e92f65d55ae493030c8bb3ff6820db412e5c36156",
+      "published": "2026-08-31",
+      "day": "2026-09-03",
+      "mode": "event",
+      "printed": "2026/9/3 ～ 10/7",
+      "location": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A091/event/event00019405/CHU_info_event_gg0001.dds",
+      "event_xml": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A091/event/event00019405/Event.xml",
+      "batch": "pkg:SDHD_2.50:A091",
+      "sha256": "83a4a00a08a0b82856a180c3a1f25965f8c09238e833828bd702ad62de46431b",
+      "targets": [
+        {
+          "music_id": 3047,
+          "title": "Smell of the Game"
+        },
+        {
+          "music_id": 3048,
+          "title": "Find Your One Way"
+        },
+        {
+          "music_id": 3049,
+          "title": "Drift"
+        },
+        {
+          "music_id": 3050,
+          "title": "The Disaster of Passion"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/06/74c85ae49b959e3cc5c0eed4181d7efd.png",
+        "official_sha256": "09832eff941acb0c20b406741ab14e7b3067a836e12b56d307f5113f742dc2df",
+        "center_crop_mean_error": 0.00188
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/12997/",
+      "announcement_sha256": "ad2094f6c0e449419a28718139ceb6fb8dd920c214dc029b64c57338c97f1790",
+      "published": "2026-09-01",
+      "day": "2026-09-03",
+      "mode": "standard",
+      "printed": "9月3日 楽曲追加",
+      "location": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A091/event/event00019411/CHU_info_music_mate0007.dds",
+      "event_xml": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A091/event/event00019411/Event.xml",
+      "batch": "pkg:SDHD_2.50:A091",
+      "sha256": "f173f33259295a8a91da596b804b7158f172e19b5c0051a0ebd073cff5bce26f",
+      "targets": [
+        {
+          "music_id": 3051,
+          "title": "JACKY [Remix]",
+          "opening_normal_slots": true
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/08/01c6c963a1745d36e7156ef7dd5adf6f.png",
+        "official_sha256": "f512e59f7cfe6bfc35bcd54e7a8f09bc965d01855d479269c7c217789ece0030",
+        "center_crop_mean_error": 0.00182
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/12707/",
+      "announcement_sha256": "0bb3da0dbdbf6c95e5ca8b08d3e9cb02e5a09ae80d2bc14c28dc89ae7de3416a",
+      "published": "2026-09-22",
+      "day": "2026-09-25",
+      "mode": "event",
+      "printed": "2026/9/25 ～ 11/11",
+      "location": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A093/event/event00019480/CHU_info_event_ddlc0001.dds",
+      "event_xml": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A093/event/event00019480/Event.xml",
+      "batch": "pkg:SDHD_2.50:A093",
+      "sha256": "d3d1dcca35ae3593b7832d91d8d265c8f96dae72f741c2e9bf82febe69fe9b58",
+      "targets": [
+        {
+          "music_id": 3057,
+          "title": "Your Reality (Kenji Mizuno Remix)"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/06/642e4a0e5ce1fa6bb3d19f007f7afeaa.png",
+        "official_sha256": "2065dcad1dfd5ddd24ca97dd33f1d9fc977135b3a16db1c9a38f1b28534c50ac",
+        "center_crop_mean_error": 0.00152
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/12719/",
+      "announcement_sha256": "84f0eadf2513519771bacd6792f1cee9c3f574e317c9e8932a4d8cd4b3af519e",
+      "published": "2026-09-21",
+      "day": "2026-09-25",
+      "mode": "standard",
+      "printed": "9月25日 楽曲追加",
+      "location": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A093/event/event00019483/CHU_info_music_mate0009.dds",
+      "event_xml": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A093/event/event00019483/Event.xml",
+      "batch": "pkg:SDHD_2.50:A093",
+      "sha256": "03e51f36fc4c069205144037225751f44bf0c585ba496ab0a722741e88848da3",
+      "targets": [
+        {
+          "music_id": 3058,
+          "title": "LaVI-Bavellabion",
+          "opening_normal_slots": true
+        },
+        {
+          "music_id": 3059,
+          "title": "奇々解体",
+          "opening_normal_slots": true
+        },
+        {
+          "music_id": 2317,
+          "title": "きゅうくらりん",
+          "difficulty": "ULT",
+          "difficulty_label": "ULTIMA"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/06/9d778442ac2e161913ec90b0700ad8a1.png",
+        "official_sha256": "f0b7dbf506d5166d6504fe88ec00adf77b71f20206990b53d4f69975ce2df058",
+        "center_crop_mean_error": 0.00212
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/10982/",
+      "announcement_sha256": "6fac05a5643858489ed0bff31639dd0a26bb64467d652b5ecf53e2a41272fdaa",
+      "published": "2025-12-15",
+      "day": "2025-12-18",
+      "mode": "standard",
+      "printed": "12月18日 楽曲追加",
+      "location": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A241/event/event00018200/CHU_info_music_xvrsx0004.dds",
+      "event_xml": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A241/event/event00018200/Event.xml",
+      "batch": "pkg:SDHD_2.45:A241",
+      "sha256": "666201553ee5beb6447bc650b741dec114e18e28a46dc4e61b67abee08f3cdee",
+      "targets": [
+        {
+          "music_id": 2922,
+          "title": "㋰責任集合体",
+          "opening_normal_slots": true
+        },
+        {
+          "music_id": 2923,
+          "title": "バカ通信",
+          "opening_normal_slots": true
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2025/12/cdce652e28372b334f72f89d8f70a02f.png",
+        "official_sha256": "19416cc190e789d8a36438a4996e9e8692b5f2a84641cc47a24438ce4f36a3fd",
+        "center_crop_mean_error": 0.00254
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/10995/",
+      "announcement_sha256": "4fb7126466ec46643d80e7abeedf46e98462a4dc47078dd7876c0836cf93ec8a",
+      "published": "2025-12-16",
+      "day": "2025-12-18",
+      "mode": "event",
+      "printed": "2025/12/18 ～ 2026/2/4",
+      "location": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A241/event/event00018202/CHU_info_event_lovelive0002.dds",
+      "event_xml": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A241/event/event00018202/Event.xml",
+      "batch": "pkg:SDHD_2.45:A241",
+      "sha256": "3e6c867cd1853f1111fef9c3b4ceef1334eff86194b5780f68cb5b26d8f79253",
+      "targets": [
+        {
+          "music_id": 2920,
+          "title": "アイドゥーミー！"
+        },
+        {
+          "music_id": 2921,
+          "title": "Edelied"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2025/09/f75d8ca1423a866fe7187b6d8f50b7ab.png",
+        "official_sha256": "14bb1d2c1b35ae10b682d47f6185adaccd512bac866ae1036764664c56a146ad",
+        "center_crop_mean_error": 0.00134
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/11055/",
+      "announcement_sha256": "526ccfca7d5dc80554cd260d151b0726438e2d20f54f79bcbe85c48cdcb9f24e",
+      "published": "2026-01-05",
+      "day": "2026-01-08",
+      "mode": "event",
+      "printed": "2026/1/8 ～ 2/18",
+      "location": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A251/event/event00018303/CHU_info_event_bookoff0002.dds",
+      "event_xml": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A251/event/event00018303/Event.xml",
+      "batch": "pkg:SDHD_2.45:A251",
+      "sha256": "546920ca885e204123c8fcb986f1bbc0629266c5dd130981921c04505d06dbdc",
+      "targets": [
+        {
+          "music_id": 2925,
+          "title": "A-Yah-YAh-YaH-YAH!"
+        },
+        {
+          "music_id": 2926,
+          "title": "アマノジャクリバース feat. ｙｔｒ"
+        },
+        {
+          "music_id": 2927,
+          "title": "The Music of Violent Eating"
+        },
+        {
+          "music_id": 2928,
+          "title": "New World"
+        },
+        {
+          "music_id": 2929,
+          "title": "メイドノココロハアヤツリドール"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2025/11/583e1cf1326afee1b93a863ec1748dd6.png",
+        "official_sha256": "8b3c91adee5b44558c9bafb131333c85d82d3bac4103c2cb7e33cde1347f4ca8",
+        "center_crop_mean_error": 0.00182
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/11127/",
+      "announcement_sha256": "8b8c2e985983c938bed57db087fc5e8f021fff181285d324f5fb8de76e896440",
+      "published": "2026-01-20",
+      "day": "2026-01-22",
+      "mode": "standard",
+      "printed": "1月22日 楽曲追加",
+      "location": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A252/event/event00018353/CHU_info_music_xvrsx0005.dds",
+      "event_xml": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A252/event/event00018353/Event.xml",
+      "batch": "pkg:SDHD_2.45:A252",
+      "sha256": "686fd6fdc56db571c491b9edbe06a545040235cca866743d567df49ed3a81dea",
+      "targets": [
+        {
+          "music_id": 2932,
+          "title": "愛と煩悩と輪廻と常識の極彩世界",
+          "opening_normal_slots": true
+        },
+        {
+          "music_id": 2933,
+          "title": "ゼイタクするまで抱きしめて",
+          "opening_normal_slots": true
+        },
+        {
+          "music_id": 2934,
+          "title": "LAST PROPOZE",
+          "opening_normal_slots": true
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2025/11/56ea19ad6386ea750b5a9b3c347820be.png",
+        "official_sha256": "bd8bc323402a0f83e6638757f297fd73bb6fdac0e4d504460c99779c00698592",
+        "center_crop_mean_error": 0.0022
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/11114/",
+      "announcement_sha256": "ed546e248c27175c5a4c19bb2f4e14fd11cdb3b8a10a882ccf5f51cb3f23009a",
+      "published": "2026-01-19",
+      "day": "2026-01-22",
+      "mode": "event",
+      "printed": "2026/1/22 ～ 3/4",
+      "location": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A252/event/event00018350/CHU_info_event_akuten0001.dds",
+      "event_xml": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A252/event/event00018350/Event.xml",
+      "batch": "pkg:SDHD_2.45:A252",
+      "sha256": "38a10a20d3d0c3cc1412db238d515765719a3efbf320c74e1ca628ca366d13be",
+      "targets": [
+        {
+          "music_id": 3003,
+          "title": "Choose!!!"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2025/11/29681ce01e142d391ac7b2a9ea817447.png",
+        "official_sha256": "8c0762152491d451aedb36a2fe15f2d5cda9ef11d894299a8b087c4a865b3afb",
+        "center_crop_mean_error": 0.0015
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/11231/",
+      "announcement_sha256": "4aaeb1854c3636faf0a5554213aee575b575b25ad8cf901d366b74abcb89a6b0",
+      "published": "2026-02-02",
+      "day": "2026-02-05",
+      "mode": "standard",
+      "printed": "2月5日 楽曲追加",
+      "location": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A261/event/event00018407/CHU_info_music_xvrsx0006.dds",
+      "event_xml": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A261/event/event00018407/Event.xml",
+      "batch": "pkg:SDHD_2.45:A261",
+      "sha256": "87a1778b6418e1913aa840356ca4ea2b757ad38cf0799235386132606bb2b50c",
+      "targets": [
+        {
+          "music_id": 2939,
+          "title": "ソレイユ",
+          "opening_normal_slots": true
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2025/11/3d15b5387b2f34f9d786bf93152bb1ed.png",
+        "official_sha256": "56a34eb1600b605806667a331b0c260735e0b4c87e9480f1572546f8c19c9aa5",
+        "center_crop_mean_error": 0.00171
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/11219/",
+      "announcement_sha256": "de8077c39e9de3d3792591df76290839928c8d9397265db5292da82b4d815a67",
+      "published": "2026-02-16",
+      "day": "2026-02-19",
+      "mode": "event",
+      "printed": "2026/2/19 ～ 3/31",
+      "location": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A262/event/event00018450/CHU_info_event_react0001.dds",
+      "event_xml": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A262/event/event00018450/Event.xml",
+      "batch": "pkg:SDHD_2.45:A262",
+      "sha256": "9fc460a9bf18fc840e57d5f36cfebe4b167100160b42f26603894296f6a78e53",
+      "targets": [
+        {
+          "music_id": 2940,
+          "title": "もっと！"
+        },
+        {
+          "music_id": 2941,
+          "title": "はっぴーでいず！"
+        },
+        {
+          "music_id": 2942,
+          "title": "Behavior"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/02/2eaa8e50cd93ff97679a48faba08b3ed.png",
+        "official_sha256": "11c722a9af083b8c718610845816f92dcf679510e897ce6984ddd7df0cdf3cbf",
+        "center_crop_mean_error": 0.00134
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/11463/",
+      "announcement_sha256": "9d517a51991590ecf7b76ceb225ef61450b44956a0b5bd80fbfe55b26c1abb4c",
+      "published": "2026-02-17",
+      "day": "2026-02-19",
+      "mode": "standard",
+      "printed": "2月19日 楽曲追加",
+      "location": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A262/event/event00018453/CHU_info_music_xvrsx0007.dds",
+      "event_xml": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A262/event/event00018453/Event.xml",
+      "batch": "pkg:SDHD_2.45:A262",
+      "sha256": "adf44ef08373494be2a4f3f17d34a855ffa33c2bda79f3b50afc8aeb7a7a60c0",
+      "targets": [
+        {
+          "music_id": 2943,
+          "title": "M@GICAL☆CURE! LOVE ♥ SHOT!",
+          "opening_normal_slots": true
+        },
+        {
+          "music_id": 2944,
+          "title": "LEMON MELON COOKIE",
+          "opening_normal_slots": true
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/02/4d01604c532d737778c052c8a7bf9895.png",
+        "official_sha256": "fa954aa5730cba5e13103bee56558b13ee4a4090192a0a82d7d3489e0032695b",
+        "center_crop_mean_error": 0.0032
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/11234/",
+      "announcement_sha256": "629c058dd43cb3e9e5c8194543d5087d317a10ef030c463b536fca3b1b9014a2",
+      "published": "2026-03-02",
+      "day": "2026-03-05",
+      "mode": "event",
+      "printed": "2026/3/5 ～ 4/15",
+      "location": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A271/event/event00018503/CHU_info_event_haruhi0001.dds",
+      "event_xml": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A271/event/event00018503/Event.xml",
+      "batch": "pkg:SDHD_2.45:A271",
+      "sha256": "38feaadebd2362bca871a8224f35a87af88efed3fd9e97d255f860cf3fd44d78",
+      "targets": [
+        {
+          "music_id": 2945,
+          "title": "無敵的ハピネス！(SOS団5人Ver.)"
+        },
+        {
+          "music_id": 2946,
+          "title": "Chasing destiny"
+        },
+        {
+          "music_id": 2947,
+          "title": "Colorful Starting Line"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/03/7f50921341f14164e517f2e2fec427ca.png",
+        "official_sha256": "c1f10ad5fd46fb96c01bd885bbaff6602df9b9ba4cce16d91f73e30ce8b57d39",
+        "center_crop_mean_error": 0.00183
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/11243/",
+      "announcement_sha256": "2aeb057d9d32779abd3c14c85a5150f39f49d1926d665803b7a84f02b5e05cab",
+      "published": "2026-03-03",
+      "day": "2026-03-05",
+      "mode": "standard",
+      "printed": "3月5日 楽曲追加",
+      "location": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A271/event/event00018506/CHU_info_music_xvrsx0008.dds",
+      "event_xml": "SDHD - CHUNITHM X-VERSE-X/option/option(A001~A302_final).zip!/option/A271/event/event00018506/Event.xml",
+      "batch": "pkg:SDHD_2.45:A271",
+      "sha256": "df9c00f4b22e0f7dbfa5b87d98b4aa9c477c1e133f2fc2395f0d4f906e3b95e1",
+      "targets": [
+        {
+          "music_id": 2955,
+          "title": "Future Refrain",
+          "opening_normal_slots": true
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2025/11/2348138289dbabab55defece57a236cc.png",
+        "official_sha256": "e5543fe5c395b9dff4441a8fb01ebaab35059e0019d22695b5bdcfb1ded5152e",
+        "center_crop_mean_error": 0.00174
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/12397/",
+      "announcement_sha256": "fd38103c1f2b366f8ac807b63be84569a413edc762226a84962016d6ee5bdc1b",
+      "published": "2026-07-27",
+      "day": "2026-07-30",
+      "mode": "event",
+      "printed": "2026/7/30 ～ 9/16",
+      "location": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A074/event/event00019282/CHU_info_event_mlsb0001.dds",
+      "event_xml": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A074/event/event00019282/Event.xml",
+      "batch": "pkg:SDHD_2.50:A074",
+      "sha256": "f8852c18df689e93e9740d57756f61a598370036871e5a4821de603c7de91424",
+      "targets": [
+        {
+          "music_id": 3035,
+          "title": "ときめき★メテオストライク"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/06/8c6be547361c872ccb96a5174354c2ba.png",
+        "official_sha256": "95d68fdd5659a026cf2b4125f7e5b086f32abaf813308e26ed0e06d60859b83c",
+        "center_crop_mean_error": 0.00155
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/12407/",
+      "announcement_sha256": "408473907cec194e03ef527be0b4d4be200db24c51fab693ab28957481e97cd6",
+      "published": "2026-07-28",
+      "day": "2026-07-30",
+      "mode": "standard",
+      "printed": "7月30日 楽曲追加",
+      "location": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A074/event/event00019280/CHU_info_music_mate0005.dds",
+      "event_xml": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A074/event/event00019280/Event.xml",
+      "batch": "pkg:SDHD_2.50:A074",
+      "sha256": "138a78f3e77d69de95319dcc831f71737df308bb002c495ff03c1a10422c37b9",
+      "targets": [
+        {
+          "music_id": 3036,
+          "title": "幕を下ろそう、パレードへ",
+          "opening_normal_slots": true
+        },
+        {
+          "music_id": 3037,
+          "title": "Ribbon",
+          "opening_normal_slots": true
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/06/3262c83df686f7ccdc94c2a0d38a7e92.png",
+        "official_sha256": "c77dbc39857753371f98c1a8bdb0d41ba3455ca22536a108d71ec56c1d9ed485",
+        "center_crop_mean_error": 0.00211
+      }
+    },
+    {
+      "announcement": "https://info-chunithm.sega.jp/12473/",
+      "announcement_sha256": "873a333ed259f48fa1e318ec962c43f8143bcc1d73e63c5f5e73a731947fe09b",
+      "published": "2026-08-03",
+      "day": "2026-08-06",
+      "mode": "event",
+      "printed": "2026/8/6 ～ 9/24",
+      "location": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A081/event/event00019307/CHU_info_event_bluearchive0002.dds",
+      "event_xml": "SDHD - CHUNITHM Mate/option/option(A001~A101).zip!/option/A081/event/event00019307/Event.xml",
+      "batch": "pkg:SDHD_2.50:A081",
+      "sha256": "3b1b7b2c0f8fe0c36067d654b209d69720cb87c26403076413c4ffedebf0e299",
+      "targets": [
+        {
+          "music_id": 3041,
+          "title": "Glitch Street"
+        },
+        {
+          "music_id": 3042,
+          "title": "Bunny Bunny Carrot Carrot"
+        }
+      ],
+      "official_image": {
+        "url": "https://info-chunithm.sega.jp/wp-content/uploads/2026/06/8981883b74c0092b5fc84ec352c18f80.png",
+        "official_sha256": "7bf5d472403889b9778f5dc149abb429a13e7e3007f8ce59cdcc615070661daa",
+        "center_crop_mean_error": 0.00165
+      }
+    }
+  ]
+}
