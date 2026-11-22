@@ -72,3 +72,5 @@ constants = history.constants_on("2026-10-08")
 新框日期证据补全与字段实证见 [官方公告与日期证据](SDHD_OFFICIAL_DATES.md)。
 
 盘内告知图普查、OCR 候选及日期补证见 [HDD 告知图片](HDD_NOTICE_IMAGES.md)。
+
+首次配信、通常解禁、Wiki 日期证据及最终本地库见 [日服配信日期审计](JP_RELEASE_DATE_AUDIT.md)。

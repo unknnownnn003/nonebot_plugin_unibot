@@ -18,7 +18,26 @@ from hdd_notice_images import compare, dates, decode, folded, possible_days
 from old_hdd_scan import encoded
 from old_hdd_timeline import batch, event
 
-NORMAL = {'BAS', 'ADV', 'EXP', 'MAS'}
+def normal_launch_witnesses(db, identity, day):
+    """Find normal slots with a C2S in the first witnessed launch-era edition."""
+    return db.execute('''SELECT * FROM (
+        SELECT e.*,o.source,o.revision,p.earliest_on,
+               row_number() OVER (PARTITION BY e.identity ORDER BY v.ordinal,b.sequence,o.source) AS witness_rank
+        FROM history_entities e
+        JOIN history_observations o USING(identity) JOIN history_revisions r USING(revision)
+        JOIN history_batches b USING(batch) JOIN versions v USING(version)
+        LEFT JOIN sdhd_first_release p USING(identity)
+        WHERE e.parent=? AND e.difficulty IN ('BAS','ADV','EXP','MAS') AND b.kind='package'
+          AND v.end_on>=? AND o.state IN ('hdd_enabled','present')
+          AND v.ordinal=(
+              SELECT min(pv.ordinal) FROM history_observations po
+              JOIN history_batches pb USING(batch) JOIN versions pv USING(version)
+              WHERE po.identity=e.parent AND pb.kind='package' AND pv.end_on>=?
+                AND po.state IN ('hdd_enabled','present'))
+          AND json_extract(r.payload,'$.c2s_sha256') IS NOT NULL
+    ) WHERE witness_rank=1 ORDER BY slot,identity''', (identity, day, day)).fetchall()
+
+
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS hdd_notice_review (
     asset TEXT REFERENCES history_assets, location TEXT, announcement TEXT,
@@ -37,14 +56,14 @@ def matches(db, package, music_id, difficulty):
                       (package, music_id, difficulty)).fetchall()
 
 
-def materialize(db, row, day, edition, claim):
+def materialize(db, row, day, edition, claim, *, inherited=False):
     identity = row['identity']
     known = {r[0] for r in db.execute('''SELECT exact_on FROM sdhd_first_release WHERE identity=? AND exact_on IS NOT NULL
         UNION SELECT effective_on FROM history_events WHERE identity=? AND kind='released' AND effective_on IS NOT NULL''',
                                     (identity, identity))}
     if known - {day}:
         return 'conflict_existing_exact'
-    if row['earliest_on'] is None or row['earliest_on'] > day:
+    if not inherited and (row['earliest_on'] is None or row['earliest_on'] > day):
         return 'outside_first_release_bounds'
     if known:
         return 'corroborated'
@@ -170,19 +189,15 @@ def apply_reviews(db, reviews, root, official):
                 if difficulty and row['parent'] != songs[0]['identity']:
                     raise ValueError(f'Wrong parent for {music_id}/{difficulty}')
                 children = []
-                if target.get('opening_normal_slots'):
-                    if difficulty or claim['mode'] != 'standard':
-                        raise ValueError('Normal slot coverage requires a standard song launch')
-                    for slot in sorted(NORMAL):
-                        charts = matches(db, claim['batch'], music_id, slot)
-                        if (len(charts) == 1 and charts[0]['parent'] == row['identity'] and charts[0]['source'] == row['source']
-                                and json.loads(charts[0]['payload']).get('c2s_sha256')):
-                            children.append(charts[0])
+                if difficulty is None and json.loads(row['payload']).get('exType') == '0':
+                    candidates = normal_launch_witnesses(db, row['identity'], day)
+                    children = [chart for chart in candidates
+                                if sum(c['difficulty'] == chart['difficulty'] for c in candidates) == 1]
                 evidence = {key: value for key, value in claim.items() if key != 'targets'} | {'target': target}
                 primary_status = materialize(db, row, day, edition, evidence)
                 for witness in [row, *children]:
                     status = (primary_status if witness == row else
-                              materialize(db, witness, day, edition, evidence)
+                              materialize(db, witness, day, edition, evidence, inherited=True)
                               if primary_status in {'adopted', 'corroborated'} else 'parent_unresolved')
                     db.execute('INSERT OR IGNORE INTO hdd_notice_review VALUES (?,?,?,?,?,?,?,?)',
                                (claim['sha256'], claim['location'], claim['announcement'], witness['identity'],
