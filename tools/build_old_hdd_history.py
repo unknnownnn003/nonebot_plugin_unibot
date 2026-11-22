@@ -159,6 +159,11 @@ def paradise_options(db, indexed, evidence):
         tag = normalize_name(reference.tag or '') if reference.ex_type == 2 else ''
         removal, removal_ref = evidence.removal(title, tag, STARS.get(reference.star) if tag else None)
         known_release, release_ref, release_date = evidence.first_release(title, tag, STARS.get(reference.star) if tag else None)
+        reviewed = evidence.reviewed_release(key, [row.source for row in rows])
+        if reviewed:
+            release_date = reviewed['on']
+            release_ref = evidence.reviewed_sources[reviewed['reference']]
+            known_release = 'PARADISE' if release_date <= '2021-05-12' else 'PARADISE LOST'
         release_proof = f'{release_ref} {release_date}' if release_ref and release_date else release_ref
         reference_basis = [x for x in (removal_ref, release_proof, evidence.max_titles.get(title) if not tag else None) if x]
         conflicting_identity = any(normalize_name(row.title) != title or row.ex_type != reference.ex_type

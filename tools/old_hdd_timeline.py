@@ -12,6 +12,11 @@ from old_hdd_evidence import ROOT, normalize_name
 from old_hdd_scan import STARS, display_level, encoded, integer, parse_music, safe_ref
 
 ONE_DAY = timedelta(days=1)
+WITNESS_IDS = {
+    'CourseData': ('infos/*/selectMusic/musicName/id', 'infos/*/selectMusicList/musicList/list/*/courseMusicData/name/id'),
+    'EventData': ('substances/music/musicNames/list/*/id',),
+    'MapData': ('infos/*/musicName/id',),
+}
 
 
 def shift(day, days):
@@ -212,6 +217,19 @@ def difference(db, previous, current, batch_id, basis, bounds):
               previous['source'], current['source'], basis, bounds=bounds)
 
 
+def validate_reviewed_witness(db, reviewed):
+    witness = reviewed.get('witness')
+    if not witness:
+        return
+    row = db.execute('SELECT xml FROM raw_xml WHERE path=?', (witness,)).fetchone()
+    if row is None:
+        raise ValueError(f'Reviewed release witness is unavailable: {witness}')
+    root = ElementTree.fromstring(row[0])
+    ids = {integer(node.text) for xpath in WITNESS_IDS.get(root.tag, ()) for node in root.findall(xpath)}
+    if reviewed['music_id'] not in ids:
+        raise ValueError(f'Reviewed release witness no longer references its music ID: {witness}')
+
+
 def build_windows(db, records, public, title_owners, epochs, sequences):
     identity, kind = records[0]['identity'], records[0]['kind']
     versions = {v['version']: v for v in epochs}
@@ -228,7 +246,16 @@ def build_windows(db, records, public, title_owners, epochs, sequences):
         version for version, values in physically.items() if any(item['raw_state'] == 'present' for item in values)}
     first_observed = next((v['version'] for v in epochs if v['version'] in eligible_editions), None)
     signals = defaultdict(dict)
-    if first_observed and len(dated) == 1:
+    reviewed = public.reviewed_release(records[0]['song'].music_id, (row['source'] for row in records))
+    if reviewed:
+        day = reviewed['on']
+        if not any(span['start_on'] <= day <= span['end_on'] and physically[span['version']] for span in epochs):
+            raise ValueError(f'Reviewed date lacks a matching edition: {identity} on {day}')
+        validate_reviewed_witness(db, reviewed)
+        signals[day]['released'] = encoded(public.reviewed_detail(reviewed))
+        if rejected := reviewed.get('rejected_restoration'):
+            restored.pop(rejected['on'], None)
+    elif first_observed and len(dated) == 1:
         day, loc = next(iter(dated.items()))
         current = versions[first_observed]
         if current['start_on'] <= day <= current['end_on']:
@@ -248,12 +275,24 @@ def build_windows(db, records, public, title_owners, epochs, sequences):
     for day, loc in sorted(restored.items()):
         if applies(day):
             signals[day]['restored'] = loc
+    if reviewed:
+        for day, action, ref, witness in reviewed.get('availability_events', ()):
+            if witness:
+                validate_reviewed_witness(db, reviewed | {'witness': witness})
+            signals[day][action] = encoded({'reference': public.reviewed_sources[ref], 'witness': witness})
+        for start, end, ref in reviewed.get('limited_periods', ()):
+            source = public.reviewed_sources[ref]
+            if start != reviewed['on']:
+                signals[start]['restored'] = source
+            signals[end]['removed'] = source
     for day, actions in signals.items():
         if 'released' in actions and any(other < day and 'restored' in values for other, values in signals.items()):
             actions['release_after_reported_restoration'] = actions['released']
     exact = {day: next(iter(actions.items())) if len(actions) == 1 else
              ('availability_conflict', encoded(actions)) for day, actions in signals.items()}
     first_release = next((d for d, (k, _) in exact.items() if k == 'released'), None)
+    routes = sorted((reviewed or {}).get('route_events', ()))
+    limited = (reviewed or {}).get('limited_periods', ())
     last_record = None
     prior_state = 'not_observed'
     last_playable = False
@@ -270,10 +309,20 @@ def build_windows(db, records, public, title_owners, epochs, sequences):
         day_events = {day: data for day, data in exact.items() if start <= day <= end}
         for day, (change, source) in sorted(day_events.items()):
             key = batch(db, f'day:{day}', edition, 'public_day', 'Dated public release/removal/restoration evidence', day=day)
+            new_source = selected['source'] if selected else None
+            if change == 'released' and reviewed:
+                new_source = reviewed['source']
             event(db, identity, key, change, 'availability',
                   {'removed':'present','released':'unavailable','restored':'unavailable'}.get(change),
                   {'removed':'unavailable','released':'present','restored':'present'}.get(change),
-                  before['source'] if before else None, selected['source'] if selected else None, source, day=day)
+                  before['source'] if before else None, new_source, source, day=day)
+        if reviewed:
+            for day, action, access, ref in routes:
+                if start <= day <= end:
+                    key = batch(db, f'day:{day}', edition, 'public_day', public.reviewed_sources[ref], day=day)
+                    opening = action == 'route_opened'
+                    event(db, identity, key, action, 'access', None if opening else access,
+                          access if opening else None, None, reviewed['source'], public.reviewed_sources[ref], day=day)
         if start in boundaries and applies(start) and start not in day_events:
             event(db, identity, checkpoint, 'removal_boundary_candidate', 'availability', 'present', 'unavailable',
                   before['source'] if before else None, selected['source'] if selected else None,
@@ -311,9 +360,11 @@ def build_windows(db, records, public, title_owners, epochs, sequences):
         if selected:
             difference(db, prior, selected, checkpoint, 'HDD endpoint difference; effective day unverified', (start,end))
 
-        cuts = sorted({start, end, shift(end, 1), *day_events, *(shift(day, 1) for day in day_events)})
+        cuts = {start, end, shift(end, 1), *day_events, *(shift(day, 1) for day in day_events)}
+        cuts.update(day for day, _, _, _ in routes if start <= day <= end)
         dated_presence = False
-        for begin, after in zip(cuts, cuts[1:]):
+        sorted_cuts = sorted(cuts)
+        for begin, after in zip(sorted_cuts, sorted_cuts[1:]):
             if begin in day_events:
                 public_state = {'removed':'unavailable','released':'present','restored':'present'}.get(day_events[begin][0])
                 dated_presence = public_state == 'present'
@@ -346,6 +397,12 @@ def build_windows(db, records, public, title_owners, epochs, sequences):
                                     | ({before['revision']} if before and prior_state == 'present' else set()))
                 if selected and selected['revision'] not in candidates and state == 'present':
                     candidates.append(selected['revision'])
+            if limited:
+                availability = 'present' if any(a <= begin < b for a,b,_ in limited) else 'unavailable'
+                basis = 'documented limited availability window'
+            route_changes = [action for day, action, _, _ in routes if start <= day <= begin]
+            if route_changes and route_changes[-1] == 'route_ended' and availability != 'unavailable':
+                availability, basis = 'possible', 'documented route ended; other access unverified'
             if availability != 'unavailable':
                 db.execute('INSERT INTO history_windows VALUES (?,?,?,?,?,?,?,?)',
                            (edition, identity, begin, shift(after,-1), availability,

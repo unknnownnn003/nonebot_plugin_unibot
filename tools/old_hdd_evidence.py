@@ -58,6 +58,9 @@ def wiki_rows(document, reference):
 
 class PublicEvidence:
     def __init__(self, directory, db):
+        reviewed = json.loads((ROOT / 'tools/old_hdd_reviewed_dates.json').read_text(encoding='utf-8'))
+        self.reviewed_sources = reviewed['references']
+        self.reviewed_releases = {row['source']: row for row in reviewed['releases']}
         self.we = defaultdict(list)
         self.release = defaultdict(list)
         self.we_release = defaultdict(list)
@@ -205,6 +208,23 @@ class PublicEvidence:
     def first_release(self, title, tag, stars):
         rows = self.we_release.get((title, tag, stars), ()) if tag else self.release.get(title, ())
         return min(rows, key=lambda row: (row[2] is None, row[2] or '', row[1])) if rows else (None, None, None)
+
+    def reviewed_release(self, music_id, paths):
+        matches = [self.reviewed_releases[path] for path in sorted(set(paths)) if path in self.reviewed_releases]
+        if len(matches) > 1 or any(row['music_id'] != music_id for row in matches):
+            raise ValueError(f'Ambiguous reviewed release for HDD music ID {music_id}')
+        return matches[0] if matches else None
+
+    def reviewed_detail(self, row):
+        detail = dict(row)
+        for field in ('reference', 'secondary_reference', 'official_post'):
+            if field in detail:
+                detail[field] = self.reviewed_sources[detail[field]]
+        if 'rejected_restoration' in detail:
+            rejected = dict(detail['rejected_restoration'])
+            rejected['reference'] = self.reviewed_sources[rejected['reference']]
+            detail['rejected_restoration'] = rejected
+        return detail
 
     def removal(self, title, tag, stars):
         rows = self.removed.get((title, tag, stars), ())

@@ -7,12 +7,12 @@
 ```powershell
 python -X utf8 tools/build_old_hdd_history.py `
   --root 'E:\SDBT 11 in 1' `
-  --output .tools/old-hdd/lifecycle-complete `
+  --output .tools/old-hdd/lifecycle-dates-final `
   --evidence .tools/old-hdd
 
 python -X utf8 tools/verify_old_hdd_timeline.py `
-  .tools/old-hdd/lifecycle-complete/catalog.sqlite `
-  .tools/old-hdd/hdd-authoritative/catalog.sqlite
+  .tools/old-hdd/lifecycle-dates-final/catalog.sqlite `
+  .tools/old-hdd/lifecycle-complete/catalog.sqlite
 ```
 
 输出必须位于 HDD 树外，且目标目录尚不存在。先在同一父目录构建，通过 SQLite 完整性和外键检查后再发布。最终数据库与报告各有 SHA-256。验证器可传 `--repeat 第二次构建的数据库` 比对数据库字节。默认只生成数据库、统计与校验清单。有一次性审计需要时可加 `--audit-csv`。默认计算 XML、C2S、图片和配置的 SHA-256，`--hash-all` 额外哈希包内其他资源，VHD 仅登记大小。
@@ -34,7 +34,7 @@ python -X utf8 tools/verify_old_hdd_timeline.py `
 ```python
 from nonebot_plugin_unibot.services.old_hdd_history import OldHddHistory
 
-history = OldHddHistory(".tools/old-hdd/lifecycle-complete/catalog.sqlite")
+history = OldHddHistory(".tools/old-hdd/lifecycle-dates-final/catalog.sqlite")
 catalog = history.catalog_on("2021-08-05", include_possible=True)
 song_and_charts = history.identities(96)
 lifecycle = history.lifecycle("0:96:1:3:MAS")
@@ -52,10 +52,23 @@ constants = history.constants("PARADISE LOST")
 
 原始 HDD、外部证据、验收基线及正式数据库保留在本地。运行库、临时 SQLite 和解出的游戏素材放入 `.tools/old-hdd/`。清理以完整构建目录的文件大小和 SHA-256 对照为依据，保留不同修订或用途不明的材料。
 
-## 真实数据验收
+## 首配日期复核
+
+日服 WikiWiki 的配信日期按明确记录采用。遇到来源冲突时，核查 HDD 中对应的曲目 ID、课程和开放事件，并查找同期官方公告。复核条目在 `tools/old_hdd_reviewed_dates.json`，构建时通过实际 Music.xml 路径限定身份。有课程、活动或地图见证时，检查其音乐引用中确有该 ID。日期修订的 `released.evidence` 包含来源 URL、HDD 路径和有证据支持的首发开放方式。课程专用谱面能通过课程游玩，普通模式的单独开放记录保存在 `access` 事件里。
+
+- 普通歌曲 8 个待确认 ID 及所属 32 张谱面均补齐日期。《GO》保留两个不同谱面版本。723 对应 2019-04-11 联动地图先行，808 对应 2019-06-06 通常开放。联动地图关闭后已解禁玩家对 723 的访问仍缺直接证据。 [《GO》历史记录](https://wikiwiki.jp/chunithmwiki/GO) · [SEGA 通常开放公告](https://chunithm.sega.jp/news/2019-06-03/)
+- 全部 18 张待确认 WE 补齐日期。官方 X 告知图明确写出 2017-05-11 的 Crazy -II- Set 和 2018-06-21 的 Double Set；HDD 对应课程分别引用 8081 和 8121。 [Crazy -II- Set 告知图](https://pbs.twimg.com/media/C_RdU6OUIAAvjBS.jpg?name=orig) · [Double Set 告知图](https://pbs.twimg.com/media/DgBbKCJU0AAIpZl.jpg?name=orig)
+- ナイト・オブ・ナイツ［時］、B.B.K.K.B.K.K.［戻］和 FREEDOM DiVE［狂］的首配采用 PLUS 追加表及 HDD 5 月下半、6 月下半开放事件。三张谱面在 AIR 切换时停配，2017-02-09 随 AIR PLUS 复配。官方告知图逐一标出三曲，HDD 事件 1294 引用三个音乐 ID。复配表原写 2016-02-09，已作为被排除的说法保留。 [PLUS 追加日表](https://wikiwiki.jp/chunithmwiki/CHUNITHM%20PLUS%20%E6%A5%BD%E6%9B%B2%E4%B8%80%E8%A6%A7%28%E8%BF%BD%E5%8A%A0%E6%97%A5%E9%A0%86%29) · [官方复配告知](https://x.com/chunithm/status/829162884299001857)
+- 《小野ちゃん…》采用官方 2020-06-18 限定开放日，记录至 2020-07-15 和 2021-04-01 至 04-07 两段在覆盖期内的限时开放。Genesis［分］三张独立谱面同日加入 Evolutionary Set，课程文件记录三个 ID 的随机池。LINK LINK FEVER!!!［招］于 2021-05-13 随 WELCOME Set 首次开放。 [SEGA 2020 限定公告](https://chunithm.sega.jp/news/2020-06-17/) · [SEGA 2021 复配公告](https://chunithm.sega.jp/news/2021-04-01/) · [官方 Genesis 课程公告](https://x.com/chunithm/status/1331070211148038145) · [官方 WELCOME Set 课程公告](https://x.com/chunithm/status/1391996830536269824)
+
+版本中途尚未获得独立生效日期的谱面修订、其余停配与复配，继续提供范围或未确认状态。按日期查询时，明确的限时开放区间和地图关闭证据优先。兼容截点仍可返回硬盘留存的版本记录，便于核对差异。
+
+完整 HDD 重建后核对了 1,021 条普通歌曲、4,084 张普通谱面和 205 张 WE，首配日期均可查询。和初版逐项比较，12 版截点仅在 PARADISE LOST 新增了已验证的 LINK LINK FEVER!!!［招］及其曲目记录。按日查询另外反映《ウソテイ》首次限时路线关闭、《GO》723 联动地图关闭，以及《小野ちゃん…》两段限时活动结束后的状态。
+
+## 初版真实数据验收
 
 两次完整构建生成相同的 SQLite SHA-256。最终库为 803,622,912 字节。逐项比对 12 版的有效曲目与谱面、曲绘、主要元信息、选用定数及 WE 属性和星级，已有字段一致。C2S 的 `CREATOR` 为 25,760 条普通和 738 条 WE 版本记录补齐了谱师。
 
 库内有 1,021 首普通歌曲、4,084 张普通谱面和 205 张独立 WE。附有明确首配日期的各为 1,013、4,052 和 187。165 个公开更新日有逐项事件。共登记 73 个物理包，44 个有可用的顺序信息，29 个日期和完整顺序仍待补证。实际游戏生效史仍缺服务器排期。追加另一时期的原始包、运营侧排期或有明文日期的公告，可以缩小日期窗口并校验现有推定。
 
-本地逐项差异、事件统计、SHA-256 复验和日期查询耗时见 `.tools/old-hdd/lifecycle-verification.json`。清理文件列表和校验和见同目录的 `cleanup-manifest.json`，执行结果见 `cleanup-result.json`。
+初版逐项差异、事件统计、SHA-256 复验和日期查询耗时见 `.tools/old-hdd/lifecycle-verification.json`。日期修订与初版的比对见 `.tools/old-hdd/lifecycle-dates-validation.json`。初版清理文件列表和校验和见同目录的 `cleanup-manifest.json`，执行结果见 `cleanup-result.json`。

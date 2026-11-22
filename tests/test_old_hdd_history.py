@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / 'tools'))
 from build_old_hdd_history import build, write_ordinary
 from old_hdd_evidence import PublicEvidence
 from old_hdd_scan import HDD_NAMES, STARS, c2s_creator, c2s_notation_hash, display_level, parse_music, raw_constant
+from old_hdd_timeline import validate_reviewed_witness
 from _unibot_history.old_hdd_history import OldHddHistory
 
 
@@ -67,6 +68,19 @@ class OldHddTests(unittest.TestCase):
             self.assertEqual(evidence.removal('twin', '!', 4), ('2021-05-13', 'locus'))
             self.assertEqual(evidence.removal('twin', '!', 2), (None, None))
 
+    def test_reviewed_release_witness_requires_a_music_reference(self):
+        with closing(sqlite3.connect(':memory:')) as db:
+            db.execute('CREATE TABLE raw_xml (path TEXT, xml BLOB)')
+            db.execute('INSERT INTO raw_xml VALUES (?,?)', ('Course.xml', b'''
+                <CourseData><name><id>8192</id></name><infos><CourseMusicDataInfo>
+                  <selectMusicList><musicList><list><CourseMusicListSubData>
+                    <courseMusicData><name><id>8191</id></name></courseMusicData>
+                  </CourseMusicListSubData></list></musicList></selectMusicList>
+                </CourseMusicDataInfo></infos></CourseData>'''))
+            validate_reviewed_witness(db, {'witness':'Course.xml','music_id':8191})
+            with self.assertRaisesRegex(ValueError, 'no longer references'):
+                validate_reviewed_witness(db, {'witness':'Course.xml','music_id':8192})
+
     def test_hdd_authority_retains_raw_value(self):
         with TemporaryDirectory() as tmp, closing(sqlite3.connect(':memory:')) as db:
             root = Path(tmp)
@@ -100,6 +114,18 @@ class OldHddTests(unittest.TestCase):
             music(root / HDD_NAMES[0] / 'data/A000', 40, title='Dated')
             music(root / HDD_NAMES[0] / 'data/A000', 41, title='Episodic')
             music(root / HDD_NAMES[2] / 'data/A000', 41, title='Episodic')
+            reviewed_pack = root / HDD_NAMES[0] / 'bin/option/A017'
+            music(reviewed_pack, 91, title='Yet Another ”drizzly rain”')
+            (reviewed_pack / 'data.conf').write_text('VerMajor = 1\nVerMinor = 0\nVerRelease = 5', encoding='utf8')
+            for index, revision, event_id in ((1,5,1006),(3,15,1294)):
+                option = root / HDD_NAMES[index] / 'bin/option/A017'
+                music(option, 8008, title='ナイト・オブ・ナイツ', we=True)
+                (option / 'data.conf').write_text(f'VerMajor = 1\nVerMinor = {revision}\nVerRelease = 6', encoding='utf8')
+                witness = option / 'event' / f'event{event_id:08}' / 'Event.xml'
+                witness.parent.mkdir(parents=True)
+                witness.write_text('''<EventData><substances><type>3</type><music><musicNames><list>
+                    <StringID><id>8008</id></StringID>
+                    </list></musicNames></music></substances></EventData>''', encoding='utf8')
             music(root / HDD_NAMES[3] / 'data/A000', 110, title='Reused', artist='Different', c2s=b'other')
             first_option = root / HDD_NAMES[0] / 'bin/option/A009'
             music(first_option, 1, constant=1280, c2s=b'original')
@@ -150,7 +176,7 @@ class OldHddTests(unittest.TestCase):
             self.assertEqual(before['selected_hundredths'], 1285)
             self.assertEqual(before['package'], 'A004')
             self.assertEqual(reader.chart('CHUNITHM', 1, 'EXP')['state'], 'not_observed')
-            self.assertEqual(len(reader.songs('CHUNITHM')), 4)
+            self.assertEqual(len(reader.songs('CHUNITHM')), 5)
             self.assertEqual(len({r['identity'] for r in reader.song_history(110)}), 2)
             chart = reader.chart('PARADISE', 200, 'MAS')
             self.assertEqual(chart['state'], 'not_released')
@@ -185,6 +211,16 @@ class OldHddTests(unittest.TestCase):
                                 for row in reader.lifecycle(before['chart_identity'])['observations']))
             self.assertEqual(len([r for r in reader.identities(8001) if r['kind'] == 'we']), 1)
             self.assertEqual(reader.lifecycle('0:110:1')['related'][0]['kind'], 'same_raw_id_distinct')
+            released = next(row for row in reader.lifecycle('0:91:1:3:MAS')['events'] if row['kind'] == 'released')
+            self.assertEqual(released['effective_on'], '2015-11-12')
+            self.assertIn('wikiwiki.jp/chunithmwiki', released['evidence'])
+            reviewed_we = reader.lifecycle('2:8008:1:4:WE')['events']
+            self.assertEqual([row['effective_on'] for row in reviewed_we if row['kind'] == 'released'], ['2016-05-26'])
+            self.assertEqual([row['effective_on'] for row in reviewed_we if row['kind'] == 'removed'], ['2016-08-25'])
+            self.assertEqual([row['effective_on'] for row in reviewed_we if row['kind'] == 'restored'], ['2017-02-09'])
+            self.assertTrue(any('rejected_restoration' in row['evidence'] for row in reviewed_we))
+            self.assertFalse(any(row['music_id'] == 91 for row in
+                                 reader.catalog_on('2015-11-11', include_possible=True)['rows']))
             for day in ('2016-03-01','2016-08-31'):
                 self.assertFalse(any(row['music_id'] == 41 for row in reader.catalog_on(day)['rows']))
             self.assertEqual({row['kind'] for row in reader.catalog_on('2016-09-01')['rows']

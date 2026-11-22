@@ -1,0 +1,396 @@
+{
+  "references": {
+    "initial": "https://wikiwiki.jp/chunithmwiki/CHUNITHM%20%E6%A5%BD%E6%9B%B2%E4%B8%80%E8%A6%A7%28%E8%BF%BD%E5%8A%A0%E6%97%A5%E9%A0%86%29",
+    "star-plus": "https://wikiwiki.jp/chunithmwiki/CHUNITHM%20STAR%20PLUS%20%E6%A5%BD%E6%9B%B2%E4%B8%80%E8%A6%A7%28%E8%BF%BD%E5%8A%A0%E6%97%A5%E9%A0%86%29",
+    "crystal": "https://wikiwiki.jp/chunithmwiki/CHUNITHM%20CRYSTAL%20%E6%A5%BD%E6%9B%B2%E4%B8%80%E8%A6%A7%28%E8%BF%BD%E5%8A%A0%E6%97%A5%E9%A0%86%29",
+    "plus": "https://wikiwiki.jp/chunithmwiki/CHUNITHM%20PLUS%20%E6%A5%BD%E6%9B%B2%E4%B8%80%E8%A6%A7%28%E8%BF%BD%E5%8A%A0%E6%97%A5%E9%A0%86%29",
+    "air-infinity": "https://wikiwiki.jp/chunithmwiki/%E6%A5%BD%E6%9B%B2%E8%BF%BD%E5%8A%A0%E3%81%AE%E3%81%8A%E7%9F%A5%E3%82%89%E3%81%9B%282017.7.20%29",
+    "air-plus": "https://wikiwiki.jp/chunithmwiki/CHUNITHM%20AIR%20PLUS%20%E6%A5%BD%E6%9B%B2%E4%B8%80%E8%A6%A7%28%E8%BF%BD%E5%8A%A0%E6%97%A5%E9%A0%86%29",
+    "star": "https://wikiwiki.jp/chunithmwiki/CHUNITHM%20STAR%20%E6%A5%BD%E6%9B%B2%E4%B8%80%E8%A6%A7%28%E8%BF%BD%E5%8A%A0%E6%97%A5%E9%A0%86%29",
+    "eternity": "https://wikiwiki.jp/chunithmwiki/%E6%A5%BD%E6%9B%B2%E8%BF%BD%E5%8A%A0%E3%81%AE%E3%81%8A%E7%9F%A5%E3%82%89%E3%81%9B%282019.9.5%29",
+    "crystal-plus": "https://wikiwiki.jp/chunithmwiki/CHUNITHM%20CRYSTAL%20PLUS%20%E6%A5%BD%E6%9B%B2%E4%B8%80%E8%A6%A7%28%E8%BF%BD%E5%8A%A0%E6%97%A5%E9%A0%86%29",
+    "evolutionary": "https://wikiwiki.jp/chunithmwiki/%E3%82%B3%E3%83%BC%E3%82%B9%E3%83%A2%E3%83%BC%E3%83%89%EF%BC%88CRYSTAL%EF%BC%89",
+    "lost": "https://wikiwiki.jp/chunithmwiki/CHUNITHM%20PARADISE%20LOST%E6%83%85%E5%A0%B1%E3%81%BE%E3%81%A8%E3%82%81",
+    "go-early": "https://wikiwiki.jp/chunithmwiki/GO",
+    "go-general": "https://chunithm.sega.jp/news/2019-06-03/",
+    "sega-june-2020": "https://chunithm.sega.jp/news/2020-06-17/",
+    "sega-april-2021": "https://chunithm.sega.jp/news/2021-04-01/",
+    "deleted": "https://wikiwiki.jp/chunithmwiki/%E9%85%8D%E4%BF%A1%E7%B5%82%E4%BA%86%E3%83%BB%E6%97%A5%E6%9C%AC%E7%89%88%E6%9C%AA%E5%8F%8E%E9%8C%B2%E6%A5%BD%E6%9B%B2%E4%B8%80%E8%A6%A7",
+    "amazon": "https://wikiwiki.jp/chunithmwiki/CHUNITHM%20AMAZON%E6%83%85%E5%A0%B1%E3%81%BE%E3%81%A8%E3%82%81",
+    "sega-june-11": "https://chunithm.sega.jp/news/2020-06-09/",
+    "x-crystal-songs": "https://x.com/chunithm/status/1270204297779621892",
+    "x-infinity": "https://x.com/chunithm/status/887145014807076864",
+    "x-crazy": "https://x.com/chunithm/status/861416232834129920",
+    "x-double": "https://x.com/chunithm/status/1008907354077724672",
+    "x-eternity": "https://x.com/chunithm/status/1169082926362808320",
+    "x-april-delayed": "https://x.com/chunithm/status/1273088929143521280",
+    "x-evolutionary": "https://x.com/chunithm/status/1331070211148038145",
+    "x-welcome": "https://x.com/chunithm/status/1391996830536269824",
+    "we-history": "https://wikiwiki.jp/chunithmwiki/WORLD%27S%20END",
+    "x-air-plus-return": "https://x.com/chunithm/status/829162884299001857"
+  },
+  "releases": [
+    {
+      "music_id": 91,
+      "on": "2015-11-12",
+      "reference": "initial",
+      "source": "SDBT_1.01/bin/option/A017/music/music0091/Music.xml",
+      "note": "Date list, table 1 row 28. Title and artist match after resolving quote style or inserted whitespace."
+    },
+    {
+      "music_id": 161,
+      "on": "2015-12-17",
+      "reference": "initial",
+      "source": "SDBT_1.01/bin/option/A017/music/music0161/Music.xml",
+      "note": "Date list, table 1 row 15. Title and artist match after resolving quote style or inserted whitespace."
+    },
+    {
+      "music_id": 206,
+      "on": "2015-08-13",
+      "reference": "initial",
+      "source": "SDBT_1.01/bin/option/A017/music/music0206/Music.xml",
+      "note": "Date list, table 1 row 57. Title and artist match after resolving quote style or inserted whitespace."
+    },
+    {
+      "music_id": 558,
+      "on": "2018-05-10",
+      "reference": "star-plus",
+      "source": "SDBT_1.25/bin/option/A008/music/music0558/Music.xml",
+      "note": "Date list, table 1 row 88. Title and artist match after resolving quote style or inserted whitespace."
+    },
+    {
+      "music_id": 600,
+      "on": "2018-07-19",
+      "reference": "star-plus",
+      "source": "SDBT_1.25/bin/option/A014/music/music0600/Music.xml",
+      "note": "Date list, table 1 row 48. Title and artist match after resolving quote style or inserted whitespace."
+    },
+    {
+      "music_id": 901,
+      "on": "2020-06-11",
+      "reference": "crystal",
+      "source": "SDBT_1.40/bin/option/A020/music/music0901/Music.xml",
+      "note": "Date list, table 1 row 15. Title and artist match after resolving quote style or inserted whitespace.",
+      "secondary_reference": "sega-june-11",
+      "official_post": "x-crystal-songs"
+    },
+    {
+      "music_id": 723,
+      "on": "2019-04-11",
+      "reference": "go-early",
+      "source": "SDBT_1.35/data/A000/music/music0723/Music.xml",
+      "note": "Advance play via the Granblue Fantasy collaboration map, as identified by the distinct map music ID. Event ended on 2019-05-22.",
+      "access": "map",
+      "witness": "SDBT_1.35/data/A000/map/map02006415/Map.xml",
+      "route_events": [
+        [
+          "2019-05-23",
+          "route_ended",
+          "map",
+          "go-early"
+        ]
+      ]
+    },
+    {
+      "music_id": 808,
+      "on": "2019-06-06",
+      "reference": "go-general",
+      "source": "SDBT_1.35/bin/option/A017/music/music0808/Music.xml",
+      "note": "SEGA dates general play. The separate ID is listed in the June permanent-open event.",
+      "access": "normal",
+      "witness": "SDBT_1.35/bin/option/A017/event/event00003800/Event.xml"
+    },
+    {
+      "music_id": 8008,
+      "on": "2016-05-26",
+      "reference": "plus",
+      "source": "SDBT_1.06/bin/option/A017/music/music8008/Music.xml",
+      "note": "Date list, table 1 row 34; the first retained HDD release event corroborates the month. The February 2016 revival entry precedes both this release and its alleged AIR stop.",
+      "access": "normal",
+      "witness": "SDBT_1.06/bin/option/A017/event/event00001006/Event.xml",
+      "rejected_restoration": {
+        "on": "2016-02-09",
+        "reference": "deleted"
+      },
+      "availability_events": [
+        [
+          "2016-08-25",
+          "removed",
+          "we-history",
+          null
+        ],
+        [
+          "2017-02-09",
+          "restored",
+          "x-air-plus-return",
+          "SDBT_1.15/bin/option/A017/event/event00001294/Event.xml"
+        ]
+      ],
+      "restoration_image": {
+        "url": "https://pbs.twimg.com/media/C4HEYm-VcAAYrNp.jpg?name=orig",
+        "sha256": "b163e9db2f1850b816da201272a81afb0efc4c794e66394a919a8d4119202b8b"
+      }
+    },
+    {
+      "music_id": 8020,
+      "on": "2016-06-23",
+      "reference": "plus",
+      "source": "SDBT_1.06/bin/option/A017/music/music8020/Music.xml",
+      "note": "Date list, table 1 row 17; the first retained HDD release event corroborates the month. The February 2016 revival entry precedes both this release and its alleged AIR stop.",
+      "access": "normal",
+      "witness": "SDBT_1.06/bin/option/A017/event/event00001031/Event.xml",
+      "rejected_restoration": {
+        "on": "2016-02-09",
+        "reference": "deleted"
+      },
+      "availability_events": [
+        [
+          "2016-08-25",
+          "removed",
+          "we-history",
+          null
+        ],
+        [
+          "2017-02-09",
+          "restored",
+          "x-air-plus-return",
+          "SDBT_1.15/bin/option/A017/event/event00001294/Event.xml"
+        ]
+      ],
+      "restoration_image": {
+        "url": "https://pbs.twimg.com/media/C4HEYm-VcAAYrNp.jpg?name=orig",
+        "sha256": "b163e9db2f1850b816da201272a81afb0efc4c794e66394a919a8d4119202b8b"
+      }
+    },
+    {
+      "music_id": 8026,
+      "on": "2016-06-23",
+      "reference": "plus",
+      "source": "SDBT_1.06/bin/option/A017/music/music8026/Music.xml",
+      "note": "Date list, table 1 row 16; the first retained HDD release event corroborates the month. The February 2016 revival entry precedes both this release and its alleged AIR stop.",
+      "access": "normal",
+      "witness": "SDBT_1.06/bin/option/A017/event/event00001031/Event.xml",
+      "rejected_restoration": {
+        "on": "2016-02-09",
+        "reference": "deleted"
+      },
+      "availability_events": [
+        [
+          "2016-08-25",
+          "removed",
+          "we-history",
+          null
+        ],
+        [
+          "2017-02-09",
+          "restored",
+          "x-air-plus-return",
+          "SDBT_1.15/bin/option/A017/event/event00001294/Event.xml"
+        ]
+      ],
+      "restoration_image": {
+        "url": "https://pbs.twimg.com/media/C4HEYm-VcAAYrNp.jpg?name=orig",
+        "sha256": "b163e9db2f1850b816da201272a81afb0efc4c794e66394a919a8d4119202b8b"
+      }
+    },
+    {
+      "music_id": 8080,
+      "on": "2017-07-20",
+      "reference": "air-infinity",
+      "source": "SDBT_1.15/bin/option/A017/music/music8080/Music.xml",
+      "note": "Dated addition of INFINITY Set lists this WE chart.",
+      "access": "course_only",
+      "witness": "SDBT_1.15/bin/option/A017/course/course00002000/Course.xml",
+      "official_post": "x-infinity"
+    },
+    {
+      "music_id": 8087,
+      "on": "2017-07-20",
+      "reference": "air-infinity",
+      "source": "SDBT_1.15/bin/option/A017/music/music8087/Music.xml",
+      "note": "Dated addition of INFINITY Set lists this WE chart.",
+      "access": "course_only",
+      "witness": "SDBT_1.15/bin/option/A017/course/course00002000/Course.xml",
+      "official_post": "x-infinity"
+    },
+    {
+      "music_id": 8081,
+      "on": "2017-05-11",
+      "reference": "air-plus",
+      "source": "SDBT_1.15/bin/option/A017/music/music8081/Music.xml",
+      "note": "Official May 11 course announcement graphic names Crazy -II- Set. The retained Course.xml lists this WE chart and shares netOpenName 340.",
+      "access": "course",
+      "witness": "SDBT_1.15/bin/option/A017/course/course00001900/Course.xml",
+      "route_events": [
+        [
+          "2018-10-25",
+          "route_opened",
+          "normal",
+          "amazon"
+        ]
+      ],
+      "official_post": "x-crazy",
+      "official_image": {
+        "url": "https://pbs.twimg.com/media/C_RdU6OUIAAvjBS.jpg?name=orig",
+        "sha256": "a6fd61501f89c8b43c8b9e38ed70e430445eaf2c7b75a70484e602b4f3a768da"
+      }
+    },
+    {
+      "music_id": 8098,
+      "on": "2017-10-19",
+      "reference": "star",
+      "source": "SDBT_1.20/bin/option/A017/music/music8098/Music.xml",
+      "note": "Table 1 row 76 matches this WE attribute and stars; Wiki inserts one extra space.",
+      "access": "normal"
+    },
+    {
+      "music_id": 8115,
+      "on": "2018-03-08",
+      "reference": "star-plus",
+      "source": "SDBT_1.25/bin/option/A001/music/music8115/Music.xml",
+      "note": "Table 1 row 129; the star cell carries footnote 6.",
+      "access": "course",
+      "route_events": [
+        [
+          "2018-10-25",
+          "route_opened",
+          "normal",
+          "amazon"
+        ]
+      ]
+    },
+    {
+      "music_id": 8116,
+      "on": "2018-04-01",
+      "reference": "star-plus",
+      "source": "SDBT_1.25/bin/option/A001/music/music8116/Music.xml",
+      "note": "Table 1 row 105; April Fools WE, independent of ordinary charts added May 10.",
+      "access": "limited_we",
+      "route_events": [
+        [
+          "2018-04-05",
+          "route_ended",
+          "limited_we",
+          "deleted"
+        ]
+      ]
+    },
+    {
+      "music_id": 8121,
+      "on": "2018-06-21",
+      "reference": "star-plus",
+      "source": "SDBT_1.25/bin/option/A011/music/music8121/Music.xml",
+      "note": "Official June 21 course announcement graphic names Double Set. The retained Course.xml lists this WE chart and shares netOpenName 541.",
+      "access": "course_only",
+      "witness": "SDBT_1.25/bin/option/A011/course/course00002311/Course.xml",
+      "route_events": [
+        [
+          "2018-10-25",
+          "route_opened",
+          "normal",
+          "amazon"
+        ]
+      ],
+      "official_post": "x-double",
+      "official_image": {
+        "url": "https://pbs.twimg.com/media/DgBbKCJU0AAIpZl.jpg?name=orig",
+        "sha256": "21fa3133890528f7263f2a9b3aa42abdd33b170cd27027d44256deb6f4294025"
+      }
+    },
+    {
+      "music_id": 8165,
+      "on": "2019-09-05",
+      "reference": "eternity",
+      "source": "SDBT_1.35/bin/option/A017/music/music8165/Music.xml",
+      "note": "Dated notice lists the three charts in the new ETERNITY Set.",
+      "access": "course_only",
+      "witness": "SDBT_1.35/bin/option/A017/course/course00003510/Course.xml",
+      "official_post": "x-eternity"
+    },
+    {
+      "music_id": 8166,
+      "on": "2019-09-05",
+      "reference": "eternity",
+      "source": "SDBT_1.35/bin/option/A017/music/music8166/Music.xml",
+      "note": "Dated notice lists the three charts in the new ETERNITY Set.",
+      "access": "course_only",
+      "witness": "SDBT_1.35/bin/option/A017/course/course00003510/Course.xml",
+      "official_post": "x-eternity"
+    },
+    {
+      "music_id": 8167,
+      "on": "2019-09-05",
+      "reference": "eternity",
+      "source": "SDBT_1.35/bin/option/A017/music/music8167/Music.xml",
+      "note": "Dated notice lists the three charts in the new ETERNITY Set.",
+      "access": "course_only",
+      "witness": "SDBT_1.35/bin/option/A017/course/course00003510/Course.xml",
+      "official_post": "x-eternity"
+    },
+    {
+      "music_id": 8180,
+      "on": "2020-06-18",
+      "reference": "sega-june-2020",
+      "source": "SDBT_1.40/bin/option/A020/music/music8180/Music.xml",
+      "note": "Official dated article names the limited chart; Wiki song page also has June 18. The chronological list slots it under June 11 and HDD retains an April event name.",
+      "access": "limited_we",
+      "witness": "SDBT_1.40/bin/option/A020/event/event00004913/Event.xml",
+      "limited_periods": [
+        [
+          "2020-06-18",
+          "2020-07-16",
+          "sega-june-2020"
+        ],
+        [
+          "2021-04-01",
+          "2021-04-08",
+          "sega-april-2021"
+        ]
+      ],
+      "official_post": "x-april-delayed"
+    },
+    {
+      "music_id": 8190,
+      "on": "2020-11-26",
+      "reference": "crystal-plus",
+      "source": "SDBT_1.45/bin/option/A014/music/music8190/Music.xml",
+      "note": "The dated entry is the Evolutionary Set random pool. The same course XML lists all three HDD IDs and shares the November 26 schedule group 951.",
+      "access": "course_only",
+      "witness": "SDBT_1.45/bin/option/A014/course/course00004515/Course.xml",
+      "secondary_reference": "evolutionary",
+      "official_post": "x-evolutionary"
+    },
+    {
+      "music_id": 8191,
+      "on": "2020-11-26",
+      "reference": "crystal-plus",
+      "source": "SDBT_1.45/bin/option/A014/music/music8191/Music.xml",
+      "note": "The dated entry is the Evolutionary Set random pool. The same course XML lists all three HDD IDs and shares the November 26 schedule group 951.",
+      "access": "course_only",
+      "witness": "SDBT_1.45/bin/option/A014/course/course00004515/Course.xml",
+      "secondary_reference": "evolutionary",
+      "official_post": "x-evolutionary"
+    },
+    {
+      "music_id": 8192,
+      "on": "2020-11-26",
+      "reference": "crystal-plus",
+      "source": "SDBT_1.45/bin/option/A014/music/music8192/Music.xml",
+      "note": "The dated entry is the Evolutionary Set random pool. The same course XML lists all three HDD IDs and shares the November 26 schedule group 951.",
+      "access": "course_only",
+      "witness": "SDBT_1.45/bin/option/A014/course/course00004515/Course.xml",
+      "secondary_reference": "evolutionary",
+      "official_post": "x-evolutionary"
+    },
+    {
+      "music_id": 8212,
+      "on": "2021-05-13",
+      "reference": "lost",
+      "source": "SDBT_1.50/bin/option/A032/music/music8212/Music.xml",
+      "note": "WELCOME Set lists this course-exclusive WE in the May 13 edition update. Course XML and chart use group 1050, corroborated by seventeen dated launch additions.",
+      "access": "course_only",
+      "witness": "SDBT_1.50/bin/option/A032/course/course00005039/Course.xml",
+      "official_post": "x-welcome"
+    }
+  ]
+}
