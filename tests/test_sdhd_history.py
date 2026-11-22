@@ -13,6 +13,7 @@ TOOLS = Path(__file__).resolve().parents[1] / 'tools'
 sys.path.insert(0, str(TOOLS))
 from build_jp_hdd_history import Observation, save_windows
 from jp_option_dates import apply_option_days
+from jp_version_removals import apply_version_removals
 from sdhd_scan import File, Layer, discover, layer_paths, ordered_layers, parse_record
 from sdhd_notices import add_official_notices, merge_availability
 from old_hdd_timeline import batch, event
@@ -26,6 +27,34 @@ def fixture(db):
 
 
 class SdhdTests(unittest.TestCase):
+    def test_version_boundary_removal_keeps_exact_evidence_and_return_day(self):
+        with closing(sqlite3.connect(':memory:')) as db:
+            fixture(db)
+            for n, name in enumerate(('OLD', 'NEW', 'LATER'), 1):
+                db.execute('INSERT INTO versions VALUES (?,?,?,?,?,?,?,?)',
+                           (name, n, 'HDD', f'2024-0{n}-01', f'2024-0{n}-28', '', '', ''))
+            for music_id, identity in enumerate(('gone', 'alias', 'dated', 'alias-new'), 1):
+                db.execute("INSERT INTO history_entities VALUES (?,'song',NULL,?,NULL,NULL)", (identity, music_id))
+                db.execute("INSERT INTO music_versions (version,identity,music_id,state,basis) VALUES (?,?,?,'present','fixture')",
+                           ('NEW' if identity == 'alias-new' else 'OLD', identity, music_id))
+            db.execute("INSERT INTO sources VALUES ('src','HDD','A000',0,NULL,'music_xml',NULL)")
+            db.execute("INSERT INTO history_identity_links VALUES ('alias','alias-new','candidate','src',NULL,'fixture')")
+            removal = batch(db, 'day:2024-02-10', 'NEW', 'public_day', 'fixture', day='2024-02-10')
+            event(db, 'dated', removal, 'removed', 'availability', None, 'removed', None, None, 'fixture',
+                  day='2024-02-10')
+            restore = batch(db, 'day:2024-03-03', 'LATER', 'public_day', 'fixture', day='2024-03-03')
+            event(db, 'gone', restore, 'restored', 'availability', None, 'restored', None, None, 'fixture',
+                  day='2024-03-03')
+            db.execute("INSERT INTO history_windows VALUES ('NEW','gone','2024-02-01','2024-02-28','possible',NULL,'[]','fixture')")
+            db.execute("INSERT INTO history_windows VALUES ('LATER','gone','2024-03-01','2024-03-28','present',NULL,'[]','fixture')")
+            self.assertEqual(apply_version_removals(db), 2)  # The alternate identity also disappears in LATER.
+            self.assertEqual([tuple(row) for row in db.execute(
+                "SELECT identity,effective_on FROM history_events WHERE kind='removed' ORDER BY identity"
+            )], [('alias-new', '2024-03-01'), ('dated', '2024-02-10'), ('gone', '2024-02-01')])
+            self.assertEqual([tuple(row) for row in db.execute("SELECT version,start_on FROM history_windows")],
+                             [('LATER', '2024-03-03')])
+            self.assertEqual(apply_version_removals(db), 0)
+
     def test_only_one_evidenced_option_day_can_date_a_chart_change(self):
         with closing(sqlite3.connect(':memory:')) as db:
             fixture(db)

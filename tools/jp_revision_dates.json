@@ -12,7 +12,8 @@
     "field": "hdd_hundredths",
     "day": "2023-05-11",
     "expected": 49,
-    "basis": "User selected the SUN PLUS launch date for the late-build base image changes."
+    "whole_batch": true,
+    "basis": "User selected the SUN PLUS launch date for the late-build base image."
   },
   {
     "batch": "pkg:SDHD_2.45:A242",

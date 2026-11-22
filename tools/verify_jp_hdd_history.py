@@ -13,19 +13,36 @@ from zipfile import ZipFile
 
 import import_paradise_lost  # Offline service bootstrap
 from _unibot_history.old_hdd_history import OldHddHistory
+from jp_version_removals import INFERRED
 from old_hdd_scan import file_hash
 
 
-def verify(database, baseline, root, *, allow_unencrypted_sample=False):
-    catalog, old = OldHddHistory(database), OldHddHistory(baseline)
-    result = {'sdbt': {}, 'sdhd': {}}
+def verify_sdbt(database, catalog, old):
+    result = {}
+    with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as db:
+        removals = [(identity, day, json.loads(evidence[len(INFERRED):])['resume_on'])
+                    for identity, day, evidence in db.execute("""
+                        SELECT identity,effective_on,evidence FROM history_events WHERE evidence LIKE ?
+                    """, (INFERRED + '%',))]
     for version in old.versions()[:12]:
         name, day = version['version'], version['end_on']
         if catalog.checkpoint(name, active_only=False) != old.checkpoint(name, active_only=False):
             raise ValueError(f'Old checkpoint changed: {name}')
-        if catalog.catalog_on(day, include_possible=True) != old.catalog_on(day, include_possible=True):
+        expected = old.catalog_on(day, include_possible=True)
+        removed = {identity for identity, start, resume in removals if start <= day and (not resume or day < resume)}
+        expected['rows'] = [row for row in expected['rows']
+                            if row['identity'] not in removed and row['parent'] not in removed]
+        expected['uncertain_count'] = sum(row['availability'] == 'possible' or row['revision'] is None
+                                          for row in expected['rows'])
+        if catalog.catalog_on(day, include_possible=True) != expected:
             raise ValueError(f'Old day query changed: {name}')
-        result['sdbt'][name] = len(catalog.checkpoint(name))
+        result[name] = len(catalog.checkpoint(name))
+    return result
+
+
+def verify(database, baseline, root, *, allow_unencrypted_sample=False):
+    catalog, old = OldHddHistory(database), OldHddHistory(baseline)
+    result = {'sdbt': verify_sdbt(database, catalog, old), 'sdhd': {}}
     with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as db:
         if db.execute('PRAGMA integrity_check').fetchone() != ('ok',) or db.execute('PRAGMA foreign_key_check').fetchone():
             raise ValueError('SQLite integrity check failed')

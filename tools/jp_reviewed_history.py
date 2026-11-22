@@ -2,6 +2,7 @@
 from collections import defaultdict
 
 from jp_option_dates import ASSUMPTION
+from jp_version_removals import INFERRED
 
 
 def loose_path(path):
@@ -75,10 +76,10 @@ def copy_reviewed(db, catalog):
     rows = db.execute("""
         SELECT e.*,b.version,b.effective_on AS batch_day
         FROM reviewed.history_events e JOIN reviewed.history_batches b USING(batch)
-        WHERE b.kind='public_day' OR (e.kind='hdd_revision' AND e.effective_on IS NOT NULL
-              AND e.evidence NOT LIKE ?)
+        WHERE (b.kind='public_day' OR (e.kind='hdd_revision' AND e.effective_on IS NOT NULL
+              AND e.evidence NOT LIKE ?)) AND e.evidence NOT LIKE ?
         ORDER BY event
-    """, (ASSUMPTION + '%',)).fetchall()
+    """, (ASSUMPTION + '%', INFERRED + '%')).fetchall()
     known = set(map(tuple, db.execute('SELECT identity,batch,kind,field,before,after,effective_on,evidence '
                                       'FROM main.history_events')))
     sdhd_versions = {version for version, in db.execute('SELECT version FROM main.versions WHERE ordinal>12')}

@@ -10,6 +10,24 @@ ASSUMPTION = 'SDHD option-day assumption: '
 USER_DATE = 'SDHD user-selected revision date: '
 
 
+def apply_batch_day(db, key, day, basis):
+    applied = db.execute('SELECT effective_on FROM history_batches WHERE batch=?', (key,)).fetchone()[0]
+    if applied and applied != day:
+        raise ValueError(f'Batch already has a different effective day: {key} / {applied}')
+    db.execute("""
+        UPDATE history_batches
+        SET effective_on=?,earliest_on=?,latest_on=?,timing='exact',evidence=?||evidence
+        WHERE batch=? AND effective_on IS NULL
+    """, (day, day, day, f'SDHD user-selected batch date: {day}; {basis} ', key))
+    return db.execute("""
+        UPDATE history_events SET effective_on=?,earliest_on=?,latest_on=?,
+            evidence=?||' Prior bounds: '||coalesce(earliest_on,'unknown')||' to '||
+                coalesce(latest_on,'unknown')||'; '||evidence
+        WHERE batch=? AND effective_on IS NULL AND kind IN ('hdd_revision','hdd_enabled','hdd_disabled')
+        RETURNING field,batch,effective_on
+    """, (day, day, day, f'{USER_DATE}{day}; {basis}', key)).fetchall()
+
+
 def apply_reviewed_days(db):
     reviews = json.loads(Path(__file__).with_name('jp_revision_dates.json').read_text(encoding='utf-8'))
     changed = []
@@ -37,6 +55,8 @@ def apply_reviewed_days(db):
                 UPDATE history_events SET effective_on=?,earliest_on=?,latest_on=?,evidence=? WHERE event=?
             ''', (day, day, day, basis, event))
             changed.append((field, key, day))
+        if review.get('whole_batch'):
+            changed.extend(apply_batch_day(db, key, day, review['basis']))
     return changed
 
 
@@ -84,6 +104,7 @@ def main():
             raise ValueError('OPTION date update failed database verification')
     for field in ('hdd_hundredths', 'c2s_sha256'):
         print(f'{field}: {sum(row[0] == field for row in rows)}')
+    print(f'all dated revision fields: {len(rows)}')
 
 
 if __name__ == '__main__':

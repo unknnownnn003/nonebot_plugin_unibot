@@ -129,3 +129,19 @@ python -X utf8 tools/jp_option_dates.py .tools/jp-hdd/compact/catalog.sqlite
 本地曲目生命周期仍记录《凛として咲く花の如く》普通曲 2016-08-25 首配、从 2021-01-21 起在 PARADISE 留存截点缺档、2021-12-05 复配。该曲 ULTIMA 独立记录 2021-12-09 首配。
 
 本次增量后的 SQLite 为 549,560,320 字节，SHA-256 为 `9b3b7cbcd031f355687a408e4a85d5786f230d13d203b42f643a18d1916c41de`。
+
+## 换代停配推定
+
+上一代留存曲库含某首可玩曲、下一代留存曲库找不到对应身份或 Music ID 时，以新版本开服日记一条推定停配。曲库中仍存在相同 ID 或关联身份时跳过。已明确的停配和复配日期优先。事件以 `JP version boundary removal inference` 标明依据，并保留原盘来源及恢复查询窗口的界限。
+
+本地库新增 283 条推定。其中《凛として咲く花の如く》普通曲在 CRYSTAL PLUS 存在、在 PARADISE 缺席，停配推定为 2021-01-21。已有复配日 2021-12-05 继续采用数据库中归档的证据。
+
+```powershell
+python -X utf8 tools/jp_version_removals.py .tools/jp-hdd/compact/catalog.sqlite
+```
+
+增量后的 SQLite 为 549,957,632 字节，SHA-256 为 `f4728cf4cd35c2c5a448e06a8aa57720ab7687d169c9867a7c45e9b608c164e5`。
+
+SUN PLUS A000 的整包采用日期后来设为 **2023-05-11**。该基础盘共 1,437 条已定日的内容变更字段，其中 49 条定数变化此前已设为同一天。原盘构建日期和盘内观察依据仍记录为 2023-05-31。
+
+当前 SQLite 为 550,182,912 字节，SHA-256 为 `3a6f224cd6b8e001b5fd6581babb336af9037fa749f53ab5444e7b08c6921094`。
