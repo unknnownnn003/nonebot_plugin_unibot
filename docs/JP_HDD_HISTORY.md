@@ -145,3 +145,16 @@ python -X utf8 tools/jp_version_removals.py .tools/jp-hdd/compact/catalog.sqlite
 SUN PLUS A000 的整包采用日期后来设为 **2023-05-11**。该基础盘共 1,437 条已定日的内容变更字段，其中 49 条定数变化此前已设为同一天。原盘构建日期和盘内观察依据仍记录为 2023-05-31。
 
 当前 SQLite 为 550,182,912 字节，SHA-256 为 `3a6f224cd6b8e001b5fd6581babb336af9037fa749f53ab5444e7b08c6921094`。
+
+## 首配证据复核
+
+- 开服推定要求 A000 正常启用的普通曲出现在实际开服曲目开放事件中。ID、曲名和开放标签需要对应，事件原盘路径及哈希须能验证。同一个 A000 批次内有可用 C2S 的普通谱面可以继承该日。NEW 的 Music ID 2039 据此采用 2021-11-04，来源是 `event00010012/Event.xml`。该事件不提供后续通常解禁日。
+- 曲名与 Music ID 一致、音源引用相同、四张普通谱面都有唯一匹配的记谱指纹时，可从已记录首配的关联身份继承日期。保留谱面身份、定数、修订、首个本地物证和停复配记录。不要以较早的继承日期给后来的 HDD 版本生成新的可玩窗口。
+- 从本地单曲页归档核对了《ゴー・トゥ・大都会》2023-06-08、《Λlteration》2023-10-12，以及 Daydream café 的 2017-03-09 通常配信。Daydream café 的 2017-02-09 联动先行配信仍为首次开放。Λlteration 的本地谱面物证始于 LUMINOUS，四张谱面的原始追加日期仍待确认。
+- 增量共补 14 个曲目身份和 52 张普通谱面记录，包含 2 个仅见于早期批次的曲目身份。上一轮口径下的首配缺口由 17 个普通曲身份及 88 张谱面降至 5 个及 36 张。剩余曲目为 Alice's Suitcase、ぱくぱく☆がーる、進め！マイウェイ！、反撃! 突撃! Back To Back! 和 GEOMETRIC DANCE。
+
+```powershell
+python -X utf8 tools/jp_release_reconcile.py .tools/jp-hdd/compact/catalog.sqlite 'E:\SDHD'
+```
+
+本次增量后的 SQLite 为 550,264,832 字节，SHA-256 为 `e3fd167b4adb02331d9c71876a67dfcafffa4702bf29a7b4a56827ac2a0a8caf`。

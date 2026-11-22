@@ -18,6 +18,7 @@ from zipfile import BadZipFile
 
 from jp_compact_history import discard_xml
 from jp_option_dates import apply_option_days, apply_reviewed_days
+from jp_release_reconcile import apply_release_repairs
 from jp_reviewed_history import copy_reviewed
 from jp_version_removals import apply_version_removals
 from old_hdd_evidence import normalize_name
@@ -590,6 +591,7 @@ def build(args):
                 merge_availability(db, public, notices)
             release_index(db, histories, calendar, first)
             finish_timeline(db, histories, calendar, public, revisions, first, designer, reviewed_changes)
+            release_repairs = apply_release_repairs(db, root)
             apply_reviewed_days(db)
             apply_option_days(db)
             apply_version_removals(db)
@@ -601,7 +603,7 @@ def build(args):
             db.execute('VACUUM')
             if db.execute('PRAGMA foreign_key_check').fetchone() or db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                 raise ValueError('Unified database failed integrity verification')
-            summary = report(db)
+            summary = report(db) | {'release_repairs': dict(release_repairs)}
         summary.update({'bytes': database.stat().st_size, 'sha256': file_hash(database),
                         'seconds': round(perf_counter() - started, 2), 'old_catalog_sha256': file_hash(old)})
         (work / 'report.json').write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding='utf-8')

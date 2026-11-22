@@ -1,0 +1,23 @@
+[
+  {
+    "identity": "0:343:1",
+    "kind": "general_open",
+    "day": "2017-03-09",
+    "source": "https://wikiwiki.jp/chunithmwiki/Daydream%20caf%C3%A9",
+    "basis": "Archived song page lines 26 and 35 distinguish regular distribution from February 9 advance distribution."
+  },
+  {
+    "identity": "sdhd:A061:SUN PLUS:0:2419",
+    "kind": "released",
+    "day": "2023-06-08",
+    "source": "https://wikiwiki.jp/chunithmwiki/%E3%82%B4%E3%83%BC%E3%83%BB%E3%83%88%E3%82%A5%E3%83%BB%E5%A4%A7%E9%83%BD%E4%BC%9A",
+    "basis": "Archived song page names June 8 regular distribution and HDD references the first June opening event; the earlier May 11 third-party hint remains an unselected claim."
+  },
+  {
+    "identity": "sdhd:A000:LUMINOUS:0:2466",
+    "kind": "released",
+    "day": "2023-10-12",
+    "source": "https://wikiwiki.jp/chunithmwiki/%CE%9Blteration",
+    "basis": "Archived song page names October 12 regular distribution; later HDD releaseDate fields agree."
+  }
+]

@@ -13,6 +13,7 @@ TOOLS = Path(__file__).resolve().parents[1] / 'tools'
 sys.path.insert(0, str(TOOLS))
 from build_jp_hdd_history import Observation, save_windows
 from jp_option_dates import apply_option_days
+from jp_release_reconcile import launch_events
 from jp_version_removals import apply_version_removals
 from sdhd_scan import File, Layer, discover, layer_paths, ordered_layers, parse_record
 from sdhd_notices import add_official_notices, merge_availability
@@ -27,6 +28,35 @@ def fixture(db):
 
 
 class SdhdTests(unittest.TestCase):
+    def test_launch_requires_a_music_event_with_the_same_opening_gate(self):
+        with TemporaryDirectory() as tmp, closing(sqlite3.connect(':memory:')) as db:
+            fixture(db)
+            root = Path(tmp)
+            raw = b'<EventData><netOpenName><id>2010</id></netOpenName></EventData>'
+            (root / 'Event.xml').write_bytes(raw)
+            db.execute("INSERT INTO versions VALUES ('NEW',13,'SDHD','2021-11-04','2022-04-13','','','')")
+            db.execute("INSERT INTO sources VALUES ('Event.xml','SDHD','A000',?,?,'xml',NULL)",
+                       (len(raw), sha256(raw).hexdigest()))
+            db.execute("INSERT INTO sources VALUES ('Music.xml','SDHD','A000',0,NULL,'music_xml',NULL)")
+            db.execute("INSERT INTO history_game_events VALUES ('Event.xml',1,'曲開放 (ロンチ)','3',0,'0',NULL)")
+            key = batch(db, 'pkg:SDHD_2.00:A000', 'NEW', 'package', 'fixture', sequence=0)
+            for music_id, gate, role in ((2039, '2010', 'music'), (2040, '2011', 'music'),
+                                         (2041, '2010', 'recommend_music')):
+                identity = str(music_id)
+                payload = json.dumps({'title': identity, 'exType': '0',
+                                      'netOpenName': [['id', gate]], 'firstLock': 'true'})
+                db.execute("INSERT INTO history_entities VALUES (?,'song',NULL,?,NULL,NULL)", (identity, music_id))
+                db.execute('INSERT INTO history_revisions VALUES (?,?,?)', (identity, identity, payload))
+                db.execute("INSERT INTO history_observations VALUES (?,?,?,'Music.xml','hdd_enabled','fixture')",
+                           (key, identity, identity))
+                db.execute("INSERT INTO sdhd_first_release VALUES (?,'2021-11-04',NULL,NULL,'fixture')", (identity,))
+                db.execute("INSERT INTO history_game_event_links VALUES ('Event.xml',?,?,?)",
+                           (role, music_id, identity))
+            self.assertEqual(launch_events(db, root)['launch_songs'], 1)
+            self.assertEqual([tuple(row) for row in db.execute(
+                'SELECT identity,exact_on FROM sdhd_first_release WHERE exact_on IS NOT NULL'
+            )], [('2039', '2021-11-04')])
+
     def test_version_boundary_removal_keeps_exact_evidence_and_return_day(self):
         with closing(sqlite3.connect(':memory:')) as db:
             fixture(db)
