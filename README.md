@@ -13,6 +13,7 @@
 | `/b30` | 所有版本的有效普通谱面按落雪单谱面 Rating 排序取前30，缺位计零，均值除以30；不是玩家总 Rating。 |
 | `/旧框` | 用本人当前成绩和 2021 日服 PARADISE LOST 定数模拟 B30，一张图显示 B1×10 和 B1–B10 两种总 Rating。见[旧框规则](docs/paradise-lost.md)。 |
 | `/b50` | 旧版本 BEST 30 + 当前国服版本 NEW 20，按歌曲版本分区，互不重复；缺位计零，合计除以50。 |
+| `/b30 <日服版本>`、`/b50 <日服版本>` | 用本人当前成绩和已核实的日服历史谱面计算模拟值。初代至 LUMINOUS PLUS 用 B30，VERSE 至 MATE 用 B50。正式库当前缺少获批映射，指令会报告覆盖与样本不足。 |
 | `/个人信息`、`/chuinfo`、`/分数` | 显示 OAuth 玩家资料、官方总 OP，以及 MASTER/ULTIMA 十二档 OP 与成就进度。 |
 | `/chulist <条件> [--nocat] [--page 页码]` | 按显示等级（`14+`）、精确定数（`14.9`）、版本（`sun`）或分类（`车万`、`ori`）筛选已配信 MASTER/ULTIMA。条件同时生效。默认按定数分组，`--nocat` 取消分组，`--page 2` 查看第 2 页。所有匹配谱面（含未游玩）参与筛选 OP 和成就统计。 |
 | `推什么 [推分/推OP/fc/aj/ajc] [显示等级或定数]` | 默认给出推分、推 OP 各一张，指定方向时最多两张。支持 `推什么 14+`、`推什么 14.8` 和 `推什么 14+ 推OP`。旧参数 `综合` 等同默认模式。 |
@@ -33,6 +34,7 @@
 | 指令 | 行为 |
 | --- | --- |
 | `<曲名/别名/ID>是什么歌`、`/查歌 <查询>` | 公共曲目详情与候选。多页时可用 `/查歌 雅迪 --page 2`。 |
+| `/chu查歌 <曲名或日服 ID> [版本]` | 只查 JP HDD 历史截点。例 `/chu查歌 鳥の詩 AIR`、`/chu查歌 96 MATE`。 |
 | `/添加别名 <ID> <别名>` | 添加本地别名；`/删除别名` 仅 SUPERUSER。 |
 | `/查看别名 <查询>` | 查看本地及上游别名。 |
 | `/chuguess [bas/adv/exp/mas/ult]`、`/猜 <歌名>` | 群内曲绘猜曲；`/提示`、`/放弃` 沿用原行为。 |
@@ -66,6 +68,7 @@ pip install -r nonebot_plugin_unibot/requirements.txt
 - [第三阶段 B 玩家查询说明](docs/oauth-player-api.md)：统一模型、缓存/授权边界、退役范围、邻仓配套项与测试。
 - [曲库模型说明](docs/lxns-cn-catalog.md)：ULTIMA、WORLD'S END 与原始ID规则。
 - [CHUNITHM 全版本曲库](docs/historical-catalog.md)说明日服 22 代版本、地区数据边界、SQLite 构建、只读查询与回滚。
+- [JP HDD 命令接入与覆盖报告](docs/JP_HDD_RUNTIME.md)记录正式库配置、曲绘导出、Rating 映射和 22 代覆盖。
 - [LocalStore迁移](docs/localstore-migration.md)：离线复制、校验与回滚。运行路径只由 `services/paths.py` 管理。
 - [开发工具](tools/README.md)：显式脚本；命令目录使用本仓生成器，不能用旧邻仓生成器覆盖。
 

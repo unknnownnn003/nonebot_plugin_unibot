@@ -18,6 +18,8 @@ async def submit(bot, event, capability, arguments, *, origin="agent"):
     from nonebot.adapters.onebot.v11 import PrivateMessageEvent, GroupMessageEvent
     if not isinstance(event, (PrivateMessageEvent, GroupMessageEvent)) or capability not in CAPABILITIES or str(bot.self_id) != str(event.self_id):
         return outcome("PERMISSION_DENIED", "任务身份或能力不匹配。", status="denied")
+    if origin != "command" and ("history_query" in arguments or "jp_version" in arguments):
+        return outcome("INVALID_ARGUMENTS", "日服历史查询请使用原生命令。", status="needs_input")
     key = f"{capability}:{event.message_id}:" + hashlib.sha256(
         json.dumps(arguments, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     from .presentation_store import scope
@@ -33,8 +35,9 @@ async def submit(bot, event, capability, arguments, *, origin="agent"):
 async def _submit(bot, event, capability, arguments, key, *, origin):
     from .sync import existing_source, submit_operation
     old = await existing_source(bot, event, capability, key)
+    prepare_cn_song = capability == "song.search" and "history_query" not in arguments
     if old is not None:
-        if capability == "song.search":
+        if prepare_cn_song:
             from .sync import _store
             return attach_candidates(old, (await _store.get(old["data"]["job_id"])).payload.get("prepared"))
         return old
@@ -44,19 +47,29 @@ async def _submit(bot, event, capability, arguments, key, *, origin):
     from . import group_policy
     if not group_policy.enabled(event, capability):
         return outcome("FEATURE_DISABLED", "本群对应功能已关闭。", status="denied")
+    if "jp_version" in arguments and capability in {"player.best", "player.b50"}:
+        from . import jp_history, jp_rating
+        from .job_store import async_call
+        try:
+            history = await async_call(jp_history.load)
+        except jp_history.HISTORY_ERRORS:
+            return outcome("JP_HISTORY_UNAVAILABLE", jp_history.UNAVAILABLE, status="unavailable")
+        _, error = jp_rating.validate_request(history, arguments["jp_version"], b50=capability == "player.b50")
+        if error:
+            return outcome("INVALID_ARGUMENTS", error, status="needs_input")
     if capability in PLAYER_CAPABILITIES:
         try:
             _, payload["oauth_binding"] = await get_reader().oauth.credential_lease(bot.self_id, event.user_id)
         except OAuthError as error:
             return failure(error)
-    if capability == "song.search":
+    if prepare_cn_song:
         from .song import prepare
         prepared = await prepare(arguments["query"])
         if not prepared["song"] and not prepared["ambiguous"]:
             return outcome("NOT_FOUND", "没有找到匹配的曲目。", status="needs_input")
         payload["prepared"] = prepared
     accepted = await submit_operation(bot, event, capability, key, payload, origin=origin)
-    if capability == "song.search" and accepted.get("data", {}).get("job_id"):
+    if prepare_cn_song and accepted.get("data", {}).get("job_id"):
         from .sync import _store
         return attach_candidates(accepted, (await _store.get(accepted["data"]["job_id"])).payload.get("prepared"))
     return accepted
@@ -82,6 +95,14 @@ async def render(bot, event, job, checkpoint=None):
             return outcome("AUTHORIZATION_CHANGED", "历史任务没有本次 OAuth 授权，请重新查询。", status="denied")
         return await player.query(bot, event, capability, args, expected=job.payload["oauth_binding"], checkpoint=checkpoint)
     if capability == "song.search":
+        if "history_query" in args:
+            from . import jp_history
+            from .job_store import async_call
+            try:
+                history = await async_call(jp_history.load)
+                return await async_call(jp_history.lookup, history, args["history_query"])
+            except jp_history.HISTORY_ERRORS:
+                return outcome("JP_HISTORY_UNAVAILABLE", jp_history.UNAVAILABLE, status="unavailable")
         return await song.search(args["query"], prepared=job.payload["prepared"])
     if capability == "song.detail":
         return await song.detail(args["song_id"])

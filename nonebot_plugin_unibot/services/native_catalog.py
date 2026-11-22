@@ -385,7 +385,7 @@ NATIVE_CATALOG = json.loads(r'''{
   }
 }''' )
 
-# OAuth stays native-only and never enters the model tool catalog.
+# Native-only registrations stay outside the model tool catalog.
 NATIVE_ONLY_COMMANDS = json.loads(r'''[
   {
     "command": "落雪授权",
@@ -413,6 +413,13 @@ NATIVE_ONLY_COMMANDS = json.loads(r'''[
     "line": 15,
     "matcher": "oauth_unlink",
     "module": "user_bind",
+    "registration": "on_command"
+  },
+  {
+    "command": "chu查歌",
+    "line": 380,
+    "matcher": "jp_lookup_cmd",
+    "module": "song",
     "registration": "on_command"
   }
 ]''' )

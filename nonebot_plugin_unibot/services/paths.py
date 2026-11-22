@@ -1,4 +1,5 @@
 """The only runtime path authority; LocalStore chooses the plugin namespace."""
+import os
 from pathlib import Path
 
 from nonebot import require
@@ -22,3 +23,13 @@ ASSETS_DIR = PACKAGE_DIR / "assets"
 STORY_DIR = DATA_DIR / "story"
 OAUTH_DIR = DATA_DIR / "oauth"
 HISTORY_DIR = DATA_DIR / "historical_catalog"
+
+
+def jp_history_database():
+    configured = os.getenv("UNIBOT_JP_HISTORY_DB")
+    if configured:
+        path = Path(configured)
+        if not path.is_absolute():
+            raise ValueError("JP HDD database override must be absolute")
+        return path
+    return HISTORY_DIR / "catalog.sqlite"

@@ -375,3 +375,18 @@ async def _(event: MessageEvent, args: Message = CommandArg()):
     
     alias_str = "、".join(map(str, aliases))
     await view_alias_cmd.finish(f"曲目【{title}】(ID: {song_id}) 的现有别名为：\n{alias_str}")
+
+
+jp_lookup_cmd = on_command("chu查歌", priority=10, block=True)
+
+
+@jp_lookup_cmd.handle()
+async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
+    from .services.media_jobs import submit
+    from .services.results import send_command_result
+
+    query = args.extract_plain_text().strip()
+    if not query:
+        await jp_lookup_cmd.finish("用法 /chu查歌 <曲名或日服 ID> [版本]")
+    result = await submit(bot, event, "song.search", {"history_query": query}, origin="command")
+    await send_command_result(jp_lookup_cmd, result, finish=True)

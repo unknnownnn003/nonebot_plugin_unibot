@@ -1,5 +1,6 @@
 """B30 and disjoint BEST30 + NEW20 presentations on one OAuth snapshot."""
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent
+from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent
+from nonebot.params import CommandArg
 from nonebot import on_command
 from PIL import Image, ImageDraw
 import asyncio
@@ -12,7 +13,6 @@ from .services.image_components import (
 )
 from .services import legacy_rating
 from .services.job_store import check_render_cancelled
-
 best_rating_cmd = on_command("b30", priority=5, block=True)
 best_rating_50_cmd = on_command("b50", priority=5, block=True)
 legacy_rating_cmd = on_command("旧框", priority=5, block=True)
@@ -132,7 +132,7 @@ COLUMNS = 5
 WIDTH = COLUMNS * (CARD_WIDTH + GAP) - GAP + 24
 
 
-def _legacy_difficulty(card, item, side):
+def _legacy_difficulty(card, item, side, *, jp=False):
     difficulty = item["level_index"]
     name_box = (10, side + 8, 134, side + 34)
     if not contain(card, ui("difficulty", DIFFICULTY_ASSETS[difficulty]), name_box, trim=True):
@@ -140,10 +140,10 @@ def _legacy_difficulty(card, item, side):
         label(card, name_box, LEVELS[difficulty], 17, PAPER, "center", fit=True)
     constant_box = (card.width - 64, side + 8, card.width - 10, side + 34)
     rounded(card, constant_box, 5, INK)
-    label(card, constant_box, f"{item['level_value']:.1f}", 19, PAPER, "center")
+    label(card, constant_box, f"{item['level_value']:.{2 if jp else 1}f}", 19, PAPER, "center", fit=jp)
 
 
-def _card(item, number, jacket, title, *, legacy=False):
+def _card(item, number, jacket, title, *, legacy=False, jp=False):
     width = CARD_WIDTH
     offset = (len(title) - 1) * 30
     height = CARD_HEIGHT + offset
@@ -168,15 +168,16 @@ def _card(item, number, jacket, title, *, legacy=False):
         band = band.resize((side, 31), RESAMPLE)
         card.paste(band, (6, side + 6), band)
     if legacy:
-        _legacy_difficulty(card, item, side)
+        _legacy_difficulty(card, item, side, jp=jp)
     else:
         rounded(card, (9, side + 6, 121, side + 32), 10, INK)
         label(card, (10, side + 4, 120, side + 30), LEVELS[difficulty], 19, PAPER, "center")
         rounded(card, (width - 64, side + 6, width - 10, side + 32), 9, INK)
-        label(card, (width - 64, side + 4, width - 10, side + 30), f"{item['level_value']:.1f}", 20, PAPER, "center")
+        label(card, (width - 64, side + 4, width - 10, side + 30),
+              f"{item['level_value']:.{2 if jp else 1}f}", 20, PAPER, "center", fit=jp)
     for index, line in enumerate(title):
         top = 247 + index * 30
-        label(card, (11, top, width - 10, top + 30), line, 24, INK, fit=not legacy)
+        label(card, (11, top, width - 10, top + 30), line, 24, INK, fit=not legacy or jp)
     score_digits(card, (10, 280 + offset, width - 10, 322 + offset), item["score"])
     badge(card, (7, 324 + offset, width // 2 - 2, 350 + offset), "clear", item["clear"])
     badge(card, (width // 2 + 2, 324 + offset, width - 7, 350 + offset), "combo", item["full_combo"])
@@ -193,9 +194,9 @@ def _legacy_rating_style(value):
     return {"frame": frame, "ink": inks[frame - 1] if frame <= len(inks) else None}
 
 
-def _legacy_header(canvas, summary):
-    have_logo = contain(canvas, ui("version", str(legacy_rating.VERSION_ID)), (613, 12, 733, 69), trim=True)
-    label(canvas, (744 if have_logo else 613, 12, 973, 70), legacy_rating.VERSION, 25, INK, fit=True)
+def _legacy_header(canvas, summary, version, logo):
+    have_logo = contain(canvas, ui("version", str(logo)), (613, 12, 733, 69), trim=True)
+    label(canvas, (744 if have_logo else 613, 12, 973, 70), version, 25, INK, fit=True)
     panels = ((609, "模拟 Rating ① · B1 × 10", summary.repeat_best),
               (876, "模拟 Rating ② · B1–B10", summary.top_ten))
     for x, title, value in panels:
@@ -206,7 +207,7 @@ def _legacy_header(canvas, summary):
           f"差值 {summary.difference:.4f}  ·  旧版定数模拟｜非真实历史 Rating", 19, MUTED, "center", fit=True)
 
 
-def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, stopped, *, legacy=None):
+def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, stopped, *, legacy=None, jp=None):
     width = WIDTH
     layouts = []
     for _, limit, items, _, _ in groups:
@@ -214,13 +215,13 @@ def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, 
         for item in items:
             check_render_cancelled(stopped)
             title = item["song_name"]
-            titles.append([title] if legacy else wrap(title, 24, CARD_WIDTH - 24))
+            titles.append([title] if legacy and not jp else wrap(title, 24, CARD_WIDTH - 24))
         strides = []
         for start in range(0, math.ceil(limit / COLUMNS) * COLUMNS, COLUMNS):
             lines = max((len(title) for title in titles[start:start + COLUMNS]), default=1)
             strides.append(CARD_HEIGHT + GAP + (lines - 1) * 30)
         layouts.append((titles, strides))
-    height = 260 + sum(76 + sum(strides) for _, strides in layouts) + (54 if legacy else 0)
+    height = 260 + sum(76 + sum(strides) for _, strides in layouts) + (78 if jp else 54 if legacy else 0)
     canvas = Image.new("RGB", (width, height), CLOUD)
     draw = ImageDraw.Draw(canvas)
     draw.rectangle((0, 0, width, 246), fill="#fff7dc")
@@ -229,6 +230,8 @@ def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, 
     draw.line((0, 246, width, 246), fill=LINE, width=2)
     if legacy is None:
         contain(canvas, playerbar(player, player_assets), (15, 8, 683, 238))
+    elif jp:
+        contain(canvas, playerbar(player, player_assets), (15, 8, 589, 238))
     else:
         legacy_player = dict(player, rating=legacy.repeat_best)
         contain(canvas, playerbar(legacy_player, player_assets, rating_style=_legacy_rating_style(legacy.repeat_best)),
@@ -238,7 +241,14 @@ def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, 
         label(canvas, (685, 55, width - 20, 89), heading, 24, MUTED, "right", fit=True)
         rating_number(canvas, (width - 267, 95, width - 19, 151), value, 4)
     else:
-        _legacy_header(canvas, legacy)
+        if jp:
+            from .services.jp_history import LOGO_IDS
+            _legacy_header(canvas, legacy, jp[0], LOGO_IDS.get(jp[0]))
+        else:
+            _legacy_header(canvas, legacy, legacy_rating.VERSION, legacy_rating.VERSION_ID)
+    if jp and legacy is None:
+        from .services.jp_history import LOGO_IDS
+        contain(canvas, ui("version", str(LOGO_IDS.get(jp[0]))), (688, 104, 851, 159), trim=True)
     y = 250
     for (title, _, items, mean, color), (titles, strides) in zip(groups, layouts):
         rounded(canvas, (15, y + 15, 23, y + 57), 4, color)
@@ -255,10 +265,19 @@ def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, 
                 check_render_cancelled(stopped)
                 item = items[i]
                 card = _card(item, i + 1, jacket_images.get(item["jacket_id"]), titles[i],
-                             legacy=legacy is not None)
+                             legacy=legacy is not None, jp=jp is not None)
                 canvas.paste(card, (12 + i % COLUMNS * (CARD_WIDTH + GAP), y))
             y += stride
-    if legacy:
+    if jp:
+        divisor = 40 if legacy else 50
+        label(canvas, (15, y, width - 15, y + 30),
+              f"JP HDD HISTORY · 当前最好成绩 × 指定历史定数的模拟 · 总值除以 {divisor}，缺位计 0",
+              21, INK, "center", fit=True)
+        summary_line, _, warning = jp[1].partition(" · 部分模拟")
+        label(canvas, (15, y + 30, width - 15, y + 54), summary_line, 19, MUTED, "center", fit=True)
+        if warning:
+            label(canvas, (15, y + 54, width - 15, y + 77), "部分模拟" + warning, 21, "#9e5000", "center")
+    elif legacy:
         count = len(groups[0][2])
         caption = (f"已纳入 {count}/30 张 · 缺位按 0 计" if count else "没有可纳入模拟的历史谱面成绩")
         label(canvas, (15, y, width - 15, y + 27), caption, 21, INK, "center", fit=True)
@@ -285,6 +304,19 @@ def draw_legacy_rating_image(player, items, jacket_images, player_assets, summar
     return _draw_ranking(player, player_assets, jacket_images, groups, None, None, stopped, legacy=summary)
 
 
+def draw_jp_b30(player, items, jackets, assets, summary, data, hint, stopped=None):
+    groups = (("BEST30", len(items), items, summary.b30, "#ffcc59"),)
+    return _draw_ranking(player, assets, jackets, groups, None, None, stopped, legacy=summary,
+                         jp=(data["version"], hint))
+
+
+def draw_jp_b50(player, best_items, new_items, jackets, assets, data, hint, stopped=None):
+    groups = (("BEST30", len(best_items), best_items, data["best30_average"], "#ffcc59"),
+              ("NEW20", len(new_items), new_items, data["new20_average"], "#74d5cd"))
+    return _draw_ranking(player, assets, jackets, groups, f"{data['version']} · B50 模拟 Rating",
+                         data["rating_estimate"], stopped, jp=(data["version"], hint))
+
+
 @legacy_rating_cmd.handle()
 async def _(bot: Bot, event: MessageEvent):
     from .services.media_jobs import submit
@@ -294,16 +326,18 @@ async def _(bot: Bot, event: MessageEvent):
 
 
 @best_rating_cmd.handle()
-async def _(bot: Bot, event: MessageEvent):
+async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     from .services.media_jobs import submit
     from .services.results import send_command_result
-    result = await submit(bot, event, "player.best", {}, origin="command")
+    version = args.extract_plain_text().strip()
+    result = await submit(bot, event, "player.best", {"jp_version": version} if version else {}, origin="command")
     await send_command_result(best_rating_cmd, result, finish=True)
 
 
 @best_rating_50_cmd.handle()
-async def _(bot: Bot, event: MessageEvent):
+async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     from .services.media_jobs import submit
     from .services.results import send_command_result
-    result = await submit(bot, event, "player.b50", {}, origin="command")
+    version = args.extract_plain_text().strip()
+    result = await submit(bot, event, "player.b50", {"jp_version": version} if version else {}, origin="command")
     await send_command_result(best_rating_50_cmd, result, finish=True)

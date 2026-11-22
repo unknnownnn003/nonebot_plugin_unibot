@@ -15,6 +15,16 @@ LEVELS = ["BASIC", "ADVANCED", "EXPERT", "MASTER", "ULTIMA", "WORLD'S END"]
 
 async def query(bot, event, capability, arguments, *, expected=None, checkpoint=None):
     try:
+        jp = capability in {"player.best", "player.b50"} and "jp_version" in arguments
+        if jp:
+            from . import jp_history, jp_rating
+            try:
+                history = await async_call(jp_history.load)
+            except jp_history.HISTORY_ERRORS:
+                return outcome("JP_HISTORY_UNAVAILABLE", jp_history.UNAVAILABLE, status="unavailable")
+            edition, error = jp_rating.validate_request(history, arguments["jp_version"], b50=capability == "player.b50")
+            if error:
+                return outcome("INVALID_ARGUMENTS", error, status="needs_input")
         snapshot = await get_reader().get(bot, event, capability, expected=expected, checkpoint=checkpoint)
         from .song_model import read_catalog, Catalog
         from .paths import SONGLIST_PATH
@@ -28,7 +38,9 @@ async def query(bot, event, capability, arguments, *, expected=None, checkpoint=
         if catalog is not None:
             known = {(song.id, chart.difficulty) for song in catalog.songs.values() for chart in song.charts}
             unmatched = sum((row["id"], row["level_index"]) not in known for row in snapshot.scores)
-        if capability in {"player.best", "player.b50"}:
+        if jp:
+            output = await jp_rating.render(snapshot, catalog, history, edition, b50=capability == "player.b50")
+        elif capability in {"player.best", "player.b50"}:
             output = await best(snapshot, catalog, b50=capability == "player.b50")
         elif capability == "player.legacy_rating":
             output = await legacy_best(snapshot, catalog)
@@ -64,7 +76,7 @@ async def query(bot, event, capability, arguments, *, expected=None, checkpoint=
             remember(scope, mode, level, output["data"]["recommendations"])
         output.setdefault("data", {}).update(source="lxns_oauth", cache_hit=snapshot.cache_hit,
             cache_ttl_seconds=60, unmatched_scores=unmatched)
-        if unmatched:
+        if unmatched and not jp:
             hint = f"另有 {unmatched} 条成绩未匹配当前国服谱面，未按标题映射或纳入计算；请更新曲库后重查。"
             output["public_hint"] = output.get("public_hint", "") + "\n" + hint
             output["fallback_text"] = output.get("fallback_text", "") + "\n" + hint
