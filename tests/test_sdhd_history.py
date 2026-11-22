@@ -12,6 +12,7 @@ from zipfile import ZipFile
 TOOLS = Path(__file__).resolve().parents[1] / 'tools'
 sys.path.insert(0, str(TOOLS))
 from build_jp_hdd_history import Observation, save_windows
+from jp_option_dates import apply_option_days
 from sdhd_scan import File, Layer, discover, layer_paths, ordered_layers, parse_record
 from sdhd_notices import add_official_notices, merge_availability
 from old_hdd_timeline import batch, event
@@ -25,6 +26,32 @@ def fixture(db):
 
 
 class SdhdTests(unittest.TestCase):
+    def test_only_one_evidenced_option_day_can_date_a_chart_change(self):
+        with closing(sqlite3.connect(':memory:')) as db:
+            fixture(db)
+            db.execute("INSERT INTO versions VALUES ('NEW',13,'SDHD','2021-11-04','2022-04-13','','','')")
+            db.execute("INSERT INTO history_entities VALUES ('a','chart',NULL,42,3,'MAS')")
+            for suffix, days in (('A000', ('2021-11-04',)), ('A001', ('2021-11-11',)),
+                                 ('A002', ('2021-11-18', '2021-11-25')), ('A003', ())):
+                key = batch(db, 'pkg:SDHD_2.00:' + suffix, 'NEW', 'package', 'fixture',
+                            bounds=('2021-11-04', '2022-04-13'), sequence=int(suffix[1:]))
+                event(db, 'a', key, 'hdd_revision', 'hdd_hundredths', 1350, 1360, None, None, 'fixture',
+                      bounds=('2021-11-04', '2022-04-13'))
+                for day in days:
+                    identity = 'song-' + day
+                    db.execute("INSERT INTO history_entities VALUES (?,'song',NULL,43,NULL,NULL)", (identity,))
+                    event(db, identity, key, 'first_hdd_observation', 'hdd_presence', None, True,
+                          None, None, 'fixture')
+                    day_key = batch(db, 'day:' + day, 'NEW', 'public_day', 'fixture', day=day)
+                    event(db, identity, day_key, 'released', 'availability', None, 'released',
+                          None, None, 'fixture', day=day)
+            self.assertEqual([tuple(row) for row in apply_option_days(db)],
+                             [('hdd_hundredths', 'pkg:SDHD_2.00:A001', '2021-11-11')])
+            saved = db.execute("SELECT evidence FROM history_events WHERE field='hdd_hundredths' "
+                               "AND effective_on IS NOT NULL").fetchone()
+            self.assertIn('option-day assumption', saved[0])
+            self.assertEqual(apply_option_days(db), [])
+
     def test_discovery_uses_nested_extraction_and_prunes_custom_packages(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

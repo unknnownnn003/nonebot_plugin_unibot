@@ -431,6 +431,20 @@ class OldHddHistory:
                             AND lb.version=b.version AND coalesce(later.effective_on,later.earliest_on)<=?
                       ) ORDER BY confirmed.event''', (edition['version'], day, day)):
                 dated_fields.setdefault(known['identity'], {})[known['field']] = known
+            for future in self._rows('''
+                    SELECT h.identity,h.field,h.before AS after,h.effective_on
+                    FROM history_batches b CROSS JOIN history_events h USING(batch)
+                    WHERE b.version=? AND b.sequence>0 AND h.kind='hdd_revision'
+                      AND h.evidence LIKE 'SDHD option-day assumption: %'
+                      AND b.earliest_on<=? AND h.effective_on>?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM history_events prior JOIN history_batches pb USING(batch)
+                          WHERE prior.identity=h.identity AND prior.field=h.field AND prior.event<h.event
+                            AND prior.kind='hdd_revision' AND pb.version=b.version
+                            AND coalesce(prior.effective_on,prior.latest_on)>?
+                      ) ORDER BY h.event
+            ''', (edition['version'], day, day, day)):
+                dated_fields.setdefault(future['identity'], {}).setdefault(future['field'], future)
         songs = {row['identity'] for row in rows if row['kind'] == 'song'}
         available = {row['identity'] for row in rows
                      if row['kind'] == 'song' and row['availability'] in ('present','inferred_present')}
