@@ -158,6 +158,8 @@ async def execute(bot, event, job, store, presentations):
         if len(contents) != len(artifacts):
             return outcome("UNSUPPORTED_MEDIA_PLAN", "媒体类型尚不支持。", status="failed")
         text = output.get("public_hint") or output.get("fallback_text")
+        if contents and text and job.capability_id == "player.b50" and "jp_version" in job.payload["arguments"]:
+            contents[-1] += MessageSegment.text("\n" + text)
         # The single-song candidate prompt and text-mode progress can be sent as text.
         if not contents and job.capability_id in {"player.song_scores", "player.progress"} and text:
             contents.append(MessageSegment.text(text))

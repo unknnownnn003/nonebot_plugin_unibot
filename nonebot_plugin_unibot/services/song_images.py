@@ -68,7 +68,7 @@ def _header(song, jacket, kind, *, compact=False, jp=None):
         label(canvas, (left, y, WIDTH - 28, y + 33), line, 27, MUTED, fit=True)
         y += 33
     cell = (WIDTH - 28 - left - 20) // 3
-    center = song["_versions"][0]["title"] if jp else f"BPM  {song.get('bpm') or '—'}"
+    center = jp[2] if jp else f"BPM  {song.get('bpm') or '—'}"
     for index, value in enumerate((song.get("genre") or "—", center, f"ID  {song['id']}")):
         x = left + index * (cell + 10)
         box = (x, height - 68, x + cell, height - 27)
@@ -81,14 +81,18 @@ def _header(song, jacket, kind, *, compact=False, jp=None):
         else:
             label(canvas, (28, y, WIDTH - 28, y + line_height), line, size, color, fit=True)
         y += line_height
-    label(canvas, (28, y, 110, y + metadata_height), "版本", 25, MUTED)
-    _version(canvas, (95, y, 306, y + 63) if compact else (96, y + 5, 413, y + 100),
-             song, song.get("version"))
     if jp:
-        date_label, state, cutoff = jp
-        label(canvas, (433, y + 4, WIDTH - 30, y + 52), f"首次实装 {date_label}", 24, MUTED, "right", fit=True)
-        label(canvas, (365, y + 54, WIDTH - 30, y + 102), f"{cutoff} · {state}", 23, MUTED, "right", fit=True)
+        release, cutoff, _ = jp
+        for x, title, version, day in ((24, "配信版本", release[1], release[0]),
+                                       (366, "当前版本", song["version"], cutoff)):
+            label(canvas, (x, y + 14, x + 110, y + 72), title, 25, MUTED, fit=True)
+            _version(canvas, (x + 113, y + 4, x + 310, y + 75), song, version)
+            if day:
+                label(canvas, (x + 107, y + 75, x + 316, y + 104), day, 20, MUTED, "center", fit=True)
     else:
+        label(canvas, (28, y, 110, y + metadata_height), "版本", 25, MUTED)
+        _version(canvas, (95, y, 306, y + 63) if compact else (96, y + 5, 413, y + 100),
+                 song, song.get("version"))
         label(canvas, (433, y, WIDTH - 30, y + metadata_height),
               f"国服配信日期：{song.get('release_date') or '—'}", 25, MUTED, "right", fit=True)
     return canvas
@@ -138,11 +142,11 @@ def _chart_label(chart):
     return f"{constant:.1f}" if constant is not None else str(chart.get("level") or "—")
 
 
-def _level(canvas, x, y, chart, *, compact=False, level_only=False):
+def _level(canvas, x, y, chart, *, compact=False):
     we = chart["difficulty"] == 5
     width, height = (70, COMPACT_LEVEL_HEIGHT) if compact else (105, 110)
     box = (x, y, x + width, y + height)
-    value = str(chart["level"]).removesuffix("+") if level_only else _chart_label(chart)
+    value = _chart_label(chart)
     plus = not we and str(chart.get("level", "")).endswith("+") and not value.endswith("+")
     fallback = value + ("+" if plus else "")
     board = ui("level", "we-board" if we else "standard-board")
@@ -160,19 +164,18 @@ def _level(canvas, x, y, chart, *, compact=False, level_only=False):
         label(board, body, chart.get("kanji") or "—", 50, INK, "center", fit=True)
     else:
         major, dot, minor = value.partition(".")
-        glyphs = [ui("level", digit) for digit in major + minor] if dot or level_only else []
+        glyphs = [ui("level", digit) for digit in major + minor] if dot else []
         if glyphs and all(glyphs):
             glyphs = [glyph.crop(glyph.getbbox()) for glyph in glyphs]
             run = Image.new("RGBA", (max(160, sum(g.width + 1 for g in glyphs) + 19), 72))
             cursor = 0
-            for glyph in (glyphs[:-1] if dot else glyphs):
+            for glyph in glyphs[:-1]:
                 run.alpha_composite(glyph, (cursor, 56 - glyph.height))
                 cursor += glyph.width + 1
-            if dot:
-                fraction = glyphs[-1]
-                fraction.thumbnail((15, 17), RESAMPLE)
-                ImageDraw.Draw(run).rectangle((cursor, 53, cursor + 2, 55), fill="#faf4db")
-                run.alpha_composite(fraction, (cursor + 4, 56 - fraction.height))
+            fraction = glyphs[-1]
+            fraction.thumbnail((15, 17), RESAMPLE)
+            ImageDraw.Draw(run).rectangle((cursor, 53, cursor + 2, 55), fill="#faf4db")
+            run.alpha_composite(fraction, (cursor + 4, 56 - fraction.height))
             if plus:
                 if not contain(run, ui("level", "plus"), (cursor - 1, 13, cursor + 13, 27), trim=True):
                     label(run, (cursor - 1, 13, cursor + 13, 27), "+", 14, PAPER, "center")
@@ -262,35 +265,32 @@ def render_song_image(song, jacket):
 
 
 def render_jp_song(song, jacket, charts, state, first_release, cutoff, logo):
-    display = song | {"version": logo or song["version"],
-                      "_versions": [{"version": logo or song["version"], "title": song["version"]}]}
-    top = _header(display, jacket, "日服历史曲目信息", jp=(first_release, state, cutoff))
-    canvas = Image.new("RGB", (WIDTH, top.height + 112 * len(charts) + 52), BG)
+    version = song["version"]
+    release_day, release_version, release_logo = first_release
+    display = song | {"version": logo or version, "_versions": [
+        {"version": logo or version, "title": version},
+        {"version": release_logo or release_version, "title": release_version},
+    ]}
+    center = version if state == "已收录" else state
+    top = _header(display, jacket, "曲目查询", jp=((release_day, release_logo or release_version), cutoff, center))
+    canvas = Image.new("RGB", (WIDTH, top.height + 120 * len(charts) + 9), BG)
     canvas.paste(top, (0, 0))
     y = top.height
     for chart in charts:
         difficulty = chart["difficulty"]
-        rounded(canvas, (19, y, 941, y + 103), 16, PAPER, LINE)
-        _difficulty(canvas, 34, y + 18, difficulty)
-        if difficulty == 5:
-            _level(canvas, 314, y + 13, chart, compact=True)
-            info = f"WE ID {chart['song_id']} · Rating 不适用"
-        else:
-            level = chart["level"]
-            if level and level.removesuffix("+").isdigit() and all(ui("level", digit) for digit in level.removesuffix("+")):
-                _level(canvas, 314, y + 13, chart, compact=True, level_only=True)
-            else:
-                label(canvas, (315, y + 11, 393, y + 92), level or "—", 32, INK, "center", fit=True)
-            constant = chart["level_value"]
-            info = f"HDD 定数 {constant:.2f}" if constant is not None else "HDD 定数未知"
+        rounded(canvas, (19, y, 941, y + 111), 16, PAPER, LINE)
+        _difficulty(canvas, 34, y + 22, difficulty)
+        _level(canvas, 302, y + 1, chart)
+        info = [f"WE ID {chart['song_id']}"] if difficulty == 5 else []
         chart_state = {"disabled": "禁用", "removed": "停配", "possible": "待确认",
                        "not_released": "未配信"}.get(chart["state"])
         if chart_state:
-            info += f" · {chart_state}"
-        label(canvas, (410, y + 10, 911, y + 52), info, 26, INK, fit=True)
-        label(canvas, (410, y + 54, 911, y + 94), f"谱师  {chart['note_designer'] or '—'}", 24, MUTED, fit=True)
-        y += 112
-    label(canvas, (24, y, WIDTH - 24, y + 44), f"JP HDD HISTORY · {song['version']}", 24, TEAL, "center", fit=True)
+            info.append(chart_state)
+        if info:
+            label(canvas, (425, y + 10, 911, y + 52), " · ".join(info), 26, INK, fit=True)
+        label(canvas, (425, y + (54 if info else 25), 911, y + (94 if info else 86)),
+              f"谱师  {chart['note_designer'] or '—'}", 24, MUTED, fit=True)
+        y += 120
     return png(canvas)
 
 

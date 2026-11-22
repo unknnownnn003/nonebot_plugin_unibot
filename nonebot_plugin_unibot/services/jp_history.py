@@ -240,16 +240,15 @@ def genre_name(value):
     return " / ".join(dict.fromkeys(strings(json.loads(value)))) if value else ""
 
 
-def release_label(release, editions):
+def release_display(release, editions):
     if not release:
-        return "未知"
+        return "", "未知", None
     day = release["exact_on"]
-    basis = release["basis"].lower()
-    if not day:
-        return f"{release['earliest_on'] or '?'} ～ {release['latest_on'] or '?'}（区间）"
-    edition = next((row["version"] for row in editions if row["start_on"] <= day <= row["end_on"]), "")
-    quality = "推定" if any(word in basis for word in ("assum", "inferred", "continuity", "observation")) else "有日期记录"
-    return f"{day} {edition}（{quality}）"
+    start = day or release["earliest_on"]
+    end = day or release["latest_on"]
+    edition = next((row["version"] for row in editions
+                    if start and end and row["start_on"] <= start <= end <= row["end_on"]), "未知")
+    return day or f"{start or '?'} ～ {end or '?'}", edition, LOGO_IDS.get(edition)
 
 
 def lookup(history, query):
@@ -290,7 +289,7 @@ def lookup(history, query):
     charts = history.song_charts(row)
     content = render_jp_song(row | {"id": row["music_id"], "genre": genre_name(row["genre"])},
                              load_jacket(HISTORY_DIR, row["jacket_sha256"]), charts, state,
-                             release_label(history.first_release(row["identity"]), history.editions),
+                             release_display(history.first_release(row["identity"]), history.editions),
                              history.by_name[row["version"]]["end_on"], LOGO_IDS.get(row["version"]))
     return outcome(data={"version": row["version"], "identity": row["identity"],
                          "revision": row["revision"], "state": row["state"]}, artifacts=[image(content)])

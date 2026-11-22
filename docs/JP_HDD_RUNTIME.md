@@ -14,7 +14,7 @@
 
 只读打开已完成发布的统一 v3 库。检查 SQLite application_id、user_version、`complete.ready`、必要表和 `quick_check`。数据库校验失败仅影响历史入口，文件替换期间已开始的历史查询会拒绝混用数据库。版本名、顺序、起止日均来自 `versions`，相同完整歌名优先于拆分后的版本后缀。MATE 截点是 **2026-10-08**。
 
-- 查歌读取 `music_versions`、`chart_versions`、`worlds_end_versions`，通过历史名称与实际观察 ID 搜索。用 `history_observations` 和 `history_revisions` 关联每个版本的修订。仅通过 `origin_identity` 或 `history_identity_links.worlds_end_origin` 展示关联 WE。首次实装信息来自 `sdhd_first_release` 和首配事件，区分日期记录、推定、范围和未知。
+- 查歌读取 `music_versions`、`chart_versions`、`worlds_end_versions`，通过历史名称与实际观察 ID 搜索。用 `history_observations` 和 `history_revisions` 关联每个版本的修订。仅通过 `origin_identity` 或 `history_identity_links.worlds_end_origin` 展示关联 WE。配信版本及日期来自 `sdhd_first_release` 和首配事件，当前版本下方为查询截点。
 - Rating 只接受截点为 `present` 且日历窗口确认可玩、适用修订一致的启用谱面。采用 `selected_hundredths` 的 `hdd_observed`、`hdd_inherited` 值。排除 WE、禁用、未配信和不明修订。旧歌复配、加 ULTIMA 后仍属旧曲。NEW20 使用歌曲首配证据，包日期推定或仅有原盘观察时不能据此分为新曲。见 [SEGA VERSE](https://info-chunithm.sega.jp/8930/) 与 [SEGA X-VERSE 新旧曲分区](https://info-chunithm.sega.jp/10018/)。
 - NEW 前使用旧框单谱公式，SSS 在 1,007,500 分封顶为定数 +2.00。NEW 起使用现有现代计算公式，1,007,500 同为 +2.00，SSS+ 在 1,009,000 分封顶为 +2.15。B30/B50 的命令分界是 VERSE。SEGA 的公告用于确认游戏时期，分段实现沿用仓库计算器。见 [SEGA NEW 新功能](https://info-chunithm.sega.jp/1098/) 与 [落雪现代计算器实现](https://github.com/Lxns-Network/maimai-prober-frontend/blob/fffe5141cbb7db59752a7187e36e1b5adcfc25d2/src/utils/chunithm/rating.ts)。
 
@@ -32,7 +32,7 @@
 | `notation_sha256` | 审核确认两地相同的标准化 C2S 记谱 SHA-256。运行时要求目标可玩修订的 `history_revisions.payload.notation_sha256` 完全一致。不同记谱修订要分别取证。 |
 | `evidence` | 审核记录定位符。应可以回查两地原件哈希、版本、槽位和标准化工具，或回查逐谱等价审核。由管理者当作可信发布文件维护。 |
 
-运行时区分已验证、候选、冲突、未知。CN 记录去重按原始 ID 和槽，双向冲突阻止入榜。部分模拟在图上显示参与样本、覆盖率、各类遗漏以及可能偏低的提示。少于 10 张时返回数据不足。B50 有未解决记录且其中一池为空时也返回数据不足。每次只有本人可查看自己的遗漏计数，`未纳入 SSS 及以上` 的阈值为 1,007,500。所有未计入的普通成绩都按可能影响榜单处理。
+运行时区分已验证、候选、冲突、未知。CN 记录去重按原始 ID 和槽，双向冲突阻止入榜。部分模拟会显示参与样本、覆盖率、各类遗漏以及可能偏低的提示。B30 显示在图内，B50 放在同一条消息的图片下方。少于 10 张时返回数据不足。B50 有未解决记录且其中一池为空时也返回数据不足。每次只有本人可查看自己的遗漏计数，`未纳入 SSS 及以上` 的阈值为 1,007,500。所有未计入的普通成绩都按可能影响榜单处理。
 
 当前 22 代查歌均可用。**指定版本 Rating 的相容审核映射为 0，22 代都会按实际成绩返回覆盖及数据不足。本轮没有采集真实账号成绩，因此无法报告个人高分遗漏的实测数量。** 若一位用户有任何 SSS 及以上普通成绩，当前这些成绩都无法进入指定版本榜单。以下数字以 JP 谱面为分母，逐版本相加会重复计入跨版谱面。用下列命令复算及审核新清单。
 
@@ -82,4 +82,4 @@ python -X utf8 tools/export_jp_jackets.py .tools/jp-hdd/compact/catalog.sqlite `
 
 ## 本地验收
 
-使用正式库覆盖了 22 代解析、版本末查询、改名和 ID 冲突、停复配、WE、HDD 定数和 NEW20 分类。实测 ID 96 的 MASTER 在 AIR 为 11.90，在 MATE 为 12.90。真实原盘曲绘、停配回查的占位图和 Rating 版式均在本地渲染。经模拟 OneBot 发送验证了公开查歌入队与幂等，指定版本 Rating 在缺 OAuth 时拒绝。今年版 MATE 使用文字版本名作为缺少 Logo 的降级。
+使用正式库覆盖了 22 代解析、版本末查询、改名和 ID 冲突、停复配、WE、HDD 定数和 NEW20 分类。实测 ID 96 的 MASTER 在 AIR 为 11.90，在 MATE 为 12.90。真实原盘曲绘、停配回查的占位图和 Rating 版式均在本地渲染。经模拟 OneBot 发送验证了公开查歌入队与幂等，指定版本 Rating 在缺 OAuth 时拒绝。MATE 图标加载本地 `assets/ui/version/25000.png`，上线时随现有 UI 贴图复制。Logo SHA-256 为 `2dc3266c41f6ed82d8af93d04bfa7a965febd6216477b2b8794aff6f75678672`。 [SEGA 官网 MATE Logo](https://chunithm.sega.jp/$site/components/chuniNavi/logo.png?_=20260701.190431)

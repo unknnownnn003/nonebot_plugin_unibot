@@ -204,7 +204,8 @@ async def render(snapshot, catalog, history, edition, *, b50):
     if b50:
         data.update(best30_average=rating.average(old, 30), new20_average=rating.average(new, 20),
                     rating_estimate=rating.average(old + new, 50))
-        content = await async_render(best_rating.draw_jp_b50, snapshot.player, old, new, jackets, assets, data, hint)
+        content = await async_render(best_rating.draw_jp_b50, snapshot.player, old, new, jackets, assets, data)
+        hint = "当前最好成绩 × 指定历史定数的模拟 · 总值除以 50，缺位计 0\n" + hint
     else:
         summary = legacy_rating.simulate([row["rating"] for row in old])
         data.update(b30_average=str(summary.b30), repeat_best=str(summary.repeat_best), top_ten=str(summary.top_ten))

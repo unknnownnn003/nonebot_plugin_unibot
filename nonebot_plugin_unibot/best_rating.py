@@ -194,7 +194,7 @@ def _legacy_rating_style(value):
     return {"frame": frame, "ink": inks[frame - 1] if frame <= len(inks) else None}
 
 
-def _legacy_header(canvas, summary, version, logo):
+def _legacy_header(canvas, summary, version, logo, *, jp=False):
     have_logo = contain(canvas, ui("version", str(logo)), (613, 12, 733, 69), trim=True)
     label(canvas, (744 if have_logo else 613, 12, 973, 70), version, 25, INK, fit=True)
     panels = ((609, "模拟 Rating ① · B1 × 10", summary.repeat_best),
@@ -204,7 +204,8 @@ def _legacy_header(canvas, summary, version, logo):
         label(canvas, (x + 4, 86, x + 248, 119), title, 22, INK, "center", fit=True)
         rating_number(canvas, (x + 14, 122, x + 238, 174), value, 4, **_legacy_rating_style(value))
     label(canvas, (609, 193, 1128, 225),
-          f"差值 {summary.difference:.4f}  ·  旧版定数模拟｜非真实历史 Rating", 19, MUTED, "center", fit=True)
+          f"差值 {summary.difference:.4f}  ·  旧版定数模拟" + ("" if jp else "｜非真实历史 Rating"),
+          19, MUTED, "center", fit=True)
 
 
 def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, stopped, *, legacy=None, jp=None):
@@ -221,7 +222,9 @@ def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, 
             lines = max((len(title) for title in titles[start:start + COLUMNS]), default=1)
             strides.append(CARD_HEIGHT + GAP + (lines - 1) * 30)
         layouts.append((titles, strides))
-    height = 260 + sum(76 + sum(strides) for _, strides in layouts) + (78 if jp else 54 if legacy else 0)
+    height = 260 + sum(76 + sum(strides) for _, strides in layouts)
+    if legacy:
+        height += 78 if jp else 54
     canvas = Image.new("RGB", (width, height), CLOUD)
     draw = ImageDraw.Draw(canvas)
     draw.rectangle((0, 0, width, 246), fill="#fff7dc")
@@ -243,12 +246,12 @@ def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, 
     else:
         if jp:
             from .services.jp_history import LOGO_IDS
-            _legacy_header(canvas, legacy, jp[0], LOGO_IDS.get(jp[0]))
+            _legacy_header(canvas, legacy, jp[0], LOGO_IDS.get(jp[0]), jp=True)
         else:
             _legacy_header(canvas, legacy, legacy_rating.VERSION, legacy_rating.VERSION_ID)
     if jp and legacy is None:
         from .services.jp_history import LOGO_IDS
-        contain(canvas, ui("version", str(LOGO_IDS.get(jp[0]))), (688, 104, 851, 159), trim=True)
+        contain(canvas, ui("version", str(LOGO_IDS.get(jp[0]))), (702, 23, 954, 100), trim=True)
     y = 250
     for (title, _, items, mean, color), (titles, strides) in zip(groups, layouts):
         rounded(canvas, (15, y + 15, 23, y + 57), 4, color)
@@ -268,10 +271,9 @@ def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, 
                              legacy=legacy is not None, jp=jp is not None)
                 canvas.paste(card, (12 + i % COLUMNS * (CARD_WIDTH + GAP), y))
             y += stride
-    if jp:
-        divisor = 40 if legacy else 50
+    if jp and legacy:
         label(canvas, (15, y, width - 15, y + 30),
-              f"JP HDD HISTORY · 当前最好成绩 × 指定历史定数的模拟 · 总值除以 {divisor}，缺位计 0",
+              "JP HDD HISTORY · 当前最好成绩 × 指定历史定数的模拟 · 总值除以 40，缺位计 0",
               21, INK, "center", fit=True)
         summary_line, _, warning = jp[1].partition(" · 部分模拟")
         label(canvas, (15, y + 30, width - 15, y + 54), summary_line, 19, MUTED, "center", fit=True)
@@ -310,11 +312,11 @@ def draw_jp_b30(player, items, jackets, assets, summary, data, hint, stopped=Non
                          jp=(data["version"], hint))
 
 
-def draw_jp_b50(player, best_items, new_items, jackets, assets, data, hint, stopped=None):
+def draw_jp_b50(player, best_items, new_items, jackets, assets, data, stopped=None):
     groups = (("BEST30", len(best_items), best_items, data["best30_average"], "#ffcc59"),
               ("NEW20", len(new_items), new_items, data["new20_average"], "#74d5cd"))
-    return _draw_ranking(player, assets, jackets, groups, f"{data['version']} · B50 模拟 Rating",
-                         data["rating_estimate"], stopped, jp=(data["version"], hint))
+    return _draw_ranking(player, assets, jackets, groups, "B50 模拟 Rating",
+                         data["rating_estimate"], stopped, jp=(data["version"],))
 
 
 @legacy_rating_cmd.handle()
