@@ -1,6 +1,8 @@
 from contextlib import closing
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
@@ -29,7 +31,7 @@ def fixture(db):
 
 
 class SdhdTests(unittest.TestCase):
-    def test_package_dates_use_base_start_and_reject_out_of_edition_mtime(self):
+    def test_package_dates_use_base_start_and_option_stamp_even_outside_edition(self):
         with TemporaryDirectory() as tmp, closing(sqlite3.connect(':memory:')) as db:
             fixture(db)
             root = Path(tmp)
@@ -37,13 +39,19 @@ class SdhdTests(unittest.TestCase):
             db.executemany("INSERT INTO packages VALUES ('SDBT_1.01',?,?,NULL,0,0,'fixture','fixture')",
                            [('A000', 'base'), ('A020', 'option')])
             for filename in ('one.xml', 'two.xml'):
-                (root / filename).write_text('test', encoding='utf-8')
+                path = root / filename
+                path.write_text('test', encoding='utf-8')
+                timestamp = datetime(2021, 1, 28, tzinfo=timezone.utc).timestamp()
+                os.utime(path, (timestamp, timestamp))
                 db.execute("INSERT INTO sources VALUES (?,'SDBT_1.01','A020',0,NULL,'music_xml',NULL)", (filename,))
             roots = {'SDBT': root, 'SDHD': None}
             needed = {('OLD', 'SDBT_1.01', code) for code in ('A000', 'A020')}
             changed = {('SDBT_1.01', 'A020'): {'one.xml', 'two.xml'}}
             dates = read_package_dates(db, roots, needed, changed)
-            self.assertEqual(dates, {('OLD', 'SDBT_1.01', 'A000'): ('2015-07-16', 'base_version_start', 'base')})
+            self.assertEqual(dates, {
+                ('OLD', 'SDBT_1.01', 'A000'): ('2015-07-16', 'base_version_start', 'base'),
+                ('OLD', 'SDBT_1.01', 'A020'): ('2021-01-28', 'package_music_xml_mtime', 'option'),
+            })
 
     def test_launch_requires_a_music_event_with_the_same_opening_gate(self):
         with TemporaryDirectory() as tmp, closing(sqlite3.connect(':memory:')) as db:

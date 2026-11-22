@@ -36,11 +36,11 @@ def read_package_dates(db, roots, needed, changed_files):
         key = version, hdd, package
         if key not in needed:
             continue
-        if applied:
-            locations[key] = applied, 'adopted_batch_date', path
-        elif package == 'A000':
+        if package == 'A000':
             locations[key] = start, 'base_version_start', path
-        elif built and start <= built <= end:
+        elif applied:
+            locations[key] = applied, 'adopted_batch_date', path
+        elif built:
             locations[key] = built, 'package_build_timestamp', path
         else:
             in_edition = {day for day in dated[key] if start <= day <= end}
@@ -58,13 +58,20 @@ def read_package_dates(db, roots, needed, changed_files):
                 file = root / locator
                 if file.is_file():
                     day = datetime.fromtimestamp(file.stat().st_mtime, JST).date().isoformat()
-                    if start <= day <= end:
-                        days[day] += 1
-            if days:
-                day, copies = days.most_common(1)[0]
-                if copies >= 2 and copies * 2 > len(paths):
-                    label = 'majority_changed_music_xml_mtime' if changed_files[hdd, package] else 'majority_music_xml_mtime'
-                    locations[key] = day, label, path
+                    days[day] += 1
+            majority = [(day, count) for day, count in days.items()
+                        if start <= day <= end and count >= 2 and count * 2 > len(paths)]
+            if majority:
+                label = 'majority_changed_music_xml_mtime' if changed_files[hdd, package] else 'majority_music_xml_mtime'
+                locations[key] = majority[0][0], label, path
+                continue
+            config = root / path / 'data.conf'
+            if config.is_file():
+                day = datetime.fromtimestamp(config.stat().st_mtime, JST).date().isoformat()
+                locations[key] = day, 'package_data_conf_mtime', path
+            elif days:
+                day = max(days, key=lambda stamp: (days[stamp], stamp))
+                locations[key] = day, 'package_music_xml_mtime', path
     return locations
 
 
@@ -126,7 +133,7 @@ def fill_package_dates(db, sdbt_root=None, sdhd_root=None):
             continue
         key = version, hdd, package
         choice = dates.get(key)
-        if not choice or earliest and choice[0] < earliest or latest and choice[0] > latest:
+        if not choice:
             remaining['/'.join(x or '?' for x in key)] += 1
             continue
         day, basis, locator = choice
