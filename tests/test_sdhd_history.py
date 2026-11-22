@@ -13,6 +13,7 @@ TOOLS = Path(__file__).resolve().parents[1] / 'tools'
 sys.path.insert(0, str(TOOLS))
 from build_jp_hdd_history import Observation, save_windows
 from jp_option_dates import apply_option_days
+from jp_package_date_fill import read_package_dates
 from jp_release_reconcile import launch_events
 from jp_version_removals import apply_version_removals
 from sdhd_scan import File, Layer, discover, layer_paths, ordered_layers, parse_record
@@ -28,6 +29,22 @@ def fixture(db):
 
 
 class SdhdTests(unittest.TestCase):
+    def test_package_dates_use_base_start_and_reject_out_of_edition_mtime(self):
+        with TemporaryDirectory() as tmp, closing(sqlite3.connect(':memory:')) as db:
+            fixture(db)
+            root = Path(tmp)
+            db.execute("INSERT INTO versions VALUES ('OLD',1,'SDBT_1.01','2015-07-16','2016-02-03','','','')")
+            db.executemany("INSERT INTO packages VALUES ('SDBT_1.01',?,?,NULL,0,0,'fixture','fixture')",
+                           [('A000', 'base'), ('A020', 'option')])
+            for filename in ('one.xml', 'two.xml'):
+                (root / filename).write_text('test', encoding='utf-8')
+                db.execute("INSERT INTO sources VALUES (?,'SDBT_1.01','A020',0,NULL,'music_xml',NULL)", (filename,))
+            roots = {'SDBT': root, 'SDHD': None}
+            needed = {('OLD', 'SDBT_1.01', code) for code in ('A000', 'A020')}
+            changed = {('SDBT_1.01', 'A020'): {'one.xml', 'two.xml'}}
+            dates = read_package_dates(db, roots, needed, changed)
+            self.assertEqual(dates, {('OLD', 'SDBT_1.01', 'A000'): ('2015-07-16', 'base_version_start', 'base')})
+
     def test_launch_requires_a_music_event_with_the_same_opening_gate(self):
         with TemporaryDirectory() as tmp, closing(sqlite3.connect(':memory:')) as db:
             fixture(db)

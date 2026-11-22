@@ -41,6 +41,7 @@ PARADISE 与 PARADISE LOST 共用手头 SDBT 1.50 镜像；表中按运营版本
 $reviewed = '.tools/jp-hdd/wiki-dates/published/catalog.sqlite'
 python -X utf8 tools/build_jp_hdd_history.py `
   --old .tools/old-hdd/lifecycle-dates-final/catalog.sqlite `
+  --sdbt-root 'E:\SDBT 11 in 1' `
   --root 'E:\SDHD' --reviewed $reviewed --output .tools/jp-hdd/compact `
   --through 2026-10-08 --through-url https://info-chunithm.sega.jp/12754/
 python -X utf8 tools/verify_jp_hdd_history.py `
@@ -158,3 +159,16 @@ python -X utf8 tools/jp_release_reconcile.py .tools/jp-hdd/compact/catalog.sqlit
 ```
 
 本次增量后的 SQLite 为 550,264,832 字节，SHA-256 为 `e3fd167b4adb02331d9c71876a67dfcafffa4702bf29a7b4a56827ac2a0a8caf`。
+
+## 包体日期补齐
+
+应用户要求，对仍缺精确日的记录采用包体日期。A000 默认用该版本开服日。OPTION 可使用已采用的批次日、包名构建时间、同包唯一的既有配信或复配日，或版本日期范围内同批变更 Music.xml 的多数一致修改日。包日期估计在证据中单独标记，已有日期保留。教程谱保存首次可定位到的包内观察日。
+
+本次补入 5 个曲目身份及 28 张普通谱面的包日期，另补 8 张教程谱观察日。补齐 11,421 条变更字段，其中包括旧框全部 576 次定数变化及 5,016 次 C2S 变化。仍有 11 个包的 305 条变更字段没有可用的日期，其中 60 条为旧框 C2S 变化。包体外的复制时间、超出原范围的候选日期以及运营可玩状态继续保留原不确定性。旧框历史事件可查推定日，日查窗口仍沿用已有可玩和谱面候选。
+
+```powershell
+python -X utf8 tools/jp_package_date_fill.py .tools/jp-hdd/compact/catalog.sqlite `
+  --sdbt-root 'E:\SDBT 11 in 1' --sdhd-root 'E:\SDHD'
+```
+
+更新后的 SQLite 为 553,029,632 字节，SHA-256 为 `17d9d12dff4fd919ad2ab68b70546f4248249ee7be62bcbea39005b0e8b44538`。本地 `report.json` 包含新增日期和仍待定的包清单。

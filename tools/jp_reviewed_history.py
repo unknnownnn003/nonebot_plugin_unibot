@@ -2,6 +2,7 @@
 from collections import defaultdict
 
 from jp_option_dates import ASSUMPTION
+from jp_package_date_fill import PACKAGE_DATE, RELEASE_BASIS, TUTORIAL_BASIS
 from jp_release_reconcile import REPAIR_BASES
 from jp_version_removals import INFERRED
 
@@ -69,7 +70,8 @@ def copy_reviewed(db, catalog):
                   SELECT DISTINCT identity,day,loose_path(locator),reference FROM reviewed.sdhd_release_evidence""")
     db.execute("""INSERT INTO main.sdhd_first_release
                   SELECT * FROM reviewed.sdhd_first_release
-                  WHERE exact_on IS NOT NULL AND basis NOT IN (?,?,?)""", REPAIR_BASES)
+                  WHERE exact_on IS NOT NULL AND basis NOT IN (?,?,?,?,?)""",
+               (*REPAIR_BASES, RELEASE_BASIS, TUTORIAL_BASIS))
     db.execute("""DELETE FROM main.history_windows WHERE version IN
                   (SELECT version FROM main.versions WHERE ordinal<=12)""")
     db.execute("""INSERT INTO main.history_windows SELECT * FROM reviewed.history_windows
@@ -79,12 +81,12 @@ def copy_reviewed(db, catalog):
         SELECT e.*,b.version,b.effective_on AS batch_day
         FROM reviewed.history_events e JOIN reviewed.history_batches b USING(batch)
         WHERE (b.kind='public_day' OR (e.kind='hdd_revision' AND e.effective_on IS NOT NULL
-              AND e.evidence NOT LIKE ?)) AND e.evidence NOT LIKE ?
+              AND e.evidence NOT LIKE ?)) AND e.evidence NOT LIKE ? AND e.evidence NOT LIKE ?
           AND NOT (e.kind='released' AND
               CASE WHEN json_valid(e.evidence) THEN coalesce(json_extract(e.evidence,'$.basis'),'')
                    ELSE '' END IN (?,?,?))
         ORDER BY event
-    """, (ASSUMPTION + '%', INFERRED + '%', *REPAIR_BASES)).fetchall()
+    """, (ASSUMPTION + '%', INFERRED + '%', PACKAGE_DATE + '%', *REPAIR_BASES)).fetchall()
     known = set(map(tuple, db.execute('SELECT identity,batch,kind,field,before,after,effective_on,evidence '
                                       'FROM main.history_events')))
     sdhd_versions = {version for version, in db.execute('SELECT version FROM main.versions WHERE ordinal>12')}
