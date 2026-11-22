@@ -1,23 +1,24 @@
 """SDHD physical data adapter. Paths in the catalog remain relative to the input roots."""
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from hashlib import sha256
 from pathlib import Path, PurePosixPath
+import os
 import re
 import struct
 from xml.etree import ElementTree
 from zipfile import ZipFile
 
 from old_hdd_scan import (
-    IMAGE_EXTENSIONS, STARS, c2s_creator, c2s_notation_hash, encoded, file_hash,
+    IMAGE_EXTENSIONS, STARS, c2s_creator, c2s_notation_hash, file_hash,
     integer, parse_music, raw_constant, safe_ref,
 )
-from old_hdd_timeline import batch
 from history_calendar import JP_RELEASES
 
 SDHD = tuple(zip(JP_RELEASES[12:], (0, 5, 10, 15, 20, 25, 30, 40, 45, 50), strict=True))
-CONFIG = re.compile(rb'^Ver(?:Major|Minor|Release)\s*=\s*(\d+)', re.M)
+VERSION_KEYS = (b'Major', b'Minor', b'Release')
+CONFIG = re.compile(rb'^Ver(Major|Minor|Release)[ 	]*=[ 	]*(\d+)', re.M)
 PACK = re.compile(r'A\d{3}')
 VHD_OPTION = re.compile(r'SDHD_(A\d{3})_(\d{14})_0')
 DIRECTIONS = {'BASIC': 'BAS', 'ADVANCED': 'ADV', 'EXPERT': 'EXP', 'MASTER': 'MAS',
@@ -35,7 +36,7 @@ class Layer:
         container = self.path.relative_to(root).as_posix()
         if self.path.is_dir():
             return {p.relative_to(self.path).as_posix(): File(p.relative_to(root).as_posix(), p)
-                    for p in sorted(self.path.rglob('*')) if p.is_file() and relevant(p.relative_to(self.path))}
+                    for p in layer_paths(self.path) if relevant(p.relative_to(self.path))}
         if self.path not in opened:
             opened[self.path] = stack.enter_context(ZipFile(self.path))
             opened[self.path].setpassword(password)
@@ -64,6 +65,29 @@ def relevant(path):
     } and path.suffix.lower() in IMAGE_EXTENSIONS | {'.xml', '.c2s'})
 
 
+def layer_paths(root):
+    def unreadable(error):
+        raise error
+
+    for folder, directories, files in os.walk(root, onerror=unreadable):
+        directories[:] = sorted(name for name in directories if name != '自制包')
+        for name in sorted(files):
+            yield Path(folder, name)
+
+
+def extracted_options(directory):
+    for item in sorted(directory.iterdir()):
+        if not item.is_dir() or item.name == '自制包':
+            continue
+        match = VHD_OPTION.fullmatch(item.name)
+        if match:
+            yield Layer(match[1], item, match[2])
+        elif PACK.fullmatch(item.name):
+            yield Layer(item.name, item)
+        elif item.name.lower() == 'option' or item.name.lower().startswith('option('):
+            yield from extracted_options(item)
+
+
 def discover(root, minor, extras=()):
     candidates = sorted(root.glob(f'SDHD - CHUNITHM */HDD/SDHD_2.{minor:02}.*_0/data/A000'))
     if minor == 15:  # The SUN PLUS local image is 2.16, its data.conf is 2.15.
@@ -75,17 +99,19 @@ def discover(root, minor, extras=()):
     for directory in (base.parents[3] / 'option', base.parents[1] / 'bin' / 'option', *extras):
         if not directory.is_dir():
             continue
+        yield from extracted_options(directory)
         for item in sorted(directory.iterdir()):
-            match = VHD_OPTION.fullmatch(item.name)
-            if item.is_dir() and (match or PACK.fullmatch(item.name)):
-                yield Layer(match[1], item, match[2]) if match else Layer(item.name, item)
             if not item.is_file() or item.suffix.lower() != '.zip':
+                continue
+            if item.with_suffix('').is_dir():
+                # The extracted counterpart is the source. The reviewed package
+                # census can detect omissions without opening the archive again.
                 continue
             groups = defaultdict(list)
             with ZipFile(item) as archive:
                 for info in archive.infolist():
                     name = PurePosixPath(info.filename)
-                    if info.is_dir() or name.is_absolute() or '..' in name.parts:
+                    if info.is_dir() or name.is_absolute() or '..' in name.parts or '自制包' in name.parts:
                         continue
                     parts = name.parts[1:] if name.parts and name.parts[0].lower() == 'option' else name.parts
                     if len(parts) >= 2 and PACK.fullmatch(parts[0]):
@@ -98,6 +124,55 @@ def discover(root, minor, extras=()):
 
 def issue(db, version, source, kind, detail):
     db.execute('INSERT INTO sdhd_issues VALUES (?,?,?,?)', (version, source, kind, detail))
+
+
+def ordered_layers(db, version, available):
+    packages = {}
+    groups = defaultdict(list)
+    for row in available:
+        layer, revision, files, _ = row
+        previous = packages.get(layer.package)
+        if previous:
+            _, old_revision, old_files, _ = previous
+            same = (revision == old_revision and files.keys() == old_files.keys()
+                    and all(file.read() == old_files[name].read() for name, file in files.items()))
+            kind = 'duplicate_package_copy' if same else 'conflicting_package_copy'
+            detail = f'{previous[0].path} / {layer.path}'
+            issue(db, version, str(layer.path), kind, detail)
+            if not same:
+                raise ValueError(f'{version} {layer.package}: {kind}: {detail}')
+            continue
+        packages[layer.package] = row
+        groups[layer.package != 'A000', revision].append(row)
+
+    ordered = []
+    for key in sorted(groups):
+        rows = groups[key]
+        # Timestamps distinguish builds of the same revision. With no trusted
+        # timestamp, different files may commute, but competing writes may not.
+        if len(rows) > 1:
+            writes = defaultdict(list)
+            for layer, _, files, _ in rows:
+                for name, file in files.items():
+                    writes[name.casefold()].append((layer, file))
+            for name, entries in writes.items():
+                if len(entries) < 2 or name == 'data.conf':
+                    continue
+                for i, (layer, file) in enumerate(entries):
+                    for other, alternate in entries[:i]:
+                        if layer.stamp and other.stamp and layer.stamp != other.stamp:
+                            continue
+                        if file.read() == alternate.read():
+                            continue
+                        detail = f'{file.source} / {alternate.source}'
+                        if name.startswith('music/') and name.endswith(('/music.xml', '.c2s')):
+                            raise ValueError(f'{version}: unresolved music overlay: {detail}')
+                        issue(db, version, file.source, 'unordered_auxiliary_overlay', detail)
+            if any(not row[0].stamp for row in rows):
+                issue(db, version, rows[0][0].package, 'shared_revision_no_build_order',
+                      ', '.join(row[0].package for row in rows))
+        ordered.extend(sorted(rows, key=lambda row: (row[0].stamp or '', row[0].path)))
+    return ordered
 
 
 def read_layers(db, root, version, minor, start, end, stack, password, extras=()):
@@ -117,14 +192,18 @@ def read_layers(db, root, version, minor, start, end, stack, password, extras=()
                 db.execute('INSERT OR IGNORE INTO sdhd_containers VALUES (?,?,?,NULL)',
                            (version, image.relative_to(root).as_posix(), image.stat().st_size))
         files = layer.files(root, stack, password, opened)
-        conf = files.get('data.conf')
+        if len(files) != len({name.casefold() for name in files}):
+            raise ValueError(f'{version}: case-insensitive path collision in {container}')
+        conf = next((file for name, file in files.items() if name.casefold() == 'data.conf'), None)
         music_count = sum(name.lower().endswith('/music.xml') for name in files)
         reason = None
         revision = ()
         try:
-            rev = CONFIG.findall(conf.read()) if conf else []
-            revision = tuple(map(int, rev))
-            if len(revision) != 3 or revision[:2] != (2, minor):
+            matches = CONFIG.findall(conf.read()) if conf else []
+            values = dict(matches)
+            if len(matches) == len(values) == len(VERSION_KEYS):
+                revision = tuple(int(values[key]) for key in VERSION_KEYS)
+            if revision[:2] != (2, minor):
                 reason = 'unverified_data_version'
         except (RuntimeError, NotImplementedError):
             reason = 'encrypted_or_unsupported_archive'
@@ -141,7 +220,7 @@ def read_layers(db, root, version, minor, start, end, stack, password, extras=()
                 issue(db, version, container, 'build_after_checkpoint', layer.package)
                 continue
             available.append((layer, revision, files, cache))
-    return sorted(available, key=lambda row: (row[0].package != 'A000', row[1], row[0].package, row[0].path))
+    return ordered_layers(db, version, available)
 
 
 def source(db, file, hdd, package, kind, *, raw=False):
@@ -155,8 +234,6 @@ def source(db, file, hdd, package, kind, *, raw=False):
     if not found:
         db.execute('INSERT INTO sources VALUES (?,?,?,?,?,?,NULL)',
                    (file.source, hdd, package, len(data), digest, kind))
-        if raw:
-            db.execute('INSERT INTO raw_xml VALUES (?,?)', (file.source, data))
     return digest, data
 
 
@@ -239,7 +316,7 @@ def parse_record(db, version, files, name, threshold):
 def scan_auxiliary(db, version, layer, files, hdd, batch_id, overlay):
     for name, file in files.items():
         path = PurePosixPath(name)
-        if path.name.lower() == 'music.xml' or path.parts[0].lower() == 'music':
+        if path.parts[0].lower() == 'music' and len(path.parts) > 2:
             continue
         ext = path.suffix.lower()
         kind = 'image' if ext in IMAGE_EXTENSIONS else 'xml' if ext == '.xml' else 'config'

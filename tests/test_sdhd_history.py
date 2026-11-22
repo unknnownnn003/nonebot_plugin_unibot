@@ -12,7 +12,7 @@ from zipfile import ZipFile
 TOOLS = Path(__file__).resolve().parents[1] / 'tools'
 sys.path.insert(0, str(TOOLS))
 from build_jp_hdd_history import Observation, save_windows
-from sdhd_scan import File, parse_record
+from sdhd_scan import File, Layer, discover, layer_paths, ordered_layers, parse_record
 from sdhd_notices import add_official_notices, merge_availability
 from old_hdd_timeline import batch, event
 from _unibot_history.old_hdd_history import OldHddHistory
@@ -25,6 +25,47 @@ def fixture(db):
 
 
 class SdhdTests(unittest.TestCase):
+    def test_discovery_uses_nested_extraction_and_prunes_custom_packages(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            edition = root / 'SDHD - CHUNITHM LUMINOUS'
+            base = edition / 'HDD/SDHD_2.20.00_20231020095843_0/data/A000'
+            base.mkdir(parents=True)
+            container = edition / 'option/option(A001~A181)'
+            package = container / 'option/A001'
+            custom = package / 'music/自制包'
+            custom.mkdir(parents=True)
+            (custom / 'Music.xml').write_bytes(b'custom')
+            (package / 'data.conf').write_bytes(b'official')
+            container.with_suffix('.zip').write_bytes(b'not read')
+            (edition / 'option/自制包/option/A002').mkdir(parents=True)
+
+            self.assertEqual([(row.package, row.path) for row in discover(root, 20)],
+                             [('A000', base), ('A001', package)])
+            self.assertEqual(list(layer_paths(package)), [package / 'data.conf'])
+
+    def test_same_revision_orders_by_build_and_rejects_undated_competing_music(self):
+        with TemporaryDirectory() as tmp, closing(sqlite3.connect(':memory:')) as db:
+            fixture(db)
+            root = Path(tmp)
+            path = 'music/music0042/Music.xml'
+            older = root / 'old'
+            newer = root / 'new'
+            older.write_bytes(b'old')
+            newer.write_bytes(b'new')
+            revision, day = (2, 10, 12), '2023-02-17'
+            rows = [
+                (Layer('A150', newer, '20230224101302'), revision, {path: File('new', newer)}, day),
+                (Layer('A151', older, '20230217174024'), revision, {path: File('old', older)}, day),
+            ]
+            self.assertEqual([row[0].package for row in ordered_layers(db, None, rows)], ['A151', 'A150'])
+            tied = [(Layer(layer.package, layer.path), rev, files, low) for layer, rev, files, low in rows]
+            with self.assertRaisesRegex(ValueError, 'unresolved music overlay'):
+                ordered_layers(db, None, tied)
+            second = tied[1]
+            disjoint = [tied[0], (second[0], revision, {'music/music0043/Music.xml': File('old', older)}, day)]
+            self.assertEqual(len(ordered_layers(db, None, disjoint)), 2)
+
     def test_official_release_can_predate_local_copy_without_inventing_payload(self):
         with TemporaryDirectory() as tmp, closing(sqlite3.connect(':memory:')) as db:
             fixture(db)

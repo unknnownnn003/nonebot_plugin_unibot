@@ -24,3 +24,10 @@ CREATE TABLE sdhd_first_release (
     identity TEXT PRIMARY KEY REFERENCES history_entities, earliest_on TEXT, latest_on TEXT,
     exact_on TEXT, basis TEXT NOT NULL
 );
+
+CREATE TABLE sdhd_observation_resources (
+    batch TEXT NOT NULL, identity TEXT NOT NULL, source TEXT NOT NULL,
+    path TEXT NOT NULL REFERENCES sources,
+    PRIMARY KEY(batch,identity,source),
+    FOREIGN KEY(batch,identity,source) REFERENCES history_observations
+);

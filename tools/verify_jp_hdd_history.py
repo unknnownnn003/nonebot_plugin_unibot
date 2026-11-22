@@ -1,4 +1,4 @@
-"""Verify old checkpoint compatibility and SDHD content against archived Music.xml."""
+"""Verify old checkpoint compatibility and SDHD content against HDD Music.xml."""
 import argparse
 from collections import Counter
 from contextlib import closing
@@ -19,7 +19,7 @@ from old_hdd_scan import file_hash
 def verify(database, baseline, root, *, allow_unencrypted_sample=False):
     catalog, old = OldHddHistory(database), OldHddHistory(baseline)
     result = {'sdbt': {}, 'sdhd': {}}
-    for version in old.versions():
+    for version in old.versions()[:12]:
         name, day = version['version'], version['end_on']
         if catalog.checkpoint(name, active_only=False) != old.checkpoint(name, active_only=False):
             raise ValueError(f'Old checkpoint changed: {name}')
@@ -29,15 +29,20 @@ def verify(database, baseline, root, *, allow_unencrypted_sample=False):
     with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as db:
         if db.execute('PRAGMA integrity_check').fetchone() != ('ok',) or db.execute('PRAGMA foreign_key_check').fetchone():
             raise ValueError('SQLite integrity check failed')
+        archived_xml = db.execute("SELECT 1 FROM sqlite_master WHERE name='raw_xml'").fetchone()
         for edition in catalog.versions()[12:]:
             name, day, hdd = edition['version'], edition['end_on'], edition['hdd']
             sources = db.execute('''
-                SELECT s.path,x.xml FROM history_batches b JOIN sources s
-                ON b.batch='pkg:'||s.hdd||':'||s.package JOIN raw_xml x USING(path)
+                SELECT s.path,s.sha256 FROM history_batches b JOIN sources s
+                ON b.batch='pkg:'||s.hdd||':'||s.package
                 WHERE s.hdd=? AND s.kind='music_xml' ORDER BY b.sequence,s.path
             ''', (hdd,))
             expected = {}
-            for path, xml in sources:
+            for path, digest in sources:
+                if archived_xml and allow_unencrypted_sample and '.zip!/' in path.lower():
+                    xml = db.execute('SELECT xml FROM raw_xml WHERE path=?', (path,)).fetchone()[0]
+                else:
+                    xml = catalog.resource_bytes(root, path, digest)
                 song = ElementTree.fromstring(xml)
                 expected[int(song.findtext('name/id'))] = (song, path)
             rows = catalog.checkpoint(name, active_only=False)
@@ -71,7 +76,7 @@ def verify(database, baseline, root, *, allow_unencrypted_sample=False):
                 present[group, 'inventory'] += 1
                 present[group, row['state']] += 1
             durations = []
-            for _ in range(5):
+            for _ in range(3):
                 start = perf_counter()
                 snapshot = catalog.catalog_on(day)
                 durations.append((perf_counter() - start) * 1000)

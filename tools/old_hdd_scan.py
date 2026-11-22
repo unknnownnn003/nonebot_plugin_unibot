@@ -226,7 +226,7 @@ def discover(db, root, hdd, *, hash_all=False):
     options = disk / 'bin/option'
     layers = [disk / 'data/A000']
     if options.is_dir():
-        layers.extend(sorted((x for x in options.iterdir() if x.is_dir()), key=lambda x: x.name))
+        layers.extend(sorted((x for x in options.iterdir() if x.is_dir() and x.name != '自制包'), key=lambda x: x.name))
     songs, package_info = defaultdict(list), {}
     source_data = {}
     path_cache = {}
@@ -258,7 +258,7 @@ def discover(db, root, hdd, *, hash_all=False):
             issues.append((locator, f'directory read failed: {type(error).__name__}: {error.filename}'))
 
         for loc, folders, names in os.walk(layer, onerror=walk_error, followlinks=False):
-            folders.sort()
+            folders[:] = sorted(folder for folder in folders if folder != '自制包')
             for filename in sorted(names):
                 path = Path(loc) / filename
                 relative = path.relative_to(root).as_posix()

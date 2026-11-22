@@ -2,6 +2,8 @@
 
 全版本曲库提供独立的只读 SQLite，用于查询版本谱面（Version Chart）、版本定数（Version Constants）和版本快照（Version Snapshot）。B5 覆盖日服初代至现行 MATE，共 22 代，另保存 INTL 和 CN 的独立观察。国服查歌、OAuth、`/b30`、`/b50` 和 `/旧框` 继续沿用各自的数据入口。
 
+正式日服历史定数与更新记录请使用 [日服 HDD 历史库](JP_HDD_HISTORY.md)。本页保留 B5 研究流程及 CN、INTL 的离线来源。
+
 ## 日服版本日历
 
 日历采用日本时间。换代首日属于新版本，前代末日是换代前一天。

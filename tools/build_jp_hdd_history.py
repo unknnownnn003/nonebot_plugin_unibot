@@ -16,6 +16,8 @@ from xml.etree import ElementTree
 from xml.parsers.expat import ExpatError
 from zipfile import BadZipFile
 
+from jp_compact_history import discard_xml
+from jp_reviewed_history import copy_reviewed
 from old_hdd_evidence import normalize_name
 from old_hdd_scan import encoded, file_hash
 from old_hdd_timeline import batch, event, index_event_changes, shift
@@ -108,6 +110,9 @@ class Histories:
                          'sdhd_package_observation'))
         self.db.execute('INSERT OR IGNORE INTO sdhd_observed_ids VALUES (?,?,?,?)',
                         (batch_id, music_id, identity, source))
+        if resource_path:
+            self.db.execute('INSERT OR IGNORE INTO sdhd_observation_resources VALUES (?,?,?,?)',
+                            (batch_id, identity, source, resource_path))
         row = Observation(identity, music_id, kind, slot, difficulty, parent, source, payload, enabled,
                           low, batch_id, revision, resource_path, resource_ref)
         if enabled and identity not in self.old and (identity not in self.first or low < self.first[identity].low):
@@ -211,6 +216,8 @@ def external_dates(db, histories, path):
 
 def release_index(db, histories, calendar, official):
     for identity, row in histories.first.items():
+        if db.execute('SELECT 1 FROM sdhd_first_release WHERE identity=?', (identity,)).fetchone():
+            continue
         version, start, end = next((v, a, b) for v, a, b in calendar if a <= row.low <= b)
         hints = histories.release_hints[identity]
         if row.difficulty in ('BAS', 'ADV', 'EXP', 'MAS', 'WE') and row.parent in histories.first:
@@ -269,7 +276,7 @@ def stage_version(db, histories, root, version, minor, start, end, password):
                 continue
             release_version = '.'.join(map(str, revision))
             batch(db, key, version, 'package', encoded({'data_version': release_version,
-                  'layer_order': 'data.conf then option code', 'build_on_is_not_effective_on': True}),
+                  'layer_order': 'data.conf then build timestamp where known', 'build_on_is_not_effective_on': True}),
                   bounds=(low, end), sequence=seq)
             db.execute('INSERT INTO packages VALUES (?,?,?,?,?,?,?,?)',
                        (hdd, layer.package, layer.path.relative_to(root).as_posix(), release_version,
@@ -278,7 +285,7 @@ def stage_version(db, histories, root, version, minor, start, end, password):
             overlay.update((name.casefold(), (file, hdd, layer.package)) for name, file in files.items())
             scan_auxiliary(db, version, layer, files, hdd, key, overlay)
             folders = {name.rpartition('/')[0].casefold() for name in files
-                       if name.lower().startswith('music/')}
+                       if name.lower().startswith('music/') and name.count('/') > 1}
             for folder in sorted(folders):
                 name = folder + '/music.xml'
                 if name not in overlay:
@@ -305,6 +312,8 @@ def stage_version(db, histories, root, version, minor, start, end, password):
                 current_ids = {row.identity for row in current}
                 for row in previous:
                     if row.identity not in current_ids:
+                        db.execute('INSERT OR IGNORE INTO history_observations VALUES (?,?,?,?,?,?)',
+                                   (key, row.identity, row.revision, row.source, 'disabled', 'sdhd_slot_removed'))
                         traces[row.identity].append(Observation(
                             row.identity, row.music_id, row.kind, row.slot, row.difficulty, row.parent, row.source,
                             row.payload, False, low, key, row.revision))
@@ -394,7 +403,9 @@ def save_windows(db, version, identity, trace, release, start, end, earliest, ch
                     'sdhd_activation_dates_partial'))
 
 
-def finish_timeline(db, histories, calendar, public, official_changes, official_first, designer_notice):
+def finish_timeline(db, histories, calendar, public, official_changes, official_first, designer_notice,
+                    reviewed_changes=None):
+    reviewed_changes = {} if reviewed_changes is None else reviewed_changes
     previous = {
         identity: Observation(identity, row['music_id'], row['kind'], row['slot'], row['difficulty'], row['parent'],
                               row['source'], row['payload'], True, calendar[0][1], 'end:PARADISE LOST', row['revision'])
@@ -453,9 +464,10 @@ def finish_timeline(db, histories, calendar, public, official_changes, official_
                       old_source, trace[0].source, 'Data-layer reappearance', bounds=(trace[0].low, end))
             for item in trace:
                 if old is not None and item.enabled != old.enabled:
+                    day = start if item.batch.endswith(':A000') and item.low == start else None
                     event(db, identity, item.batch, 'hdd_enabled' if item.enabled else 'hdd_disabled',
                           'hdd_enabled', old.enabled, item.enabled, old.source, item.source,
-                          'Enable flags and file references in data overlay', bounds=(item.low, end))
+                          'Enable flags and file references in data overlay', day=day, bounds=(item.low, end))
                 if old_payload is not None:
                     for field in sorted(old_payload.keys() | item.payload.keys()):
                         left, right = old_payload.get(field), item.payload.get(field)
@@ -465,13 +477,18 @@ def finish_timeline(db, histories, calendar, public, official_changes, official_
                                 raise ValueError(f'Official revision prior value differs: {identity} / {field}')
                             if timing is None:
                                 timing = designer_revision(db, designer_notice, item, field, left, right)
+                            archived = reviewed_changes.pop((identity, item.batch, field, encoded(left), encoded(right)), None)
                             evidence = 'SDHD overlay content change'
-                            if timing:
+                            day = start if item.batch.endswith(':A000') and item.low == start else None
+                            if archived:
+                                day, evidence = archived
+                            elif timing:
+                                day = timing[0]
                                 # A field-level announcement alone does not establish
                                 # the activation of every value in this revision.
                                 evidence = encoded({'basis': evidence, 'official_notice': timing[1]})
                             event(db, identity, item.batch, 'hdd_revision', field, left, right, old_source,
-                                  item.source, evidence, day=timing[0] if timing else None, bounds=(item.low, end))
+                                  item.source, evidence, day=day, bounds=(item.low, end))
                 old, old_payload, old_source = item, item.payload, item.source
             release = histories.known_release.get(identity)
             if identity in earlier and identity not in present_before and release and release < start:
@@ -500,6 +517,8 @@ def finish_timeline(db, histories, calendar, public, official_changes, official_
         present_before = {key for key, state in states.items() if state == 'present'}
         earlier.update(traces)
         previous = flat
+    if reviewed_changes:
+        raise ValueError(f'Reviewed dated revisions no longer match physical transitions: {list(reviewed_changes)[:8]}')
     if official_changes:
         raise ValueError(f'No physical change for reviewed official revisions: {sorted(official_changes)}')
 
@@ -528,7 +547,7 @@ def build(args):
     try:
         database = work / 'catalog.sqlite'
         shutil.copyfile(old, database)
-        with closing(sqlite3.connect(database)) as db:
+        with closing(sqlite3.connect(database, uri=True)) as db:
             db.row_factory = sqlite3.Row
             if (db.execute('PRAGMA user_version').fetchone()[0] != 2 or
                     db.execute('PRAGMA application_id').fetchone()[0] != 1431193672 or
@@ -556,15 +575,25 @@ def build(args):
                 stage_version(db, histories, root, version, minor, start, end, password)
                 calendar.append((version, start, end))
                 print(f'{version}: {len(histories.traces[version][1])} local music records', flush=True)
-            external_dates(db, histories, args.date_catalog)
-            add_ultima_evidence(db, histories, args.ultima_evidence)
-            public = read_availability(db, histories, args.availability, calendar)
-            first, revisions, notices, designer = add_official_notices(db, histories, calendar, args.official_notices)
-            merge_availability(db, public, notices)
+            reviewed_changes = {}
+            if args.reviewed:
+                public, first, reviewed_changes = copy_reviewed(db, args.reviewed)
+                histories.known_release.update((identity, entry[0]) for identity, entry in first.items())
+                revisions, designer = {}, None
+            else:
+                external_dates(db, histories, args.date_catalog)
+                add_ultima_evidence(db, histories, args.ultima_evidence)
+                public = read_availability(db, histories, args.availability, calendar)
+                first, revisions, notices, designer = add_official_notices(db, histories, calendar, args.official_notices)
+                merge_availability(db, public, notices)
             release_index(db, histories, calendar, first)
-            finish_timeline(db, histories, calendar, public, revisions, first, designer)
+            finish_timeline(db, histories, calendar, public, revisions, first, designer, reviewed_changes)
             index_event_changes(db, 'SDHD_*')
+            discard_xml(db)
             db.commit()
+            if args.reviewed:
+                db.execute('DETACH DATABASE reviewed')
+            db.execute('VACUUM')
             if db.execute('PRAGMA foreign_key_check').fetchone() or db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                 raise ValueError('Unified database failed integrity verification')
             summary = report(db)
@@ -604,6 +633,7 @@ def main():
     parser.add_argument('--old', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--reviewed', type=Path, help='Reuse the approved date and evidence archive')
     parser.add_argument('--date-catalog', type=Path)
     parser.add_argument('--availability', type=Path)
     parser.add_argument('--ultima-evidence', type=Path)

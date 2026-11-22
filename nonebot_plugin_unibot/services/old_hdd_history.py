@@ -295,6 +295,40 @@ class OldHddHistory:
                     SELECT * FROM history_game_event_changes WHERE batch=? ORDER BY event_id,field,new_source
                 ''', (batch,))), 'assets': self.assets(batch=batch)}
 
+    def package_checkpoint(self, batch):
+        """Return the local SDHD overlay after a package, including disabled slots."""
+        selected = self._timeline_rows("""
+            SELECT version,sequence FROM history_batches WHERE batch=? AND kind='package'
+            AND version IN (SELECT version FROM versions WHERE ordinal>12)
+        """, (batch,))
+        if not selected:
+            raise KeyError(batch)
+        if not self._rows("SELECT 1 FROM sqlite_master WHERE name='sdhd_observation_resources'"):
+            raise ValueError('Package checkpoints require a rebuilt SDHD catalog')
+        target = selected[0]
+        rows = self._rows("""
+            WITH packages AS (
+                SELECT batch,sequence FROM history_batches
+                WHERE version=? AND kind='package' AND sequence<=?
+            ), ranked AS (
+                SELECT o.*,row_number() OVER (PARTITION BY o.identity ORDER BY p.sequence DESC) AS rank
+                FROM packages p JOIN history_observations o USING(batch)
+            ), aliases AS MATERIALIZED (
+                SELECT ids.* FROM packages p JOIN sdhd_observed_ids ids USING(batch)
+            )
+            SELECT e.identity,e.kind,e.parent,coalesce(ids.music_id,e.music_id) AS music_id,
+                   CASE WHEN e.kind='we' THEN 5 ELSE e.slot END AS slot,
+                   e.difficulty,o.batch,o.state,o.source,data.path AS resource_path,r.payload
+            FROM ranked o JOIN history_entities e USING(identity)
+            JOIN history_revisions r USING(revision)
+            LEFT JOIN sdhd_observation_resources data USING(batch,identity,source)
+            LEFT JOIN aliases ids USING(batch,identity,source)
+            WHERE o.rank=1 ORDER BY music_id,e.slot,e.identity
+        """, (target['version'], target['sequence']))
+        for row in rows:
+            row['payload'] = json.loads(row['payload'])
+        return rows
+
     def batches(self, version=None):
         where = ' WHERE b.version=?' if version is not None else ''
         return self._timeline_rows('SELECT b.* FROM history_batches b LEFT JOIN versions v USING(version)' + where +
@@ -384,9 +418,12 @@ class OldHddHistory:
                         JOIN history_batches b USING(batch) WHERE b.version=? ORDER BY a.music_id''',
                                     (edition['version'],)):
                 aliases.setdefault(alias['identity'], []).append(alias['music_id'])
+            # A000 defaults already enter through the day's revision candidates.
+            # Overlay field-level dates only where the evidence adds information.
             for known in self._rows('''SELECT confirmed.identity,confirmed.field,confirmed.after,confirmed.effective_on
-                    FROM history_events confirmed JOIN history_batches b ON b.batch=confirmed.batch
+                    FROM history_batches b CROSS JOIN history_events confirmed ON b.batch=confirmed.batch
                     WHERE b.version=? AND confirmed.kind='hdd_revision' AND confirmed.effective_on<=?
+                      AND (b.sequence<>0 OR confirmed.evidence<>'SDHD overlay content change')
                       AND NOT EXISTS (
                           SELECT 1 FROM history_events later JOIN history_batches lb ON lb.batch=later.batch
                           WHERE later.identity=confirmed.identity AND later.field=confirmed.field
