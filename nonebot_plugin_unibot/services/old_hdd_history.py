@@ -100,7 +100,8 @@ class OldHddHistory:
                                WHERE identity = ? ORDER BY v.ordinal, kind, field''', (chart_identity,))
         if self.schema_version < 3:
             return legacy
-        return legacy + self._rows('''SELECT e.*,b.version AS new_version,b.timing
+        return legacy + self._rows('''SELECT e.*,b.version AS new_version,
+             CASE WHEN e.effective_on IS NOT NULL THEN 'exact' ELSE b.timing END AS timing
              FROM history_events e JOIN history_batches b USING(batch) JOIN versions v USING(version)
              WHERE e.identity=? AND v.ordinal>12
              ORDER BY v.ordinal,coalesce(e.effective_on,e.earliest_on),e.event''', (chart_identity,))
@@ -189,6 +190,23 @@ class OldHddHistory:
         if exact:
             return exact[0] | {'earliest_on': exact[0]['exact_on'], 'latest_on': exact[0]['exact_on']}
         return None
+
+    def official_notices(self, *, day=None, identity=None):
+        """Read official evidence, with any matched HDD source and revision."""
+        if day is not None:
+            day = self._day(day)
+        if not self._rows("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sdhd_notice'"):
+            return []
+        rows = self._rows('''SELECT n.*, c.identity,c.effective_on AS claim_on,c.kind,c.mode,
+                                  c.detail,c.image,c.image_sha256,c.locator,c.package,c.source,c.revision,c.field
+            FROM sdhd_notice n LEFT JOIN sdhd_notice_claim c ON c.announcement=n.url
+            WHERE (? IS NULL OR c.effective_on=? OR (c.identity IS NULL AND n.effective_on=?))
+              AND (? IS NULL OR c.identity=?)
+            ORDER BY coalesce(c.effective_on,n.effective_on,n.published_on),n.url,c.identity,c.kind,c.field
+            ''', (day, day, day, identity, identity))
+        for row in rows:
+            row['related'] = json.loads(row['related'])
+        return rows
 
     def constants_on(self, day):
         """Return date-eligible constants and the catalog coverage label."""
@@ -360,11 +378,22 @@ class OldHddHistory:
         ''', (edition['version'], day, int(include_possible)))
         payload_by_revision = {row['revision']: json.loads(row['payload']) for row in alternatives}
         aliases = {}
+        dated_fields = {}
         if edition['basis'] == 'sdhd_partial_operating_history':
             for alias in self._rows('''SELECT DISTINCT a.identity,a.music_id FROM sdhd_observed_ids a
                         JOIN history_batches b USING(batch) WHERE b.version=? ORDER BY a.music_id''',
                                     (edition['version'],)):
                 aliases.setdefault(alias['identity'], []).append(alias['music_id'])
+            for known in self._rows('''SELECT confirmed.identity,confirmed.field,confirmed.after,confirmed.effective_on
+                    FROM history_events confirmed JOIN history_batches b ON b.batch=confirmed.batch
+                    WHERE b.version=? AND confirmed.kind='hdd_revision' AND confirmed.effective_on<=?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM history_events later JOIN history_batches lb ON lb.batch=later.batch
+                          WHERE later.identity=confirmed.identity AND later.field=confirmed.field
+                            AND later.kind='hdd_revision' AND later.event>confirmed.event
+                            AND lb.version=b.version AND coalesce(later.effective_on,later.earliest_on)<=?
+                      ) ORDER BY confirmed.event''', (edition['version'], day, day)):
+                dated_fields.setdefault(known['identity'], {})[known['field']] = known
         songs = {row['identity'] for row in rows if row['kind'] == 'song'}
         available = {row['identity'] for row in rows
                      if row['kind'] == 'song' and row['availability'] in ('present','inferred_present')}
@@ -393,6 +422,14 @@ class OldHddHistory:
                     row['payload'] = {field: value for field, value in options[0].items()
                                       if all(field in option and option[field] == value for option in options[1:])}
                     row['value_status'] = 'partial'
+                if row['identity'] in dated_fields:
+                    verified = dated_fields[row['identity']]
+                    row['dated_fields'] = {key: value['effective_on'] for key, value in verified.items()}
+                    values = {key: json.loads(value['after']) for key, value in verified.items()}
+                    payload = row['payload'] or {}
+                    if any(payload.get(key) != value or key not in payload for key, value in values.items()):
+                        row['value_status'] = 'partial'
+                    row['payload'] = payload | values
                 if row['kind'] == 'chart':
                     if (row['payload'] or {}).get('hdd_hundredths') is None:
                         row['constant_status'] = 'unknown'

@@ -1,9 +1,11 @@
 from contextlib import closing
 from hashlib import sha256
+import json
 from pathlib import Path
 import sqlite3
 import sys
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from zipfile import ZipFile
 
@@ -11,6 +13,8 @@ TOOLS = Path(__file__).resolve().parents[1] / 'tools'
 sys.path.insert(0, str(TOOLS))
 from build_jp_hdd_history import Observation, save_windows
 from sdhd_scan import File, parse_record
+from sdhd_notices import add_official_notices, merge_availability
+from old_hdd_timeline import batch, event
 from _unibot_history.old_hdd_history import OldHddHistory
 
 
@@ -21,6 +25,51 @@ def fixture(db):
 
 
 class SdhdTests(unittest.TestCase):
+    def test_official_release_can_predate_local_copy_without_inventing_payload(self):
+        with TemporaryDirectory() as tmp, closing(sqlite3.connect(':memory:')) as db:
+            fixture(db)
+            calendar = [('NEW', '2021-11-04', '2022-04-13')]
+            db.execute("INSERT INTO versions VALUES ('NEW',13,'SDHD','2021-11-04','2022-04-13','','','')")
+            db.execute("INSERT INTO history_entities VALUES ('a','song',NULL,42,NULL,NULL)")
+            db.execute("INSERT INTO history_revisions VALUES ('revision','a','{}')")
+            db.execute("INSERT INTO sources VALUES ('src','SDHD','A000',10,NULL,'music_xml',NULL)")
+            batch(db, 'pkg', 'NEW', 'package', 'fixture', bounds=('2022-01-10', '2022-04-13'))
+            row = Observation('a', 42, 'song', None, None, None, 'src', {'title': 'Track'}, True,
+                              '2022-01-10', 'pkg', 'revision')
+            histories = SimpleNamespace(first={'a': row}, traces={'NEW': ({'a': [row]}, {})})
+            notice = {'url': 'https://x.com/chunithm/status/123', 'published': '2022-01-05',
+                      'title': 'Release', 'sha256': 'a' * 64, 'channel': 'official_x_embed',
+                      'claims': [{'day': '2022-01-06', 'identity': 'a', 'batch': 'pkg', 'kind': 'first',
+                                  'mode': 'map', 'music_id': 42, 'title': 'Track', 'locator': 'Card',
+                                  'detail': 'Map access'}]}
+            manifest = Path(tmp) / 'notices.json'
+            manifest.write_text(json.dumps({'notices': [notice]}), encoding='utf-8')
+            first, revisions, availability, designer = add_official_notices(db, histories, calendar, manifest)
+            self.assertEqual(first['a'][0], '2022-01-06')
+            self.assertEqual((revisions, dict(availability), designer), ({}, {}, None))
+            saved = db.execute('''SELECT n.published_on,c.effective_on,c.mode FROM sdhd_notice n
+                                  JOIN sdhd_notice_claim c ON c.announcement=n.url''').fetchone()
+            self.assertEqual(tuple(saved), ('2022-01-05', '2022-01-06', 'map'))
+            save_windows(db, 'NEW', 'a', [row], first['a'][0], *calendar[0][1:],
+                         None, {}, official_first=True)
+            early = db.execute("SELECT availability,revision FROM history_windows WHERE start_on='2022-01-06'").fetchone()
+            self.assertEqual(tuple(early), ('present', None))
+
+    def test_superseded_removal_keeps_source_but_is_not_a_dated_candidate(self):
+        with closing(sqlite3.connect(':memory:')) as db:
+            fixture(db)
+            db.execute("INSERT INTO history_entities VALUES ('a','song',NULL,42,NULL,NULL)")
+            batch(db, 'day:2024-07-19', None, 'public_day', 'archive', day='2024-07-19')
+            event(db, 'a', 'day:2024-07-19', 'removed', 'availability', None, 'removed',
+                  None, None, 'Archive row', day='2024-07-19')
+            archived = {'a': {'2024-07-19': 'removed'}}
+            merge_availability(db, archived, {'a': {'2024-07-18': 'removed'}})
+            self.assertEqual(archived, {'a': {'2024-07-18': 'removed'}})
+            row = db.execute('SELECT kind,effective_on,earliest_on,latest_on,evidence FROM history_events').fetchone()
+            self.assertEqual(tuple(row)[:4], ('superseded_availability_candidate', None, None, None))
+            self.assertIn('Archive row', row['evidence'])
+            self.assertIn('2024-07-19', row['evidence'])
+
     def test_ultima_flag_and_notation_overlay(self):
         xml = b"""<MusicData><name><id>42</id><str>Music</str></name>
         <artistName><str>Artist</str></artistName><exType>0</exType>

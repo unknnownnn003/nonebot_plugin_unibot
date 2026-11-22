@@ -20,6 +20,7 @@ from old_hdd_evidence import normalize_name
 from old_hdd_scan import encoded, file_hash
 from old_hdd_timeline import batch, event, index_event_changes, shift
 from sdhd_public import add_ultima_evidence, read_availability
+from sdhd_notices import add_official_notices, designer_revision, merge_availability
 from sdhd_scan import SDHD, compact_date, issue, parse_record, read_layers, scan_auxiliary
 
 
@@ -208,7 +209,7 @@ def external_dates(db, histories, path):
             histories.release_hints[identity].add((day, locator, reference))
 
 
-def release_index(db, histories, calendar):
+def release_index(db, histories, calendar, official):
     for identity, row in histories.first.items():
         version, start, end = next((v, a, b) for v, a, b in calendar if a <= row.low <= b)
         hints = histories.release_hints[identity]
@@ -229,6 +230,15 @@ def release_index(db, histories, calendar):
         future = next(iter(all_days)) if len(all_days) == 1 and next(iter(all_days)) > end else None
         basis = 'dated_release_evidence' if day else 'disk_presence_future_date_hint' if future else (
             'conflicting_or_out_of_window_release_evidence' if all_days else 'disk_presence_only')
+        if identity in official:
+            official_day, url, locator = official[identity]
+            db.execute('INSERT OR IGNORE INTO sdhd_release_evidence VALUES (?,?,?,?)',
+                       (identity, official_day, locator, url))
+            if day != official_day and all_days and all_days != {official_day}:
+                issue(db, version, row.source, 'official_date_disagreement', encoded(sorted(all_days | {official_day})))
+            if day is None or official_day <= day:
+                day, basis = official_day, 'official_date_with_hdd_witness'
+                version = next(v for v, lo, hi in calendar if lo <= day <= hi)
         if basis == 'conflicting_or_out_of_window_release_evidence':
             issue(db, version, row.source, 'release_date_not_adopted', encoded(sorted(all_days)))
         db.execute('INSERT INTO sdhd_first_release VALUES (?,?,?,?,?)',
@@ -237,7 +247,8 @@ def release_index(db, histories, calendar):
             histories.known_release[identity] = day
             day_batch = batch(db, f'day:{day}', version, 'public_day', 'Archived JP date evidence', day=day)
             event(db, identity, day_batch, 'released', 'availability', None, 'released', None, row.source,
-                  encoded({'evidence': 'sdhd_release_evidence', 'access': 'conditions may apply'}), day=day)
+                  encoded({'evidence': 'sdhd_release_evidence', 'official_notice': official.get(identity),
+                           'access': 'conditions may apply'}), day=day)
 
 
 def stage_version(db, histories, root, version, minor, start, end, password):
@@ -357,7 +368,7 @@ def availability_on(changes, day, release):
     return 'present' if release and release <= day else 'possible'
 
 
-def save_windows(db, version, identity, trace, release, start, end, earliest, changes):
+def save_windows(db, version, identity, trace, release, start, end, earliest, changes, official_first=False):
     # Content from later layers is a candidate after its build bound. A missing
     # service date cannot silently change a constant inside the operating period.
     lower = max(start, release or earliest or min(row.low for row in trace))
@@ -366,11 +377,13 @@ def save_windows(db, version, identity, trace, release, start, end, earliest, ch
     edges = sorted({lower, end, shift(end, 1)} | {row.low for row in trace if lower < row.low <= end}
                    | {day for day in changes if lower < day <= end})
     for first, stop in zip(edges, edges[1:]):
-        candidates = [row for row in trace if row.low <= first]
-        if not candidates or not any(row.enabled for row in candidates):
-            continue
         availability = availability_on(changes, first, release)
         if availability == 'removed':
+            continue
+        candidates = [row for row in trace if row.low <= first]
+        if candidates and not any(row.enabled for row in candidates):
+            continue
+        if not candidates and (not official_first or availability != 'present'):
             continue
         if any(not row.enabled for row in candidates):
             availability = 'possible'
@@ -381,7 +394,7 @@ def save_windows(db, version, identity, trace, release, start, end, earliest, ch
                     'sdhd_activation_dates_partial'))
 
 
-def finish_timeline(db, histories, calendar, public):
+def finish_timeline(db, histories, calendar, public, official_changes, official_first, designer_notice):
     previous = {
         identity: Observation(identity, row['music_id'], row['kind'], row['slot'], row['difficulty'], row['parent'],
                               row['source'], row['payload'], True, calendar[0][1], 'end:PARADISE LOST', row['revision'])
@@ -405,7 +418,9 @@ def finish_timeline(db, histories, calendar, public):
             if row.enabled and release and release <= end and (identity in present_before or identity not in earlier
                                                                  or start <= release):
                 state = 'present'
-            changes = public.get(row.parent or identity, {})
+            changes = dict(sorted((public.get(row.parent, {}) | public.get(identity, {})).items()))
+            own_restore = any(when <= end and action == 'restored'
+                              for when, action in public.get(identity, {}).items())
             operational = availability_on(changes, end, release)
             if operational == 'removed':
                 state = 'removed'
@@ -413,7 +428,7 @@ def finish_timeline(db, histories, calendar, public):
                   and any(day <= end for day in changes)):
                 state = 'possible'
             elif (row.enabled and changes and operational == 'present'
-                  and (row.kind == 'song' or release and release <= end)
+                  and (row.kind == 'song' or own_restore or release and release <= end)
                   and not (earliest.get(identity, '') > end)):
                 state = 'present'
             if row.parent and state == 'present' and states[row.parent] != 'present':
@@ -445,24 +460,48 @@ def finish_timeline(db, histories, calendar, public):
                     for field in sorted(old_payload.keys() | item.payload.keys()):
                         left, right = old_payload.get(field), item.payload.get(field)
                         if left != right:
+                            timing = official_changes.pop((identity, item.batch, field), None)
+                            if timing is not None and left != timing[2]:
+                                raise ValueError(f'Official revision prior value differs: {identity} / {field}')
+                            if timing is None:
+                                timing = designer_revision(db, designer_notice, item, field, left, right)
+                            evidence = 'SDHD overlay content change'
+                            if timing:
+                                # A field-level announcement alone does not establish
+                                # the activation of every value in this revision.
+                                evidence = encoded({'basis': evidence, 'official_notice': timing[1]})
                             event(db, identity, item.batch, 'hdd_revision', field, left, right, old_source,
-                                  item.source, 'SDHD overlay content change', bounds=(item.low, end))
+                                  item.source, evidence, day=timing[0] if timing else None, bounds=(item.low, end))
                 old, old_payload, old_source = item, item.payload, item.source
             release = histories.known_release.get(identity)
             if identity in earlier and identity not in present_before and release and release < start:
                 release = None
-            changes = public.get(row.parent or identity, {})
+            changes = dict(sorted((public.get(row.parent, {}) | public.get(identity, {})).items()))
             # A restored song is evidence for ordinary incumbent charts, but
             # cannot prove contemporaneous release of a separately added ULTIMA.
             if row.kind != 'song' and not release:
-                changes = {day: kind for day, kind in changes.items() if kind != 'restored'}
+                changes = {day: kind for day, kind in changes.items()
+                           if kind != 'restored' or public.get(identity, {}).get(day) == 'restored'}
             window_trace = trace
             if identity in present_before and identity in previous and min(row.low for row in trace) > start:
                 window_trace = [replace(previous[identity], low=start), *trace]
-            save_windows(db, version, identity, window_trace, release, start, end, earliest.get(identity), changes)
+            save_windows(db, version, identity, window_trace, release, start, end, earliest.get(identity), changes,
+                         official_first=identity in official_first)
+        for identity, (day, _url, _locator) in official_first.items():
+            if start <= day <= end and identity not in traces and histories.known_release.get(identity) == day:
+                db.execute('INSERT INTO history_windows VALUES (?,?,?,?,?,?,?,?)',
+                           (version, identity, day, day, 'present', None, '[]', 'official_first_no_local_revision'))
+                next_change = min((on for on in public.get(identity, {}) if on > day), default=shift(end, 1))
+                through = min(end, shift(next_change, -1))
+                if day < through:
+                    db.execute('INSERT INTO history_windows VALUES (?,?,?,?,?,?,?,?)',
+                               (version, identity, shift(day, 1), through, 'inferred_present', None, '[]',
+                                'official_continuity_no_local_revision'))
         present_before = {key for key, state in states.items() if state == 'present'}
         earlier.update(traces)
         previous = flat
+    if official_changes:
+        raise ValueError(f'No physical change for reviewed official revisions: {sorted(official_changes)}')
 
 
 def preserve_paradise_constants(db):
@@ -519,9 +558,11 @@ def build(args):
                 print(f'{version}: {len(histories.traces[version][1])} local music records', flush=True)
             external_dates(db, histories, args.date_catalog)
             add_ultima_evidence(db, histories, args.ultima_evidence)
-            release_index(db, histories, calendar)
             public = read_availability(db, histories, args.availability, calendar)
-            finish_timeline(db, histories, calendar, public)
+            first, revisions, notices, designer = add_official_notices(db, histories, calendar, args.official_notices)
+            merge_availability(db, public, notices)
+            release_index(db, histories, calendar, first)
+            finish_timeline(db, histories, calendar, public, revisions, first, designer)
             index_event_changes(db, 'SDHD_*')
             db.commit()
             if db.execute('PRAGMA foreign_key_check').fetchone() or db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
@@ -566,6 +607,7 @@ def main():
     parser.add_argument('--date-catalog', type=Path)
     parser.add_argument('--availability', type=Path)
     parser.add_argument('--ultima-evidence', type=Path)
+    parser.add_argument('--official-notices', type=Path)
     parser.add_argument('--through-url')
     parser.add_argument('--password-file', type=Path)
     parser.add_argument('--through', required=True, help='Latest MATE date covered by the local evidence')

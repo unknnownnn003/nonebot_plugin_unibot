@@ -68,3 +68,5 @@ constants = history.constants_on("2026-10-08")
 旧接口保留。可用 `title_identities` 解析版本中保留的精确歌名，`identities` 按实际出现过的数字 ID 查找，`first_release` 查询首配证据，`lifecycle` 返回修订、变更与关系。ZIP 曲绘可将 `jackets` 返回的 `path` 和 `sha256` 传给 `resource_bytes` 读取校验。 `cn_mapping_candidates` 沿统一谱面身份回溯旧框已有的 CN 映射证据，返回来源版本、状态和原指纹。现有 CN 成绩接口继续使用原数据和验证过的映射。
 
 全库保留研究和溯源所需 XML 与索引。后续若需部署，仅在能逐项校验日期、定数、图片索引及身份关系的条件下再裁剪运行库。
+
+新框日期证据补全与字段实证见 [官方公告与日期证据](SDHD_OFFICIAL_DATES.md)。
