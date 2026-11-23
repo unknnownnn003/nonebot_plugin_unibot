@@ -98,15 +98,19 @@ class PublishedJpHistoryTests(unittest.TestCase):
         self.assertEqual(len(row), 1)
         self.assertTrue(any(chart["difficulty"] == 5 for chart in self.history.song_charts(row[0]["row"])))
 
-    def test_candidate_mappings_and_real_rating_partitions(self):
+    def test_raw_id_slots_and_real_rating_partitions(self):
         for version in ("AIR", "PARADISE LOST", "LUMINOUS PLUS", "VERSE", "X-VERSE-X", "MATE"):
             edition = self.history.by_name[version]
             charts = jp_rating.inventory(self.history, edition)
-            index = jp_rating.MappingIndex(self.history, edition, charts, [])
-            self.assertEqual(index.resolve((96, 3), []), ("candidate", None))
-            self.assertEqual(index.resolve((2**31, 3), []), ("unknown", None))
-            self.assertEqual(len(charts), len(index.charts))
+            slots = jp_rating.match_charts(charts)
+            self.assertEqual(len(charts), sum(map(len, slots.values())))
+            master, = slots[96, 3]
+            self.assertEqual(master["chart_identity"], "0:96:1:3:MAS")
+            self.assertNotIn((96, 5), slots)
+            self.assertNotIn((2**31, 3), slots)
             if version == "AIR":
+                self.assertEqual(master["selected_hundredths"], 1190)
+                self.assertNotIn((96, 4), slots)
                 self.assertTrue(all(chart["slot"] < 4 for chart in charts))
             if edition["ordinal"] >= self.history.by_name["VERSE"]["ordinal"]:
                 new = [chart for chart in charts if jp_rating.partition(edition, chart) == "new"]
@@ -115,21 +119,12 @@ class PublishedJpHistoryTests(unittest.TestCase):
                 self.assertTrue(any(chart["slot"] == 4 and chart["seen_before"]
                                     and jp_rating.partition(edition, chart) == "old" for chart in charts))
 
-    def test_mapping_requires_matching_revision_and_unique_bilateral_identity(self):
-        edition = self.history.by_name["AIR"]
-        charts = jp_rating.inventory(self.history, edition)
-        old = next(row for row in charts if row["chart_identity"] == "0:96:1:3:MAS")
-        mate = next(row for row in jp_rating.inventory(self.history, self.history.by_name["MATE"])
-                    if row["chart_identity"] == old["chart_identity"])
-        self.assertNotEqual(old["notation_sha256"], mate["notation_sha256"])
-        pin = self.history.score_mappings("PARADISE LOST")
-        cn = next(row["cn_fingerprint"] for row in pin if row["chart_identity"] == old["chart_identity"])
-        # Simulate the manifest gate locally. No such approval is shipped.
-        mapping = jp_rating.Mapping(96, 3, cn, old["chart_identity"], old["notation_sha256"], "test only")
-        index = jp_rating.MappingIndex(self.history, edition, charts, [mapping])
-        self.assertEqual(index.resolve((96, 3), [cn])[0], "verified")
-        self.assertEqual(index.resolve((96, 3), [])[0], "candidate")
-        self.assertEqual(index.resolve((96, 3), [cn, cn])[0], "conflict")
-        incompatible = jp_rating.Mapping(96, 3, cn, old["chart_identity"], mate["notation_sha256"], "test only")
-        self.assertEqual(jp_rating.MappingIndex(self.history, edition, charts, [incompatible])
-                         .resolve((96, 3), [cn])[0], "candidate")
+    def test_duplicate_target_id_slot_is_retained_as_conflict(self):
+        rows = [
+            {"music_id": 96, "slot": 3, "chart_identity": "chart-a"},
+            {"music_id": 96, "slot": 3, "chart_identity": "chart-b"},
+            {"music_id": 96, "slot": 2, "chart_identity": "chart-c"},
+        ]
+        slots = jp_rating.match_charts(rows)
+        self.assertEqual(slots[96, 3], rows[:2])
+        self.assertEqual(slots[96, 2], rows[2:])

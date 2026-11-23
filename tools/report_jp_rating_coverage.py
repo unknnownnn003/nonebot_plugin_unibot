@@ -1,39 +1,35 @@
-"""Audit public JP inventory and mapping evidence without requesting player scores."""
+"""Audit direct CN-to-JP ID coverage using a public LXNS catalog."""
 import argparse
 from collections import Counter
+import json
 from pathlib import Path
 
 import import_paradise_lost  # Offline service bootstrap
 from _unibot_history.jp_history import JpHistory
-from _unibot_history.jp_rating import MappingIndex, inventory, partition, read_mappings
+from _unibot_history.jp_rating import inventory, match_charts, partition
+from _unibot_history.song_model import Catalog
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("database", type=Path)
-    parser.add_argument("--mappings", type=Path)
+    parser.add_argument("--cn-catalog", type=Path, required=True)
     args = parser.parse_args()
     history = JpHistory(args.database)
-    approved = read_mappings(args.mappings) if args.mappings else []
-    print("| 版本 | 截点 | 曲目身份 | 统计谱面 | 相容审核证据 | 候选 | 冲突 | 未知 | NEW20 池 | 待分区 |")
-    print("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+    catalog = Catalog(json.loads(args.cn_catalog.read_text(encoding="utf-8-sig")))
+    keys = {(song.id, chart.difficulty) for song in catalog.songs.values()
+            for chart in song.charts if chart.difficulty < 5}
+    print("| 版本 | JP 可计分谱面 | 同 ID/同难度匹配 | BEST30 池 | NEW20 池 | 待分区 | 冲突 |")
+    print("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
     for edition in history.editions:
-        name = edition["version"]
         charts = inventory(history, edition)
-        index = MappingIndex(history, edition, charts, approved)
-        keys = {}
-        for key, identities in index.candidates.items():
-            fingerprints = {row.cn_fingerprint for row in index.approved.get(key, ())}
-            state, chart = index.resolve(key, fingerprints)
-            for identity in identities:
-                keys.setdefault(identity, set()).add(state if chart is None or chart["chart_identity"] == identity else "candidate")
-        coverage = Counter(next((state for state in ("verified", "conflict", "candidate") if state in states), "unknown")
-                           for states in (keys.get(row["chart_identity"], ()) for row in charts))
-        modern = edition["ordinal"] >= history.by_name["VERSE"]["ordinal"]
-        pools = Counter(partition(edition, row) for row in charts)
-        songs = len({row["identity"] for row in history.songs(name)})
-        values = (name, edition["end_on"], songs, len(charts), coverage["verified"], coverage["candidate"],
-                  coverage["conflict"], coverage["unknown"], pools["new"] if modern else "—", pools[None] if modern else "—")
+        slots = match_charts(charts)
+        matches = [slots[key][0] for key in keys & slots.keys() if len(slots[key]) == 1]
+        conflicts = sum(len(slots[key]) > 1 for key in keys & slots.keys())
+        b50 = edition["ordinal"] >= history.by_name["VERSE"]["ordinal"]
+        pools = Counter(partition(edition, chart) for chart in matches) if b50 else {}
+        values = (edition["version"], len(charts), len(matches), pools.get("old", 0) if b50 else "—",
+                  pools.get("new", 0) if b50 else "—", pools.get(None, 0) if b50 else "—", conflicts)
         print("| " + " | ".join(map(str, values)) + " |")
 
 

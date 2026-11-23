@@ -26,20 +26,21 @@ async def query(bot, event, capability, arguments, *, expected=None, checkpoint=
             if error:
                 return outcome("INVALID_ARGUMENTS", error, status="needs_input")
         snapshot = await get_reader().get(bot, event, capability, expected=expected, checkpoint=checkpoint)
-        from .song_model import read_catalog, Catalog
-        from .paths import SONGLIST_PATH
-        try:
-            catalog = Catalog(await async_call(read_catalog, SONGLIST_PATH))
-        except (ValueError, OSError):
-            if capability != "player.profile":
-                raise
-            catalog = None
         unmatched = 0
-        if catalog is not None:
-            known = {(song.id, chart.difficulty) for song in catalog.songs.values() for chart in song.charts}
-            unmatched = sum((row["id"], row["level_index"]) not in known for row in snapshot.scores)
+        if not jp:
+            from .song_model import read_catalog, Catalog
+            from .paths import SONGLIST_PATH
+            try:
+                catalog = Catalog(await async_call(read_catalog, SONGLIST_PATH))
+            except (ValueError, OSError):
+                if capability != "player.profile":
+                    raise
+                catalog = None
+            if catalog is not None:
+                known = {(song.id, chart.difficulty) for song in catalog.songs.values() for chart in song.charts}
+                unmatched = sum((row["id"], row["level_index"]) not in known for row in snapshot.scores)
         if jp:
-            output = await jp_rating.render(snapshot, catalog, history, edition, b50=capability == "player.b50")
+            output = await jp_rating.render(snapshot, history, edition, b50=capability == "player.b50")
         elif capability in {"player.best", "player.b50"}:
             output = await best(snapshot, catalog, b50=capability == "player.b50")
         elif capability == "player.legacy_rating":
@@ -75,8 +76,10 @@ async def query(bot, event, capability, arguments, *, expected=None, checkpoint=
         if capability == "player.recommend" and output["code"] == "OK":
             remember(scope, mode, level, output["data"]["recommendations"])
         output.setdefault("data", {}).update(source="lxns_oauth", cache_hit=snapshot.cache_hit,
-            cache_ttl_seconds=60, unmatched_scores=unmatched)
-        if unmatched and not jp:
+            cache_ttl_seconds=60)
+        if not jp:
+            output["data"]["unmatched_scores"] = unmatched
+        if unmatched:
             hint = f"另有 {unmatched} 条成绩未匹配当前国服谱面，未按标题映射或纳入计算；请更新曲库后重查。"
             output["public_hint"] = output.get("public_hint", "") + "\n" + hint
             output["fallback_text"] = output.get("fallback_text", "") + "\n" + hint
