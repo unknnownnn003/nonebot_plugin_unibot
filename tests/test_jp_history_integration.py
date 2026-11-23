@@ -87,6 +87,23 @@ class PublishedJpHistoryTests(unittest.TestCase):
         self.assertIsNone(self.search("#0:306:1 PARADISE")[0]["row"])
         self.assertEqual(self.search("#0:306:1 NEW")[0]["row"]["state"], "present")
 
+    def test_version_aliases_share_parser_and_keep_longest_suffix(self):
+        cases = {
+            "+": "PLUS", "chunithmplus": "PLUS", "CHUNITHM +": "PLUS",
+            "air+": "AIR PLUS", "AIRPLUS": "AIR PLUS", "air ＋": "AIR PLUS",
+            "paradiselost": "PARADISE LOST", "CHUNITHM LUMINOUS+": "LUMINOUS PLUS",
+            "xverse": "X-VERSE", "xversex": "X-VERSE-X", "X - VERSE X": "X-VERSE-X",
+        }
+        for alias, version in cases.items():
+            with self.subTest(alias=alias):
+                self.assertIs(self.history.parse_version(alias), self.history.by_name[version])
+                self.assertEqual(self.history.split_query(f"96 {alias}"), ("96", self.history.by_name[version]))
+                b50 = self.history.by_name[version]["ordinal"] >= self.history.by_name["VERSE"]["ordinal"]
+                self.assertEqual(jp_rating.validate_request(self.history, alias, b50=b50),
+                                 (self.history.by_name[version], None))
+        self.assertEqual(self.history.split_query("Jade Star"), ("Jade Star", None))
+        self.assertIsNone(self.history.parse_version("air++"))
+
     def test_hdd_constants_we_and_versions_do_not_use_cn(self):
         for version, expected in (("AIR", "11.90"), ("MATE", "12.90")):
             row = self.search("96 " + version)[0]["row"]

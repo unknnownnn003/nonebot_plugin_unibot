@@ -177,7 +177,7 @@ def _card(item, number, jacket, title, *, legacy=False, jp=False):
               f"{item['level_value']:.{2 if jp else 1}f}", 20, PAPER, "center", fit=jp)
     for index, line in enumerate(title):
         top = 247 + index * 30
-        label(card, (11, top, width - 10, top + 30), line, 24, INK, fit=not legacy or jp)
+        label(card, (11, top, width - 10, top + 30), line, 24, INK, fit=not (legacy or jp))
     score_digits(card, (10, 280 + offset, width - 10, 322 + offset), item["score"])
     badge(card, (7, 324 + offset, width // 2 - 2, 350 + offset), "clear", item["clear"])
     badge(card, (width // 2 + 2, 324 + offset, width - 7, 350 + offset), "combo", item["full_combo"])
@@ -216,7 +216,7 @@ def _draw_ranking(player, player_assets, jacket_images, groups, heading, value, 
         for item in items:
             check_render_cancelled(stopped)
             title = item["song_name"]
-            titles.append([title] if legacy and not jp else wrap(title, 24, CARD_WIDTH - 24))
+            titles.append([title] if legacy or jp else wrap(title, 24, CARD_WIDTH - 24))
         strides = []
         for start in range(0, math.ceil(limit / COLUMNS) * COLUMNS, COLUMNS):
             lines = max((len(title) for title in titles[start:start + COLUMNS]), default=1)

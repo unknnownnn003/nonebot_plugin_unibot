@@ -33,6 +33,12 @@ TABLES = frozenset({
     "history_identity_links", "score_mapping", "sdhd_observed_ids", "sdhd_first_release", "jacket_manifest",
 })
 HASH = re.compile(r"[0-9a-f]{64}")
+VERSION_SEPARATORS = str.maketrans({" ": "", "-": "", "+": "plus"})
+
+
+def version_key(value):
+    key = normalize_title(value).translate(VERSION_SEPARATORS)
+    return key.removeprefix("chunithm") or key
 
 
 class JpHistory(OldHddHistory):
@@ -47,6 +53,7 @@ class JpHistory(OldHddHistory):
                 raise ValueError("Invalid JP HDD catalog")
         self.editions = self.versions()
         self.by_name = {row["version"]: row for row in self.editions}
+        self.by_version_key = {version_key(name): row for name, row in self.by_name.items()}
         if (set(self.by_name) != set(LOGO_IDS) or len(self.editions) != len(LOGO_IDS)
                 or len({row["ordinal"] for row in self.editions}) != len(self.editions)):
             raise ValueError("Incomplete JP HDD calendar")
@@ -75,19 +82,19 @@ class JpHistory(OldHddHistory):
         return db
 
     def parse_version(self, value):
-        name = normalize_title(value)
-        return next((row for row in self.editions if normalize_title(row["version"]) == name), None)
+        return self.by_version_key.get(version_key(value))
 
     def split_query(self, value):
         value = " ".join(value.split())
-        for name in sorted(self.by_name, key=len, reverse=True):
-            words = len(name.split())
-            parts = value.rsplit(" ", words)
-            if len(parts) > words and normalize_title(" ".join(parts[-words:])) == normalize_title(name):
+        for index, char in enumerate(value):
+            if char != " ":
+                continue
+            edition = self.parse_version(value[index + 1:])
+            if edition is not None:
                 titles = self._rows("SELECT DISTINCT title FROM music_versions")
                 if any(normalize_title(row["title"] or "") == normalize_title(value) for row in titles):
                     break
-                return parts[0], self.by_name[name]
+                return value[:index], edition
         return value, None
 
     def search(self, query, edition=None):
