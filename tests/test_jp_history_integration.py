@@ -104,6 +104,25 @@ class PublishedJpHistoryTests(unittest.TestCase):
         self.assertEqual(self.history.split_query("Jade Star"), ("Jade Star", None))
         self.assertIsNone(self.history.parse_version("air++"))
 
+    def test_reviewed_song_continuity_and_availability(self):
+        cases = ((2108, "NEW", "NEW PLUS", "3.0"), (2109, "NEW", "NEW PLUS", "3.0"),
+                 (2110, "NEW", "NEW PLUS", "2.0"), (2172, "NEW PLUS", "SUN", "1.0"),
+                 (2173, "NEW PLUS", "SUN", "3.0"))
+        for music_id, earlier, later, constant in cases:
+            with self.subTest(music_id=music_id):
+                old, = self.search(f"{music_id} {earlier}")
+                new, = self.search(f"{music_id} {later}")
+                self.assertEqual(old["row"]["identity"], new["row"]["identity"])
+                self.assertEqual(new["row"]["state"], "present")
+                old_basic, = (c for c in self.history.song_charts(old["row"]) if c["slot"] == 0)
+                new_basic, = (c for c in self.history.song_charts(new["row"]) if c["slot"] == 0)
+                self.assertEqual(old_basic["chart_identity"], new_basic["chart_identity"])
+                self.assertEqual(new_basic["level_value"], Decimal(constant))
+        with closing(self.history._connect()) as db:
+            for table in ("music_versions", "chart_versions", "worlds_end_versions", "history_observations"):
+                self.assertIsNone(db.execute(f"SELECT 1 FROM {table} WHERE state='possible' LIMIT 1").fetchone())
+            self.assertIsNone(db.execute("SELECT 1 FROM history_windows WHERE availability='possible' LIMIT 1").fetchone())
+
     def test_hdd_constants_we_and_versions_do_not_use_cn(self):
         for version, expected in (("AIR", "11.90"), ("MATE", "12.90")):
             row = self.search("96 " + version)[0]["row"]

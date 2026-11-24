@@ -81,7 +81,9 @@ def copy_reviewed(db, catalog):
         SELECT e.*,b.version,b.effective_on AS batch_day
         FROM reviewed.history_events e JOIN reviewed.history_batches b USING(batch)
         WHERE (b.kind='public_day' OR (e.kind='hdd_revision' AND e.effective_on IS NOT NULL
-              AND e.evidence NOT LIKE ?)) AND e.evidence NOT LIKE ? AND e.evidence NOT LIKE ?
+              AND e.evidence NOT LIKE ?
+              AND NOT (b.sequence IS 0 AND e.evidence='SDHD overlay content change')))
+          AND e.evidence NOT LIKE ? AND e.evidence NOT LIKE ?
           AND NOT (e.kind='released' AND
               CASE WHEN json_valid(e.evidence) THEN coalesce(json_extract(e.evidence,'$.basis'),'')
                    ELSE '' END IN (?,?,?))

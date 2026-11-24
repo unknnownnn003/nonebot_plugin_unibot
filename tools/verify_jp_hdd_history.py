@@ -32,8 +32,10 @@ def verify_sdbt(database, catalog, old):
         removed = {identity for identity, start, resume in removals if start <= day and (not resume or day < resume)}
         expected['rows'] = [row for row in expected['rows']
                             if row['identity'] not in removed and row['parent'] not in removed]
-        expected['uncertain_count'] = sum(row['availability'] == 'possible' or row['revision'] is None
-                                          for row in expected['rows'])
+        for row in expected['rows']:
+            if row['availability'] == 'possible':
+                row['availability'] = 'present'
+        expected['uncertain_count'] = sum(row['revision'] is None for row in expected['rows'])
         if catalog.catalog_on(day, include_possible=True) != expected:
             raise ValueError(f'Old day query changed: {name}')
         result[name] = len(catalog.checkpoint(name))

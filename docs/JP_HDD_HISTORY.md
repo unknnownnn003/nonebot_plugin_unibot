@@ -74,6 +74,20 @@ today = history.catalog_on("2026-10-08", include_possible=True)
 constants = history.constants_on("2026-10-08")
 ```
 
+## 已确认的曲目连续性与存在状态
+
+UTAKATA、Rule the World!!、どうぶつ☆パラダイス、Cry Baby、怪物分别使用最早版本的曲目身份。五组的 Music ID 和 BAS 至 MAS 的谱面文件一致。合并后每个版本仍保留自己的署名、定数、修订和来源。旧 `possible` 状态按正常存在纳入截点与日历查询，普通谱面直接使用该版本 HDD 有记录的定数。停配、禁用、未配信及内容修订的证据继续按各自记录读取。
+
+完整构建会自动应用这些决议。已有精简库可在备份后执行事务更新。
+
+```powershell
+python -X utf8 tools/jp_catalog_decisions.py .tools/jp-hdd/compact/catalog.sqlite
+```
+
+本地增量合并了 5 个曲目身份及各自的 4 张普通谱面。131 条歌曲截点、393 条普通谱面截点、41 条 WE 截点及 4,118 个日历窗口转为正常存在。更新后的 SQLite SHA-256 为 `4cacc245f7d8af322e463c5d6dc2c6d580c1cf9c27f5fe12a5e2d0a69036e775`。
+
+## 查询接口
+
 旧接口保留。可用 `title_identities` 解析版本中保留的精确歌名，`identities` 按实际出现过的数字 ID 查找，`first_release` 查询首配证据，`lifecycle` 返回修订、变更与关系。曲绘可将 `jackets` 返回的 `path` 和 `sha256` 传给 `resource_bytes` 读取校验。 `cn_mapping_candidates` 沿统一谱面身份回溯旧框已有的 CN 映射证据，返回来源版本、状态和原指纹。现有 CN 成绩接口继续使用原数据和验证过的映射。
 
 `raw_xml` 已移除。旧框 WE 和歌曲索引仍通过 `sources` 引用 XML 路径及哈希。修订 JSON 已按规范化内容与身份去重；每次 OPTION 的状态通过观察表、修订表和资源索引拼出。B5 离线研究包保留其他地区数据。现行国服成绩和旧框 Rating 指令继续使用各自现有输入。

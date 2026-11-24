@@ -16,6 +16,7 @@ from xml.etree import ElementTree
 from xml.parsers.expat import ExpatError
 from zipfile import BadZipFile
 
+from jp_catalog_decisions import apply_catalog_decisions
 from jp_compact_history import discard_xml
 from jp_option_dates import apply_option_days, apply_reviewed_days
 from jp_package_date_fill import fill_package_dates
@@ -597,6 +598,7 @@ def build(args):
             apply_option_days(db)
             apply_version_removals(db)
             package_dates = fill_package_dates(db, args.sdbt_root.resolve(strict=True) if args.sdbt_root else None, root)
+            catalog_decisions = apply_catalog_decisions(db)
             index_event_changes(db, 'SDHD_*')
             discard_xml(db)
             db.commit()
@@ -605,7 +607,8 @@ def build(args):
             db.execute('VACUUM')
             if db.execute('PRAGMA foreign_key_check').fetchone() or db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                 raise ValueError('Unified database failed integrity verification')
-            summary = report(db) | {'release_repairs': dict(release_repairs), 'package_date_fill': package_dates}
+            summary = report(db) | {'release_repairs': dict(release_repairs), 'package_date_fill': package_dates,
+                                    'catalog_decisions': catalog_decisions}
         summary.update({'bytes': database.stat().st_size, 'sha256': file_hash(database),
                         'seconds': round(perf_counter() - started, 2), 'old_catalog_sha256': file_hash(old)})
         (work / 'report.json').write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding='utf-8')
